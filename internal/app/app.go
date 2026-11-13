@@ -26,6 +26,7 @@ import (
 	"wailstools/internal/shot"
 	"wailstools/internal/sshmgr"
 	"wailstools/internal/subscription"
+	"wailstools/internal/tray"
 	"wailstools/internal/updater"
 	"wailstools/internal/version"
 )
@@ -45,6 +46,8 @@ type App struct {
 	updater  *updater.Manager
 	subs     *subscription.Manager
 	shots    *shot.Manager
+	tray     *tray.Tray
+	quitting bool
 
 	mu      sync.Mutex
 	terms   map[string]*sshmgr.Terminal
@@ -122,6 +125,7 @@ func New() (*App, error) {
 	}
 	link.SetStateHandler(func(st serverlink.Status) {
 		a.emit("server:status", st)
+		a.refreshTrayTooltip()
 	})
 	a.updater = updater.New(store, link, nil)
 	updater.CleanupOld()
@@ -155,6 +159,9 @@ func (a *App) Startup(ctx context.Context) {
 	}
 	if a.subs != nil {
 		a.subs.StartAutoRefresh(context.Background())
+	}
+	if cfg := a.settings.Get().Startup; cfg.TrayEnabled {
+		a.startTray()
 	}
 	if cfg := a.settings.Get(); cfg.Update.AutoCheck {
 		go func() {
@@ -209,10 +216,15 @@ func (a *App) Shutdown(ctx context.Context) {
 	if a.shots != nil {
 		a.shots.StopClipboardWatch()
 	}
+	a.stopTray()
 }
 
 // quit asks Wails to close the application.
 func (a *App) quit() {
+	a.mu.Lock()
+	a.quitting = true
+	a.mu.Unlock()
+	a.stopTray()
 	if a.ctx != nil {
 		wruntime.Quit(a.ctx)
 	}

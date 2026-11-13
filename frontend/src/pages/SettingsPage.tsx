@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type AppInfo, type AutostartStatus, type DownloadSettings, type Settings } from '../lib/api'
+import { api, type AppInfo, type AutostartStatus, type DownloadSettings, type Settings, type StartupSettings } from '../lib/api'
 import { Field, Spinner, Switch, Tag, useToast } from '../components/ui'
 import { formatBytes } from '../lib/format'
 import type { PageProps } from '../App'
@@ -71,6 +71,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
   const [downloads, setDownloads] = useState<DownloadForm>(() => toDownloadForm(settings))
   const [uiForm, setUiForm] = useState<UiForm>(() => toUiForm(settings))
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null)
+  const [startup, setStartup] = useState<StartupSettings | null>(null)
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [savingDl, setSavingDl] = useState(false)
   const [savingUi, setSavingUi] = useState(false)
@@ -78,6 +79,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
   useEffect(() => {
     setDownloads(toDownloadForm(settings))
     setUiForm(toUiForm(settings))
+    setStartup(settings.startup ?? null)
   }, [settings])
 
   useEffect(() => {
@@ -375,6 +377,73 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
             刷新状态
           </button>
         </div>
+        <div className="divider" />
+        <div className="row row-wrap" style={{ gap: 16 }}>
+          <label className="row" style={{ gap: 8 }}>
+            <Switch
+              checked={startup?.trayEnabled ?? true}
+              onChange={async (v) => {
+                try {
+                  const next = await api.SetTrayEnabled(v)
+                  setStartup(next)
+                  toast.push(v ? '已启用系统托盘' : '已关闭系统托盘')
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            />
+            <span className="small">系统托盘图标</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <Switch
+              checked={startup?.closeToTray ?? true}
+              onChange={async (v) => {
+                try {
+                  const next = await api.SetCloseToTray(v)
+                  setStartup(next)
+                  toast.push(v ? '关闭窗口时最小化到托盘' : '关闭窗口时直接退出')
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            />
+            <span className="small">关闭窗口时最小化到托盘</span>
+          </label>
+          <label className="row" style={{ gap: 8 }}>
+            <Switch
+              checked={startup?.startMinimized ?? false}
+              onChange={async (v) => {
+                try {
+                  const current = startup ?? { enabled: false, startMinimized: false, trayEnabled: true, closeToTray: true }
+                  const saved = await api.SaveSettings({
+                    ...settings,
+                    startup: { ...current, startMinimized: v },
+                  })
+                  setStartup(saved.startup ?? null)
+                  await reloadSettings()
+                  toast.push(v ? '启动时最小化到托盘（下次启动生效）' : '启动时显示窗口')
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            />
+            <span className="small">启动时最小化到托盘</span>
+          </label>
+          <div className="spacer" />
+          <button
+            className="btn btn-sm"
+            onClick={async () => {
+              try {
+                await api.HideMainWindow()
+              } catch (err) {
+                toast.error(err)
+              }
+            }}
+          >
+            最小化到托盘
+          </button>
+        </div>
+
         {autostart?.location ? (
           <div className="small faint mono truncate" style={{ marginTop: 8 }} title={autostart.location}>
             {autostart.location}
@@ -472,6 +541,8 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     </div>
   )
 }
+
+
 
 
 

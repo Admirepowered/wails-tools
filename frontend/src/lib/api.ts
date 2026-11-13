@@ -134,11 +134,21 @@ export interface ServerSettings {
   lastUsedTransport?: string
 }
 
+export interface StartupSettings {
+  enabled: boolean
+  startMinimized: boolean
+  trayEnabled: boolean
+  closeToTray: boolean
+}
+
 export interface Settings {
   proxy: { default: ProxyRule; scopes?: Record<string, ProxyRule>; followSystem: boolean }
   downloads: DownloadSettings
   server: ServerSettings
   ui: { theme: string; language: string; density: string }
+  update?: UpdateSettings
+  screenshots?: ScreenshotSettings
+  startup?: StartupSettings
 }
 
 export interface AppInfo {
@@ -793,6 +803,14 @@ const rawApi = {
   // autostart
   GetAutostartStatus: () => call<AutostartStatus>('GetAutostartStatus'),
   SetAutostart: (enabled: boolean) => call<AutostartStatus>('SetAutostart', enabled),
+
+  // system tray
+  TrayAvailable: () => call<boolean>('TrayAvailable'),
+  TrayEnabled: () => call<boolean>('TrayEnabled'),
+  SetTrayEnabled: (enabled: boolean) => call<StartupSettings>('SetTrayEnabled', enabled),
+  SetCloseToTray: (enabled: boolean) => call<StartupSettings>('SetCloseToTray', enabled),
+  ShowMainWindow: () => call<void>('ShowMainWindow'),
+  HideMainWindow: () => call<void>('HideMainWindow'),
 }
 
 /**
@@ -853,5 +871,6 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 

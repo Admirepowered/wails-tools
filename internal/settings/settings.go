@@ -134,10 +134,14 @@ type ScreenshotSettings struct {
 	OpenAfterCapture bool   `json:"openAfterCapture"`
 }
 
-// StartupSettings controls launch-at-login.
+// StartupSettings controls launch-at-login and the system tray.
 type StartupSettings struct {
 	Enabled        bool `json:"enabled"`
 	StartMinimized bool `json:"startMinimized"`
+	// TrayEnabled installs the system tray icon.
+	TrayEnabled bool `json:"trayEnabled"`
+	// CloseToTray hides the window instead of quitting when it is closed.
+	CloseToTray bool `json:"closeToTray"`
 }
 
 // Settings is the root document.
@@ -185,6 +189,7 @@ func Default() Settings {
 			Format:    "png",
 			AutoSave:  true,
 		},
+		Startup: StartupSettings{TrayEnabled: true, CloseToTray: true},
 	}
 }
 

@@ -20,18 +20,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("initialise application: %v", err)
 	}
+	startHidden := a.StartHidden()
 	err = wails.Run(&options.App{
-		Title:     "WailsTools",
-		Width:     1440,
-		Height:    920,
-		MinWidth:  1080,
-		MinHeight: 680,
+		Title:       "WailsTools",
+		Width:       1440,
+		Height:      920,
+		MinWidth:    1080,
+		MinHeight:   680,
+		StartHidden: startHidden,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 18, G: 20, B: 26, A: 1},
 		OnStartup:        a.Startup,
 		OnShutdown:       a.Shutdown,
+		OnBeforeClose:    a.OnBeforeClose,
 		Bind:             []interface{}{a},
 		Windows: &windows.Options{
 			WebviewIsTransparent: false,

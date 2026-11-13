@@ -28,6 +28,10 @@
 
 ![自动更新](docs/screenshots/update.png)
 
+托盘图标与右键菜单（关闭窗口后仍驻留，双击恢复）：
+
+![托盘菜单](docs/screenshots/tray-menu.png)
+
 连接成功后顶部会显示实际使用的传输方式（`UDP · QUIC` 或 `TCP 回退`）与地址：
 
 ![UDP 连接状态](docs/screenshots/connected-udp.png)
@@ -47,6 +51,7 @@
 | 代理订阅 | 订阅链接自动拉取节点（明文/Base64/Clash YAML/JSON），定时后台刷新，流量与到期信息，节点一键应用到指定连接类型 |
 | 截图自动保存 | 一键截屏（主屏/全部屏幕）自动落盘、剪贴板图片自动保存、命名模板与格式可选、缩略图画廊 |
 | 自动更新 | 服务端分发客户端构建（管理员上传、按平台/通道查询、SHA-256 校验），失败回退 GitHub Release；**绕过 SNI 检测**（固定 IP + Host 复用 + TLS ClientHello 分片） |
+| 系统托盘 | 原生 Win32 托盘图标（无第三方依赖）：双击显示窗口、右键菜单（截图/同步/连接服务器/剪贴板/自启动/退出）、悬停显示连接状态、关闭窗口最小化到托盘 |
 | 开机自启动 | Windows 注册表 Run 项 / Linux autostart 桌面项，一键开关 |
 | 同步服务端 | 用户注册/登录（Argon2id）、令牌会话、每用户独立笔记与文件空间、配额、TCP 中转隧道、客户端构建分发、审计记录 |
 
@@ -73,6 +78,7 @@
 │  internal/updater      自动更新（服务端 / GitHub + SHA-256）                                   │
 │  internal/githubx      GitHub SNI 绕过客户端（固定 IP、Host 复用、ClientHello 分片）            │
 │  internal/autostart    开机自启动（注册表 / autostart）                                        │
+│  internal/tray         系统托盘（Shell_NotifyIcon + 隐藏消息窗口，纯 Go 无 cgo）                 │
 │  internal/netx         QUIC(UDP) 优先 + TLS/TCP 回退的多路复用传输                              │
 │  internal/wire         长度前缀 JSON 帧 + 流式接管协议                                          │
 └───────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -212,4 +218,5 @@ server/cmd/wt-server     服务端可执行
 server/internal/{api,store,auth,server}
 frontend/                React + TypeScript 界面
 ```
+
 
