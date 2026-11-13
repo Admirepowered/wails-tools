@@ -289,7 +289,8 @@ func (c *Client) doOnce(ctx context.Context, method string, parsed *url.URL, bod
 	if port == "" {
 		port = "443"
 	}
-	address := parsed.Host
+	host := parsed.Hostname()
+	address := net.JoinHostPort(host, port)
 	if cand.ip != "" {
 		address = net.JoinHostPort(cand.ip, port)
 	}

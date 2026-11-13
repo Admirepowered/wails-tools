@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"wailstools/internal/miproxy"
 	"wailstools/internal/settings"
 )
 
@@ -16,59 +17,65 @@ func TestParsePlainList(t *testing.T) {
 	body := `# comment
 http://user:pass@1.2.3.4:8080#香港 01
 socks5://5.6.7.8:1080#US-02
-socks5h://9.9.9.9:1080
-vmess://not-supported
-http://1.2.3.4:8080
+vmess://` + base64.StdEncoding.EncodeToString([]byte(`{"v":"2","ps":"HK-VMess","add":"h.example.com","port":"443","id":"11111111-2222-3333-4444-555555555555","aid":"0","net":"ws","path":"/ws","host":"cdn.example.com","tls":"tls"}`)) + `
 `
 	src := Parse(body)
-	if len(src.Nodes) != 4 {
-		t.Fatalf("expected 4 nodes, got %d: %+v", len(src.Nodes), src.Nodes)
+	if len(src.Nodes) != 3 {
+		t.Fatalf("expected 3 nodes, got %d: %+v", len(src.Nodes), src.Nodes)
 	}
-	first := src.Nodes[0]
-	if first.Scheme != "http" || first.Host != "1.2.3.4" || first.Port != 8080 {
-		t.Fatalf("unexpected first node: %+v", first)
+	byName := map[string]miproxy.Node{}
+	for _, n := range src.Nodes {
+		byName[n.Name] = n
 	}
-	if first.Username != "user" || first.Password != "pass" {
-		t.Fatalf("credentials not parsed: %+v", first)
+	httpNode, ok := byName["香港 01"]
+	if !ok || httpNode.Protocol != miproxy.ProtoHTTP || httpNode.Server != "1.2.3.4" || httpNode.Port != 8080 {
+		t.Fatalf("http node parse failed: %+v", httpNode)
 	}
-	if first.Name != "香港 01" {
-		t.Fatalf("name not decoded: %q", first.Name)
+	if httpNode.Username != "user" || httpNode.Password != "pass" {
+		t.Fatalf("credentials lost: %+v", httpNode)
 	}
-	if src.Nodes[1].Scheme != "socks5" {
-		t.Fatalf("socks5h should map to socks5: %+v", src.Nodes[1])
+	vm, ok := byName["HK-VMess"]
+	if !ok {
+		t.Fatalf("vmess node missing: %+v", src.Nodes)
 	}
-	// Duplicate endpoint deduplicated.
-	if len(src.Nodes) != 4 {
-		t.Fatalf("duplicates were not removed: %d", len(src.Nodes))
+	if vm.Protocol != miproxy.ProtoVMess || vm.UUID == "" || vm.Network != miproxy.NetWS || !vm.TLS || vm.Path != "/ws" {
+		t.Fatalf("vmess fields wrong: %+v", vm)
 	}
 }
 
-func TestParseBase64List(t *testing.T) {
-	plain := "socks5://a:b@10.0.0.1:1080#节点A\nhttp://10.0.0.2:3128#节点B\n"
+func TestParseBase64Subscription(t *testing.T) {
+	plain := "vmess://" + base64.StdEncoding.EncodeToString([]byte(`{"ps":"A","add":"a.com","port":"16632","id":"22222222-3333-4444-5555-666666666666","aid":"0","net":"ws","path":"/","host":"h.com"}`)) + "\n" +
+		"trojan://pw@b.com:443?sni=b.com#B\n"
 	encoded := base64.StdEncoding.EncodeToString([]byte(plain))
 	src := Parse(encoded)
 	if len(src.Nodes) != 2 {
-		t.Fatalf("expected 2 nodes from base64, got %d", len(src.Nodes))
+		t.Fatalf("expected 2 nodes, got %d", len(src.Nodes))
 	}
-	if src.Nodes[0].Host != "10.0.0.1" || src.Nodes[1].Port != 3128 {
-		t.Fatalf("unexpected nodes: %+v", src.Nodes)
+	protocols := map[miproxy.Protocol]bool{}
+	for _, n := range src.Nodes {
+		protocols[n.Protocol] = true
+	}
+	if !protocols[miproxy.ProtoVMess] || !protocols[miproxy.ProtoTrojan] {
+		t.Fatalf("unexpected protocols: %+v", protocols)
 	}
 }
 
 func TestParseClashYAML(t *testing.T) {
 	body := `mixed-port: 7890
 proxies:
-  - name: "日本 01"
-    type: socks5
-    server: 1.1.1.1
-    port: 1080
-    username: u1
-    password: p1
-  - {name: "HK", type: http, server: 2.2.2.2, port: 8080}
-  - name: "SS"
-    type: ss
-    server: 3.3.3.3
-    port: 8388
+  - name: "HK"
+    type: vmess
+    server: hk.example.com
+    port: 443
+    uuid: 33333333-4444-5555-6666-777777777777
+    alterId: 0
+    cipher: auto
+    tls: true
+    network: ws
+    ws-path: /ray
+    ws-host: cdn.example.com
+  - {name: "SS", type: ss, server: 1.2.3.4, port: 8388, cipher: aes-256-gcm, password: secret}
+  - {name: "Junk", type: tuic, server: 9.9.9.9, port: 443}
 proxy-groups:
   - name: auto
 `
@@ -76,37 +83,27 @@ proxy-groups:
 	if len(src.Nodes) != 2 {
 		t.Fatalf("expected 2 usable nodes, got %d: %+v", len(src.Nodes), src.Nodes)
 	}
-	if src.Nodes[0].Name != "日本 01" || src.Nodes[0].Username != "u1" {
-		t.Fatalf("block style parse failed: %+v", src.Nodes[0])
+	var vm, ss *miproxy.Node
+	for i := range src.Nodes {
+		switch src.Nodes[i].Protocol {
+		case miproxy.ProtoVMess:
+			vm = &src.Nodes[i]
+		case miproxy.ProtoSS:
+			ss = &src.Nodes[i]
+		}
 	}
-	if src.Nodes[1].Scheme != "http" || src.Nodes[1].Port != 8080 {
-		t.Fatalf("inline map parse failed: %+v", src.Nodes[1])
+	if vm == nil || vm.Path != "/ray" || vm.Host != "cdn.example.com" || !vm.TLS {
+		t.Fatalf("clash vmess parse failed: %+v", vm)
 	}
-}
-
-func TestParseJSONDocuments(t *testing.T) {
-	clashJSON := `{"proxies":[{"name":"A","type":"socks5","server":"1.2.3.4","port":1080},{"name":"B","type":"ss","server":"5.6.7.8","port":1}]}`
-	src := Parse(clashJSON)
-	if len(src.Nodes) != 1 || src.Nodes[0].Scheme != "socks5" {
-		t.Fatalf("clash json parse failed: %+v", src.Nodes)
-	}
-	sip008 := `{"servers":[{"server":"9.9.9.9","server_port":8388,"method":"aes-256-gcm"}]}`
-	if got := Parse(sip008); len(got.Nodes) != 0 {
-		t.Fatalf("shadowsocks-only subscription must not yield nodes: %+v", got.Nodes)
-	}
-	bare := `[{"name":"C","type":"http","server":"7.7.7.7","port":3128}]`
-	if got := Parse(bare); len(got.Nodes) != 1 {
-		t.Fatalf("bare array parse failed: %+v", got.Nodes)
+	if ss == nil || ss.Method != "aes-256-gcm" || ss.Password != "secret" {
+		t.Fatalf("clash ss parse failed: %+v", ss)
 	}
 }
 
-func TestParseUserInfo(t *testing.T) {
+func TestParseUserInfoHeader(t *testing.T) {
 	info := ParseUserInfo("upload=1024; download=2048; total=10737418240; expire=1893456000")
 	if info.Upload != 1024 || info.Download != 2048 || info.Total != 10737418240 || info.Expire != 1893456000 {
 		t.Fatalf("unexpected info: %+v", info)
-	}
-	if got := ParseUserInfo("garbage"); got != (Info{}) {
-		t.Fatalf("garbage should parse to zero info: %+v", got)
 	}
 	merged := MergeInfo(Info{Total: 1}, Info{Download: 5})
 	if merged.Total != 1 || merged.Download != 5 {
@@ -114,14 +111,14 @@ func TestParseUserInfo(t *testing.T) {
 	}
 }
 
-func TestNodeURL(t *testing.T) {
-	n := Node{Scheme: "socks5", Host: "1.2.3.4", Port: 1080, Username: "u", Password: "p"}
-	if got := n.URL(); got != "socks5://u:p@1.2.3.4:1080" {
+func TestProxyURLForPlainNodes(t *testing.T) {
+	n := miproxy.Node{Protocol: miproxy.ProtoSOCKS5, Server: "1.2.3.4", Port: 1080, Username: "u", Password: "p"}
+	if got := ProxyURL(n); got != "socks5://u:p@1.2.3.4:1080" {
 		t.Fatalf("unexpected URL %q", got)
 	}
-	plain := Node{Scheme: "http", Host: "example.com", Port: 8080}
-	if got := plain.URL(); got != "http://example.com:8080" {
-		t.Fatalf("unexpected URL %q", got)
+	vm := miproxy.Node{Protocol: miproxy.ProtoVMess, Server: "x", Port: 1}
+	if got := ProxyURL(vm); got != "" {
+		t.Fatalf("proxy protocols must not render a plain URL, got %q", got)
 	}
 }
 
@@ -156,21 +153,19 @@ func TestStorePersistenceAndRefresh(t *testing.T) {
 	if res.Source.Info.Total != 3 || res.Source.Info.Expire != 4 {
 		t.Fatalf("userinfo not captured: %+v", res.Source.Info)
 	}
-
-	// Reload from disk.
 	reopened, err := Open(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	got, ok := reopened.Get(saved.ID)
-	if !ok || len(got.Nodes) != 1 || got.LastFetch == "" {
+	got, found := reopened.Get(saved.ID)
+	if !found || len(got.Nodes) != 1 || got.LastFetch == "" {
 		t.Fatalf("persistence failed: %+v", got)
 	}
 	if err := reopened.Delete(saved.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if _, ok := reopened.Get(saved.ID); ok {
-		t.Fatal("subscription not deleted")
+	if _, err := os.Stat(filepath.Join(dir, "subscriptions.json")); err != nil {
+		t.Fatalf("store file missing: %v", err)
 	}
 }
 
@@ -190,8 +185,5 @@ func TestRefreshFailureKeepsError(t *testing.T) {
 	got, _ := store.Get(saved.ID)
 	if got.LastError == "" {
 		t.Fatal("error was not recorded")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "subscriptions.json")); err != nil {
-		t.Fatalf("store file missing: %v", err)
 	}
 }

@@ -19,27 +19,21 @@ import (
 	"sync"
 	"time"
 
+	"wailstools/internal/miproxy"
 	"wailstools/internal/proxyx"
 	"wailstools/internal/settings"
 )
 
-// Node is one usable proxy endpoint.
-type Node struct {
-	Name     string `json:"name"`
-	Scheme   string `json:"scheme"` // http | socks5
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-}
+// Node is one usable proxy endpoint (all supported protocols).
+type Node = miproxy.Node
 
-// URL renders the node as a proxy URL.
-func (n Node) URL() string {
-	scheme := n.Scheme
-	if scheme == "" {
-		scheme = "http"
+// ProxyURL renders plain http/socks5 nodes as a proxy URL.
+func ProxyURL(n Node) string {
+	scheme := string(n.Protocol)
+	if n.Protocol != miproxy.ProtoHTTP && n.Protocol != miproxy.ProtoSOCKS5 {
+		return ""
 	}
-	host := n.Host
+	host := n.Server
 	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
 		host = "[" + host + "]"
 	}
@@ -394,50 +388,4 @@ func parseTime(v string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-// ParseUserInfo parses the "subscription-userinfo" header.
-func ParseUserInfo(header string) Info {
-	var info Info
-	if strings.TrimSpace(header) == "" {
-		return info
-	}
-	for _, part := range strings.Split(header, ";") {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		value, err := strconv.ParseInt(strings.TrimSpace(kv[1]), 10, 64)
-		if err != nil {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(kv[0])) {
-		case "upload":
-			info.Upload = value
-		case "download":
-			info.Download = value
-		case "total":
-			info.Total = value
-		case "expire":
-			info.Expire = value
-		}
-	}
-	return info
-}
-
-// MergeInfo keeps non-zero values from the incoming info.
-func MergeInfo(base, incoming Info) Info {
-	if incoming.Upload != 0 {
-		base.Upload = incoming.Upload
-	}
-	if incoming.Download != 0 {
-		base.Download = incoming.Download
-	}
-	if incoming.Total != 0 {
-		base.Total = incoming.Total
-	}
-	if incoming.Expire != 0 {
-		base.Expire = incoming.Expire
-	}
-	return base
 }

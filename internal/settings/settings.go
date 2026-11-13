@@ -76,6 +76,16 @@ func (p ProxySettings) Resolve(scope string) ProxyRule {
 	return p.Default.Clone()
 }
 
+// ProxyRuntimeSettings configures the local proxy engine listener.
+type ProxyRuntimeSettings struct {
+	// External exposes the local proxy on 0.0.0.0 for other devices.
+	External bool `json:"external"`
+	// Port is the listen port used in external mode.
+	Port     int    `json:"port"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
 // DownloadSettings tunes the HTTP download engine.
 type DownloadSettings struct {
 	Directory       string `json:"directory"`
@@ -146,13 +156,14 @@ type StartupSettings struct {
 
 // Settings is the root document.
 type Settings struct {
-	Proxy       ProxySettings      `json:"proxy"`
-	Downloads   DownloadSettings   `json:"downloads"`
-	Server      ServerSettings     `json:"server"`
-	UI          UISettings         `json:"ui"`
-	Update      UpdateSettings     `json:"update"`
-	Screenshots ScreenshotSettings `json:"screenshots"`
-	Startup     StartupSettings    `json:"startup"`
+	Proxy        ProxySettings        `json:"proxy"`
+	Downloads    DownloadSettings     `json:"downloads"`
+	Server       ServerSettings       `json:"server"`
+	UI           UISettings           `json:"ui"`
+	ProxyRuntime ProxyRuntimeSettings `json:"proxyRuntime"`
+	Update       UpdateSettings       `json:"update"`
+	Screenshots  ScreenshotSettings   `json:"screenshots"`
+	Startup      StartupSettings      `json:"startup"`
 }
 
 // Default returns the built-in configuration.
@@ -189,7 +200,8 @@ func Default() Settings {
 			Format:    "png",
 			AutoSave:  true,
 		},
-		Startup: StartupSettings{TrayEnabled: true, CloseToTray: true},
+		Startup:      StartupSettings{TrayEnabled: true, CloseToTray: true},
+		ProxyRuntime: ProxyRuntimeSettings{Port: 7890},
 	}
 }
 

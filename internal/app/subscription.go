@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"wailstools/internal/miproxy"
 	"wailstools/internal/proxyx"
 	"wailstools/internal/settings"
 	"wailstools/internal/subscription"
@@ -57,9 +58,8 @@ func (a *App) ApplySubscriptionNode(sourceID string, nodeIndex int, scopes []str
 		return settings.Settings{}, errors.New("节点不存在")
 	}
 	node := src.Nodes[nodeIndex]
-	rule := settings.ProxyRule{Mode: node.Scheme, URL: node.URL(), Username: node.Username, Password: node.Password}
-	rule.URL = hostPort(node.Host, node.Port)
-	if rule.Mode == "" {
+	rule := settings.ProxyRule{Mode: string(node.Protocol), URL: hostPort(node.Server, node.Port), Username: node.Username, Password: node.Password}
+	if rule.Mode == "" || (node.Protocol != miproxy.ProtoHTTP && node.Protocol != miproxy.ProtoSOCKS5) {
 		rule.Mode = "http"
 	}
 	if all {
@@ -95,7 +95,10 @@ func (a *App) TestSubscriptionNode(sourceID string, nodeIndex int) proxyx.TestRe
 		return proxyx.TestResult{Detail: "节点不存在"}
 	}
 	node := src.Nodes[nodeIndex]
-	rule := settings.ProxyRule{Mode: node.Scheme, URL: hostPort(node.Host, node.Port), Username: node.Username, Password: node.Password}
+	rule := settings.ProxyRule{Mode: string(node.Protocol), URL: hostPort(node.Server, node.Port), Username: node.Username, Password: node.Password}
+	if rule.Mode == "" {
+		rule.Mode = "http"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	return proxyx.TestProxy(ctx, rule, "http://www.gstatic.com/generate_204")

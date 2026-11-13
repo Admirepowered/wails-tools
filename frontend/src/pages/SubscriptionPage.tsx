@@ -1,34 +1,72 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, onEvent, type SubscriptionSource, type Settings, type TestResult } from '../lib/api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  api,
+  onEvent,
+  type MiproxyNode,
+  type ProxyRuntimeSettings,
+  type ProxyRuntimeStatus,
+  type Settings,
+  type SubscriptionSource,
+  type TestResult,
+} from '../lib/api'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Switch, Tag, useToast } from '../components/ui'
 import { formatBytes, formatTime, relativeTime } from '../lib/format'
 import type { PageProps } from '../App'
+
+const PROTOCOL_LABEL: Record<string, string> = {
+  vmess: 'VMess',
+  vless: 'VLESS',
+  trojan: 'Trojan',
+  shadowsocks: 'SS',
+  http: 'HTTP',
+  socks5: 'SOCKS5',
+  direct: '直连',
+}
 
 const SCOPE_LABEL: Record<string, string> = {
   http: 'HTTP 下载',
   netdisk: '网盘接口',
   ssh: 'SSH / SFTP',
   ftp: 'FTP',
-  sync: '同步服务',
+}
+
+function protocolTag(protocol: string) {
+  const label = PROTOCOL_LABEL[protocol] ?? protocol
+  const kind = protocol === 'vmess' || protocol === 'vless' || protocol === 'trojan' || protocol === 'shadowsocks' ? 'info' : 'default'
+  return <Tag kind={kind}>{label}</Tag>
 }
 
 export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const toast = useToast()
   const [list, setList] = useState<SubscriptionSource[]>([])
+  const [customNodes, setCustomNodes] = useState<MiproxyNode[]>([])
+  const [runtime, setRuntime] = useState<ProxyRuntimeStatus | null>(null)
+  const [runtimeCfg, setRuntimeCfg] = useState<ProxyRuntimeSettings>({ external: false, port: 7890 })
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState<string>('')
+  const [busy, setBusy] = useState('')
+  const [selected, setSelected] = useState('')
   const [editing, setEditing] = useState<SubscriptionSource | null>(null)
   const [deleting, setDeleting] = useState<SubscriptionSource | null>(null)
-  const [selected, setSelected] = useState<string>('')
-  const [applyNode, setApplyNode] = useState<{ source: SubscriptionSource; index: number } | null>(null)
+  const [nodeModal, setNodeModal] = useState<MiproxyNode | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [activate, setActivate] = useState<{ node: MiproxyNode; source: string } | null>(null)
   const [applyScopes, setApplyScopes] = useState<string[]>(['http', 'netdisk'])
-  const [applyAll, setApplyAll] = useState(false)
-  const [tests, setTests] = useState<Record<string, TestResult | null>>({})
+  const [applyAll, setApplyAll] = useState(true)
+  const [tests, setTests] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string } | null>>({})
 
   const load = useCallback(async () => {
     try {
-      const items = await api.ListSubscriptions()
+      const [items, custom, status, cfg] = await Promise.all([
+        api.ListSubscriptions(),
+        api.ListCustomNodes(),
+        api.ProxyRuntimeStatus(),
+        api.GetProxyRuntimeSettings(),
+      ])
       setList(items)
+      setCustomNodes(custom)
+      setRuntime(status)
+      setRuntimeCfg(cfg)
       setSelected((prev) => (prev && items.some((i) => i.id === prev) ? prev : items[0]?.id ?? ''))
     } catch (err) {
       toast.error(err)
@@ -42,11 +80,16 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   }, [load])
 
   useEffect(() => {
-    const off = onEvent<{ source: SubscriptionSource }>('subscription:updated', () => {
-      void load()
-    })
-    return () => off()
+    const off = onEvent<{ source: SubscriptionSource }>('subscription:updated', () => void load())
+    const offStatus = onEvent<ProxyRuntimeStatus>('proxy:status', (st) => setRuntime(st))
+    return () => {
+      off()
+      offStatus()
+    }
   }, [load])
+
+  const current = list.find((s) => s.id === selected) ?? null
+  const nodes = current?.nodes ?? []
 
   const refreshOne = async (src: SubscriptionSource) => {
     setBusy(src.id)
@@ -75,55 +118,121 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
     }
   }
 
-  const save = async (draft: SubscriptionSource) => {
-    try {
-      await api.SaveSubscription(draft)
-      setEditing(null)
-      await load()
-      toast.push('订阅已保存')
-    } catch (err) {
-      toast.error(err)
-    }
-  }
-
-  const testNode = async (src: SubscriptionSource, index: number) => {
-    const key = `${src.id}:${index}`
+  const testNode = async (node: MiproxyNode) => {
+    const key = nodeKey(node)
     setTests((t) => ({ ...t, [key]: null }))
     try {
-      const result = await api.TestSubscriptionNode(src.id, index)
-      setTests((t) => ({ ...t, [key]: result }))
+      const res = await api.TestProxyNode(node)
+      setTests((t) => ({ ...t, [key]: res }))
     } catch (err) {
       toast.error(err)
     }
   }
 
-  const doApply = async () => {
-    if (!applyNode) return
+  const doActivate = async () => {
+    if (!activate) return
+    setBusy('activate')
     try {
-      await api.ApplySubscriptionNode(applyNode.source.id, applyNode.index, applyScopes, applyAll)
+      const res = await api.ActivateProxyNode(
+        activate.node,
+        applyScopes,
+        applyAll,
+        runtimeCfg.external,
+        runtimeCfg.username ?? '',
+        runtimeCfg.password ?? '',
+      )
       await reloadSettings()
-      setApplyNode(null)
-      toast.push('代理已应用')
+      setRuntime(await api.ProxyRuntimeStatus())
+      setActivate(null)
+      const mode = res.mode === 'engine' ? '本地引擎' : '上游代理'
+      toast.push(`已启用 ${activate.node.name}（${mode}）`)
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const deactivate = async () => {
+    try {
+      await api.DeactivateProxy()
+      await reloadSettings()
+      setRuntime(await api.ProxyRuntimeStatus())
+      toast.push('已停止代理并恢复直连')
     } catch (err) {
       toast.error(err)
     }
   }
 
-  const current = list.find((s) => s.id === selected) ?? null
+  const saveRuntime = async (next: ProxyRuntimeSettings) => {
+    try {
+      const saved = await api.SaveProxyRuntimeSettings(next)
+      setRuntimeCfg(saved)
+      toast.push('本地代理设置已保存')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const importLinks = async () => {
+    try {
+      const nodes = await api.ImportNodeLinks(importText)
+      setImportText('')
+      setImportOpen(false)
+      await load()
+      toast.push(`已导入 ${nodes.length} 个节点`)
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const stats = runtime?.stats
+  const nodeRows = useMemo(() => nodes, [nodes])
 
   return (
     <div>
+      {runtime?.running && (
+        <div className="card" style={{ borderColor: 'var(--accent)' }}>
+          <div className="row">
+            <div style={{ flex: 1 }}>
+              <h3 className="card-title" style={{ marginBottom: 2 }}>
+                代理运行中
+                <Tag kind="ok">{PROTOCOL_LABEL[runtime.node?.protocol ?? ''] ?? runtime.node?.protocol}</Tag>
+                {runtime.external ? <Tag kind="warn">外部可用</Tag> : <Tag>仅本机</Tag>}
+              </h3>
+              <div className="small faint">
+                {runtime.node?.name} · {runtime.node?.server}:{runtime.node?.port} → 本地{' '}
+                <span className="mono">{runtime.addr}</span>
+                {runtime.auth ? '（需认证）' : ''}
+              </div>
+              {stats ? (
+                <div className="small faint" style={{ marginTop: 4 }}>
+                  连接 {stats.accepted} · 活动 {stats.active} · 失败 {stats.failed} · 上行{' '}
+                  {formatBytes(stats.bytesIn)} · 下行 {formatBytes(stats.bytesOut)} · 启动 {formatTime(runtime.since)}
+                </div>
+              ) : null}
+            </div>
+            <button className="btn btn-danger" onClick={deactivate}>
+              停止并恢复直连
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="row">
           <div>
             <h3 className="card-title">代理订阅</h3>
             <p className="card-desc" style={{ margin: 0 }}>
-              订阅地址会自动拉取 HTTP / SOCKS5 节点，并按设定的间隔在后台刷新；选中节点后可一键应用到指定的连接类型。
+              支持 VMess / VLESS / Trojan / Shadowsocks / HTTP / SOCKS5 节点；内置 Go 代理引擎，选中节点即可启用。
             </p>
           </div>
           <div className="spacer" />
           <button className="btn" onClick={refreshAll} disabled={busy !== '' || list.length === 0}>
             全部刷新
+          </button>
+          <button className="btn" onClick={() => setImportOpen(true)}>
+            导入节点链接
           </button>
           <button
             className="btn btn-primary"
@@ -149,14 +258,14 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
           <Spinner label="加载订阅" />
         </div>
       ) : list.length === 0 ? (
-        <Empty icon="⇅" title="还没有订阅" hint="点击右上角「新建订阅」，粘贴订阅链接即可导入节点" />
+        <Empty icon="⇅" title="还没有订阅" hint="新建订阅或导入节点链接后即可使用" />
       ) : (
         <div className="grid-2" style={{ marginTop: 14 }}>
           {list.map((src) => {
             const used = src.info.download + src.info.upload
             const pct = src.info.total > 0 ? Math.min(100, (used / src.info.total) * 100) : 0
             return (
-              <div key={src.id} className={`scope-card ${selected === src.id ? '' : ''}`}>
+              <div key={src.id} className="scope-card">
                 <div className="scope-head">
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="scope-title truncate">{src.name || '未命名订阅'}</div>
@@ -177,7 +286,6 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                     }}
                   />
                 </div>
-
                 {src.info.total > 0 && (
                   <div className="col" style={{ gap: 4 }}>
                     <Progress percent={pct} />
@@ -190,14 +298,12 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                     </div>
                   </div>
                 )}
-
                 <div className="row small faint">
                   <span>每 {src.intervalHours} 小时刷新</span>
                   <span>·</span>
                   <span>{src.lastFetch ? `上次 ${relativeTime(src.lastFetch)}` : '尚未刷新'}</span>
                 </div>
                 {src.lastError ? <div className="small" style={{ color: 'var(--danger)' }}>{src.lastError}</div> : null}
-
                 <div className="row">
                   <button className="btn btn-sm" disabled={busy !== ''} onClick={() => refreshOne(src)}>
                     刷新
@@ -219,57 +325,165 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
         </div>
       )}
 
-      {current && current.nodes.length > 0 && (
+      {current && (
         <div className="card" style={{ marginTop: 14 }}>
           <h3 className="card-title">
             节点列表 · {current.name}
-            <Tag>{current.nodes.length}</Tag>
+            <Tag>{nodeRows.length}</Tag>
           </h3>
-          <p className="card-desc">点击「应用」把该节点写入代理设置，可选择作用域或全部连接。</p>
+          <p className="card-desc">点击「启用」启动本地代理引擎并把所选作用域切到该节点。</p>
+          {nodeRows.length === 0 ? (
+            <Empty icon="◇" title="该订阅没有可用节点" hint="刷新订阅，或检查链接格式" />
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>协议</th>
+                  <th>服务器</th>
+                  <th>传输</th>
+                  <th className="right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nodeRows.map((node, index) => {
+                  const key = nodeKey(node, index)
+                  const result = tests[key]
+                  const active = runtime?.running && runtime.node?.name === node.name && runtime.node?.server === node.server
+                  return (
+                    <tr key={key}>
+                      <td className="truncate" title={node.name}>
+                        {node.name}
+                        {active ? <Tag kind="ok">使用中</Tag> : null}
+                      </td>
+                      <td>{protocolTag(node.protocol)}</td>
+                      <td className="mono small">
+                        {node.server}:{node.port}
+                      </td>
+                      <td className="small faint">
+                        {(node.network ?? 'tcp').toUpperCase()}
+                        {node.tls ? ' + TLS' : ''}
+                      </td>
+                      <td className="right">
+                        <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
+                          {result ? (
+                            <span className={`tag ${result.ok ? 'tag-ok' : 'tag-bad'}`}>
+                              {result.ok ? `${result.latencyMs ?? 0}ms` : '失败'}
+                            </span>
+                          ) : null}
+                          <button className="btn btn-sm" onClick={() => testNode(node)}>
+                            测速
+                          </button>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => {
+                              setActivate({ node, source: current.id })
+                              setApplyAll(true)
+                            }}
+                          >
+                            启用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      <div className="card">
+        <div className="row">
+          <h3 className="card-title" style={{ margin: 0 }}>
+            自定义节点
+            <Tag>{customNodes.length}</Tag>
+          </h3>
+          <div className="spacer" />
+          <button
+            className="btn btn-sm"
+            onClick={() =>
+              setNodeModal({
+                name: '',
+                protocol: 'vmess',
+                server: '',
+                port: 443,
+                uuid: '',
+                alterId: 0,
+                security: 'auto',
+                network: 'ws',
+                path: '/',
+                host: '',
+                tls: false,
+              })
+            }
+          >
+            添加节点
+          </button>
+        </div>
+        <p className="card-desc">手动添加或粘贴分享链接导入，支持与订阅节点同样的协议。</p>
+        {customNodes.length === 0 ? (
+          <Empty icon="＋" title="还没有自定义节点" hint="点击「添加节点」或「导入节点链接」" />
+        ) : (
           <table className="table">
             <thead>
               <tr>
                 <th>名称</th>
                 <th>协议</th>
-                <th>地址</th>
+                <th>服务器</th>
+                <th>传输</th>
                 <th className="right">操作</th>
               </tr>
             </thead>
             <tbody>
-              {current.nodes.map((node, index) => {
-                const key = `${current.id}:${index}`
+              {customNodes.map((node, index) => {
+                const key = nodeKey(node, index)
                 const result = tests[key]
+                const active = runtime?.running && runtime.node?.id !== '' && runtime.node?.id === node.id
                 return (
                   <tr key={key}>
                     <td className="truncate" title={node.name}>
                       {node.name}
+                      {active ? <Tag kind="ok">使用中</Tag> : null}
                     </td>
-                    <td>
-                      <Tag kind={node.scheme === 'socks5' ? 'info' : 'default'}>
-                        {node.scheme === 'socks5' ? 'SOCKS5' : 'HTTP'}
-                      </Tag>
-                    </td>
+                    <td>{protocolTag(node.protocol)}</td>
                     <td className="mono small">
-                      {node.host}:{node.port}
+                      {node.server}:{node.port}
+                    </td>
+                    <td className="small faint">
+                      {(node.network ?? 'tcp').toUpperCase()}
+                      {node.tls ? ' + TLS' : ''}
                     </td>
                     <td className="right">
                       <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
                         {result ? (
                           <span className={`tag ${result.ok ? 'tag-ok' : 'tag-bad'}`}>
-                            {result.ok ? `${result.latencyMs}ms` : '不可用'}
+                            {result.ok ? `${result.latencyMs ?? 0}ms` : '失败'}
                           </span>
                         ) : null}
-                        <button className="btn btn-sm" onClick={() => testNode(current, index)}>
-                          测试
+                        <button className="btn btn-sm" onClick={() => testNode(node)}>
+                          测速
+                        </button>
+                        <button className="btn btn-sm" onClick={() => setNodeModal(node)}>
+                          编辑
+                        </button>
+                        <button className="btn btn-primary btn-sm" onClick={() => setActivate({ node, source: 'custom' })}>
+                          启用
                         </button>
                         <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() => {
-                            setApplyNode({ source: current, index })
-                            setApplyAll(false)
+                          className="btn btn-danger btn-sm"
+                          onClick={async () => {
+                            try {
+                              await api.DeleteCustomNode(node.id ?? '')
+                              await load()
+                              toast.push('已删除节点')
+                            } catch (err) {
+                              toast.error(err)
+                            }
                           }}
                         >
-                          应用
+                          删除
                         </button>
                       </div>
                     </td>
@@ -278,30 +492,75 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
               })}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 className="card-title">本地代理与共享</h3>
+        <p className="card-desc">
+          默认只监听 127.0.0.1，供本程序内部使用；开启「外部可用」后监听 0.0.0.0，同一网络的其它设备也能把代理指向本机。
+        </p>
+        <div className="row row-wrap" style={{ gap: 18 }}>
+          <label className="row" style={{ gap: 8 }}>
+            <Switch checked={runtimeCfg.external} onChange={(v) => setRuntimeCfg({ ...runtimeCfg, external: v })} />
+            <span className="small">外部可用（0.0.0.0）</span>
+          </label>
+          <div className="field" style={{ width: 140 }}>
+            <input
+              className="input"
+              type="number"
+              min={1024}
+              max={65535}
+              value={runtimeCfg.port}
+              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, port: Number(e.target.value) || 7890 })}
+            />
+          </div>
+          <div className="field" style={{ width: 160 }}>
+            <input
+              className="input"
+              placeholder="用户名（可选）"
+              value={runtimeCfg.username ?? ''}
+              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, username: e.target.value })}
+            />
+          </div>
+          <div className="field" style={{ width: 160 }}>
+            <input
+              className="input"
+              type="password"
+              placeholder="密码（可选）"
+              value={runtimeCfg.password ?? ''}
+              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, password: e.target.value })}
+            />
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={() => saveRuntime(runtimeCfg)}>
+            保存
+          </button>
         </div>
-      )}
+        <div className="small faint" style={{ marginTop: 8 }}>
+          设置作用域：{Object.keys(SCOPE_LABEL).map((k) => SCOPE_LABEL[k]).join('、')}；同步链路始终直连。
+        </div>
+      </div>
 
-      {editing && <SubscriptionEditor initial={editing} onCancel={() => setEditing(null)} onSave={save} />}
+      {editing && <SubscriptionEditor initial={editing} onCancel={() => setEditing(null)} onSave={saveEditor} />}
 
-      {applyNode && (
+      {activate && (
         <Modal
-          title="应用代理节点"
-          onClose={() => setApplyNode(null)}
+          title="启用节点"
+          onClose={() => setActivate(null)}
           footer={
             <>
-              <button className="btn" onClick={() => setApplyNode(null)}>
+              <button className="btn" onClick={() => setActivate(null)}>
                 取消
               </button>
-              <button className="btn btn-primary" onClick={doApply}>
-                应用
+              <button className="btn btn-primary" disabled={busy === 'activate'} onClick={doActivate}>
+                启用
               </button>
             </>
           }
         >
           <div className="small dim">
-            节点：{applyNode.source.nodes[applyNode.index]?.name}（
-            {applyNode.source.nodes[applyNode.index]?.scheme}://{applyNode.source.nodes[applyNode.index]?.host}:
-            {applyNode.source.nodes[applyNode.index]?.port}）
+            {activate.node.name}（{PROTOCOL_LABEL[activate.node.protocol] ?? activate.node.protocol} ·{' '}
+            {activate.node.server}:{activate.node.port}）
           </div>
           <label className="row" style={{ gap: 8 }}>
             <Switch checked={applyAll} onChange={setApplyAll} />
@@ -325,13 +584,63 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
               ))}
             </div>
           )}
+          {runtimeCfg.external ? (
+            <div className="small faint">将以「外部可用」模式监听 0.0.0.0:{runtimeCfg.port}</div>
+          ) : (
+            <div className="small faint">将以「仅本机」模式监听 127.0.0.1（随机端口）</div>
+          )}
+        </Modal>
+      )}
+
+      {nodeModal && (
+        <NodeEditor
+          initial={nodeModal}
+          onCancel={() => setNodeModal(null)}
+          onSave={async (node) => {
+            try {
+              await api.SaveCustomNode(node)
+              setNodeModal(null)
+              await load()
+              toast.push('节点已保存')
+            } catch (err) {
+              toast.error(err)
+            }
+          }}
+        />
+      )}
+
+      {importOpen && (
+        <Modal
+          title="导入节点链接"
+          wide
+          onClose={() => setImportOpen(false)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setImportOpen(false)}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={importLinks} disabled={!importText.trim()}>
+                导入
+              </button>
+            </>
+          }
+        >
+          <Field label="每行一个分享链接" hint="支持 vmess://、vless://、trojan://、ss://、http://、socks5://">
+            <textarea
+              className="textarea"
+              style={{ minHeight: 180 }}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder="vmess://eyJ2IjoiMiIsInBzIjoi..."
+            />
+          </Field>
         </Modal>
       )}
 
       {deleting && (
         <Confirm
           title="删除订阅"
-          message={`确定删除「${deleting.name}」吗？已应用的代理设置不会自动撤销。`}
+          message={`确定删除「${deleting.name}」吗？已启用的节点不会被自动停用。`}
           danger
           onCancel={() => setDeleting(null)}
           onConfirm={async () => {
@@ -348,6 +657,21 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
       )}
     </div>
   )
+
+  async function saveEditor(draft: SubscriptionSource) {
+    try {
+      await api.SaveSubscription(draft)
+      setEditing(null)
+      await load()
+      toast.push('订阅已保存')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+}
+
+function nodeKey(node: MiproxyNode, index = 0): string {
+  return `${node.protocol}|${node.server}|${node.port}|${node.name}|${node.id ?? ''}|${index}`
 }
 
 function SubscriptionEditor({
@@ -379,12 +703,12 @@ function SubscriptionEditor({
       <Field label="名称">
         <input className="input" value={draft.name} onChange={(e) => patch({ name: e.target.value })} placeholder="例如：机场 A" />
       </Field>
-      <Field label="订阅地址" hint="支持明文/Base64 节点列表、Clash YAML 与 JSON">
+      <Field label="订阅地址" hint="支持 Base64 节点列表、明文链接、Clash YAML">
         <input
           className="input mono"
           value={draft.url}
           onChange={(e) => patch({ url: e.target.value })}
-          placeholder="https://example.com/sub?token=..."
+          placeholder="https://example.com/api/v1/client/subscribe?token=..."
         />
       </Field>
       <div className="row" style={{ gap: 12 }}>
@@ -400,6 +724,118 @@ function SubscriptionEditor({
         </Field>
         <Field label="启用自动刷新">
           <Switch checked={draft.enabled} onChange={(v) => patch({ enabled: v })} />
+        </Field>
+      </div>
+    </Modal>
+  )
+}
+
+function NodeEditor({
+  initial,
+  onCancel,
+  onSave,
+}: {
+  initial: MiproxyNode
+  onCancel: () => void
+  onSave: (node: MiproxyNode) => void
+}) {
+  const [draft, setDraft] = useState<MiproxyNode>({ network: 'ws', path: '/', alterId: 0, security: 'auto', ...initial })
+  const patch = (next: Partial<MiproxyNode>) => setDraft((cur) => ({ ...cur, ...next }))
+  const needsUUID = draft.protocol === 'vmess' || draft.protocol === 'vless'
+  const needsPassword = draft.protocol === 'trojan' || draft.protocol === 'shadowsocks'
+  const needsMethod = draft.protocol === 'shadowsocks'
+  return (
+    <Modal
+      title={initial.id ? '编辑节点' : '添加节点'}
+      wide
+      onClose={onCancel}
+      footer={
+        <>
+          <button className="btn" onClick={onCancel}>
+            取消
+          </button>
+          <button className="btn btn-primary" onClick={() => onSave(draft)} disabled={!draft.server || !draft.port}>
+            保存
+          </button>
+        </>
+      }
+    >
+      <div className="grid-2">
+        <Field label="名称">
+          <input className="input" value={draft.name} onChange={(e) => patch({ name: e.target.value })} />
+        </Field>
+        <Field label="协议">
+          <select className="select" value={draft.protocol} onChange={(e) => patch({ protocol: e.target.value })}>
+            <option value="vmess">VMess</option>
+            <option value="vless">VLESS</option>
+            <option value="trojan">Trojan</option>
+            <option value="shadowsocks">Shadowsocks</option>
+            <option value="socks5">SOCKS5</option>
+            <option value="http">HTTP</option>
+          </select>
+        </Field>
+        <Field label="服务器">
+          <input className="input mono" value={draft.server} onChange={(e) => patch({ server: e.target.value })} placeholder="example.com" />
+        </Field>
+        <Field label="端口">
+          <input
+            className="input"
+            type="number"
+            value={draft.port}
+            onChange={(e) => patch({ port: Number(e.target.value) || 0 })}
+          />
+        </Field>
+        {needsUUID && (
+          <Field label="UUID">
+            <input className="input mono" value={draft.uuid ?? ''} onChange={(e) => patch({ uuid: e.target.value })} />
+          </Field>
+        )}
+        {draft.protocol === 'vmess' && (
+          <Field label="AlterID">
+            <input
+              className="input"
+              type="number"
+              value={draft.alterId ?? 0}
+              onChange={(e) => patch({ alterId: Number(e.target.value) || 0 })}
+            />
+          </Field>
+        )}
+        {needsMethod && (
+          <Field label="加密方式">
+            <select className="select" value={draft.method ?? 'aes-256-gcm'} onChange={(e) => patch({ method: e.target.value })}>
+              <option value="aes-128-gcm">aes-128-gcm</option>
+              <option value="aes-256-gcm">aes-256-gcm</option>
+              <option value="chacha20-ietf-poly1305">chacha20-ietf-poly1305</option>
+            </select>
+          </Field>
+        )}
+        {needsPassword && (
+          <Field label="密码">
+            <input
+              className="input"
+              type="password"
+              value={draft.password ?? ''}
+              onChange={(e) => patch({ password: e.target.value })}
+            />
+          </Field>
+        )}
+        <Field label="传输">
+          <select className="select" value={draft.network ?? 'tcp'} onChange={(e) => patch({ network: e.target.value })}>
+            <option value="tcp">TCP</option>
+            <option value="ws">WebSocket</option>
+          </select>
+        </Field>
+        <Field label="WS 路径">
+          <input className="input mono" value={draft.path ?? ''} onChange={(e) => patch({ path: e.target.value })} placeholder="/" />
+        </Field>
+        <Field label="WS Host">
+          <input className="input mono" value={draft.host ?? ''} onChange={(e) => patch({ host: e.target.value })} placeholder="cdn.example.com" />
+        </Field>
+        <Field label="TLS">
+          <Switch checked={!!draft.tls} onChange={(v) => patch({ tls: v })} />
+        </Field>
+        <Field label="SNI（可选）">
+          <input className="input mono" value={draft.sni ?? ''} onChange={(e) => patch({ sni: e.target.value })} />
         </Field>
       </div>
     </Modal>

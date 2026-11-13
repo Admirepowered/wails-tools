@@ -19,6 +19,7 @@ import (
 	"wailstools/internal/netdisk"
 	"wailstools/internal/notes"
 	"wailstools/internal/paths"
+	"wailstools/internal/proxysvc"
 	"wailstools/internal/proxyx"
 	"wailstools/internal/secretstore"
 	"wailstools/internal/serverlink"
@@ -35,19 +36,21 @@ import (
 type App struct {
 	ctx context.Context
 
-	settings *settings.Store
-	ssh      *sshmgr.Manager
-	ftp      *ftpHub
-	engine   *dlengine.Engine
-	notes    *notes.Store
-	link     *serverlink.Client
-	netdisk  *netdisk.Manager
-	vault    *secretstore.Vault
-	updater  *updater.Manager
-	subs     *subscription.Manager
-	shots    *shot.Manager
-	tray     *tray.Tray
-	quitting bool
+	settings    *settings.Store
+	ssh         *sshmgr.Manager
+	ftp         *ftpHub
+	engine      *dlengine.Engine
+	notes       *notes.Store
+	link        *serverlink.Client
+	netdisk     *netdisk.Manager
+	vault       *secretstore.Vault
+	updater     *updater.Manager
+	subs        *subscription.Manager
+	shots       *shot.Manager
+	tray        *tray.Tray
+	quitting    bool
+	proxySvc    *proxysvc.Service
+	customNodes *proxysvc.NodeStore
 
 	mu      sync.Mutex
 	terms   map[string]*sshmgr.Terminal
@@ -142,6 +145,13 @@ func New() (*App, error) {
 	a.subs.SetUpdateHandler(func(res subscription.UpdateResult) {
 		a.emit("subscription:updated", res)
 	})
+	a.proxySvc = proxysvc.New(nil)
+	nodesDir, nerr := paths.Dir("nodes")
+	if nerr == nil {
+		if ns, err := proxysvc.OpenNodes(nodesDir); err == nil {
+			a.customNodes = ns
+		}
+	}
 	a.shots = shot.NewManager(store, nil)
 	a.shots.SetSavedHandler(func(item shot.Item) {
 		a.emit("screenshot:saved", item)
@@ -217,6 +227,9 @@ func (a *App) Shutdown(ctx context.Context) {
 		a.shots.StopClipboardWatch()
 	}
 	a.stopTray()
+	if a.proxySvc != nil {
+		_ = a.proxySvc.Stop()
+	}
 }
 
 // quit asks Wails to close the application.

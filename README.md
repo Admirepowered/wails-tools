@@ -48,7 +48,8 @@
 | FTP 管理 | FTP / 隐式 FTPS / 显式 FTPS（AUTH TLS）、被动模式、目录浏览、上传/下载、新建/重命名/删除、多会话 |
 | 下载工具 | HTTP(S)、多连接分段下载、断点续传、自动重试、限速、进度/速度事件、任务队列与并发控制、按任务选择走代理或直连、文件名识别（Content-Disposition） |
 | 网盘管理 | 夸克网盘、UC 网盘、百度网盘：Cookie 账号、文件列表/搜索、上传、下载（解析直链后交给下载引擎）、分享、回收站、视频预览 || 代理 | HTTP CONNECT 与 SOCKS5、账号密码、按作用域（HTTP 下载 / 网盘 / SSH / FTP / 同步）分别设置走或不走代理、绕过列表（后缀与 CIDR）、连通性测试、一键全部直连 |
-| 代理订阅 | 订阅链接自动拉取节点（明文/Base64/Clash YAML/JSON），定时后台刷新，流量与到期信息，节点一键应用到指定连接类型 |
+| 代理订阅 | 订阅链接自动拉取节点（明文/Base64/Clash YAML），定时后台刷新，流量与到期信息；支持 VMess / VLESS / Trojan / Shadowsocks / HTTP / SOCKS5，选中节点一键启用 |
+| 代理引擎 | 由 C 版 miproxy/Pulse 内核重写为 Go：VMess（AEAD/legacy 头 + WS/TLS）、VLESS、Trojan、Shadowsocks(AEAD)、本地 SOCKS5+HTTP 混合入站、内部/外部共享与可选认证 |
 | 截图自动保存 | 一键截屏（主屏/全部屏幕）自动落盘、剪贴板图片自动保存、命名模板与格式可选、缩略图画廊 |
 | 自动更新 | 服务端分发客户端构建（管理员上传、按平台/通道查询、SHA-256 校验），失败回退 GitHub Release；**绕过 SNI 检测**（固定 IP + Host 复用 + TLS ClientHello 分片） |
 | 系统托盘 | 原生 Win32 托盘图标（无第三方依赖）：双击显示窗口、右键菜单（截图/同步/连接服务器/剪贴板/自启动/退出）、悬停显示连接状态、关闭窗口最小化到托盘 |
@@ -73,6 +74,8 @@
 │  internal/netdisk      网盘提供方（夸克/UC/百度）                                              │
 │  internal/proxyx       代理解析（HTTP CONNECT / SOCKS5 / 绕过）                                 │
 │  internal/serverlink   服务端客户端（RPC、笔记、文件流、中转、构建上传）                        │
+│  internal/miproxy      代理内核（VMess/VLESS/Trojan/SS + SOCKS5/HTTP 入站，C 版重写）           │
+│  internal/proxysvc     代理引擎生命周期、自定义节点存储                                        │
 │  internal/subscription 代理订阅（抓取/解析/定时刷新）                                          │
 │  internal/shot         截图与剪贴板自动保存（GDI / CF_DIB）                                    │
 │  internal/updater      自动更新（服务端 / GitHub + SHA-256）                                   │
@@ -218,5 +221,6 @@ server/cmd/wt-server     服务端可执行
 server/internal/{api,store,auth,server}
 frontend/                React + TypeScript 界面
 ```
+
 
 

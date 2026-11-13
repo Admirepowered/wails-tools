@@ -462,7 +462,7 @@ export interface SubscriptionSource {
   intervalHours: number
   lastFetch?: string
   lastError?: string
-  nodes: SubscriptionNode[]
+  nodes: MiproxyNode[]
   info: SubscriptionInfo
   createdAt?: string
   updatedAt?: string
@@ -537,6 +537,59 @@ export interface AutostartStatus {
   location?: string
   supported: boolean
   error?: string
+}
+
+/* ---------------- proxy engine nodes ---------------- */
+
+export interface MiproxyNode {
+  id?: string
+  name: string
+  protocol: string
+  server: string
+  port: number
+  uuid?: string
+  alterId?: number
+  security?: string
+  flow?: string
+  network?: string
+  path?: string
+  host?: string
+  tls?: boolean
+  sni?: string
+  skipVerify?: boolean
+  password?: string
+  method?: string
+  username?: string
+  sourceId?: string
+  index?: number
+  raw?: string
+}
+
+export interface ProxyRuntimeStats {
+  accepted: number
+  active: number
+  failed: number
+  bytesIn: number
+  bytesOut: number
+  startedAt: string
+}
+
+export interface ProxyRuntimeStatus {
+  running: boolean
+  node?: MiproxyNode
+  addr?: string
+  external: boolean
+  auth: boolean
+  stats?: ProxyRuntimeStats
+  since?: string
+  error?: string
+}
+
+export interface ProxyRuntimeSettings {
+  external: boolean
+  port: number
+  username?: string
+  password?: string
 }
 /* ---------------- events ---------------- */
 
@@ -761,6 +814,28 @@ const rawApi = {
       req,
     ),
 
+  // proxy engine
+  SubscriptionNodes: (sourceId: string) => call<MiproxyNode[]>('SubscriptionNodes', sourceId),
+  ActivateProxyNode: (
+    node: MiproxyNode,
+    scopes: string[],
+    all: boolean,
+    external: boolean,
+    username: string,
+    password: string,
+  ) => call<Record<string, unknown>>('ActivateProxyNode', node, scopes, all, external, username, password),
+  DeactivateProxy: () => call<Settings>('DeactivateProxy'),
+  ProxyRuntimeStatus: () => call<ProxyRuntimeStatus>('ProxyRuntimeStatus'),
+  TestProxyNode: (node: MiproxyNode) =>
+    call<{ ok: boolean; latencyMs?: number; error?: string }>('TestProxyNode', node),
+  ListCustomNodes: () => call<MiproxyNode[]>('ListCustomNodes'),
+  SaveCustomNode: (node: MiproxyNode) => call<MiproxyNode>('SaveCustomNode', node),
+  DeleteCustomNode: (id: string) => call<void>('DeleteCustomNode', id),
+  ImportNodeLinks: (text: string) => call<MiproxyNode[]>('ImportNodeLinks', text),
+  ParseNodeLinks: (text: string) => call<MiproxyNode[]>('ParseNodeLinks', text),
+  GetProxyRuntimeSettings: () => call<ProxyRuntimeSettings>('GetProxyRuntimeSettings'),
+  SaveProxyRuntimeSettings: (next: ProxyRuntimeSettings) =>
+    call<ProxyRuntimeSettings>('SaveProxyRuntimeSettings', next),
   // subscriptions
   ListSubscriptions: () => call<SubscriptionSource[]>('ListSubscriptions'),
   SaveSubscription: (src: Partial<SubscriptionSource>) => call<SubscriptionSource>('SaveSubscription', src),
@@ -832,6 +907,8 @@ const ARRAY_METHODS = [
   'NetdiskProviders',
   'ListServerFiles',
   'ListSubscriptions',
+  'SubscriptionNodes',
+  'ListCustomNodes',
   'ListScreenshots',
   'ListServerReleases',
 ] as const
@@ -871,6 +948,8 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
 
 
 
