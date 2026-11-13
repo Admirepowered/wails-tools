@@ -156,6 +156,33 @@ func (a *App) Startup(ctx context.Context) {
 	if a.subs != nil {
 		a.subs.StartAutoRefresh(context.Background())
 	}
+	if cfg := a.settings.Get(); cfg.Update.AutoCheck {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			res, err := a.updater.Check(ctx)
+			if err != nil {
+				a.emit("update:check", map[string]any{"error": err.Error()})
+				return
+			}
+			if !res.Available || res.Release == nil {
+				return
+			}
+			a.emit("update:available", map[string]any{
+				"latest": res.Latest, "source": res.Source, "transport": updater.DescribeTransport(res.GitHub),
+			})
+			if a.settings.Get().Update.AutoInstall {
+				path, derr := a.updater.Download(ctx, *res.Release, nil)
+				if derr != nil {
+					a.emit("update:check", map[string]any{"error": derr.Error()})
+					return
+				}
+				if _, aerr := a.ApplyUpdate(path); aerr != nil {
+					a.emit("update:check", map[string]any{"error": aerr.Error()})
+				}
+			}
+		}()
+	}
 	if a.settings.Get().Server.AutoConnect {
 		go func() {
 			c, cancel := context.WithTimeout(context.Background(), 8*time.Second)
