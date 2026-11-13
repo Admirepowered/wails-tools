@@ -1,0 +1,21 @@
+# build artifacts
+build/
+frontend/dist/
+frontend/wailsjs/
+frontend/node_modules/
+
+# local data / test scratch
+.wt-server-data/
+.uicheck/
+.finalcheck/
+.finalcheck-srv/
+.smoketest/
+.smoketest-server/
+tmpdebug/
+*.log
+
+# editors
+.vs/
+.vscode/
+.idea/
+*.user

@@ -1,0 +1,20 @@
+[Unit]
+Description=WailsTools sync server (notes, files, relay, client updates)
+Documentation=https://github.com/Admirepowered/wails-tools
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wt-server -data /var/lib/wt-server -tcp 0.0.0.0:8642 -udp 0.0.0.0:8642 -allow-register=true -relay=true -quota-gb 10
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+# The service needs to write its data directory only.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/var/lib/wt-server
+
+[Install]
+WantedBy=multi-user.target
