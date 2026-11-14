@@ -31,6 +31,7 @@ type Config struct {
 	RelayBlockedCIDRs []string
 	DefaultQuotaBytes int64
 	TokenTTL          time.Duration
+	LocalAdmin        bool
 	Logger            *log.Logger
 }
 
@@ -83,6 +84,7 @@ func New(cfg Config) (*Server, error) {
 		TokenTTL:          cfg.TokenTTL,
 		RelayEnabled:      cfg.RelayEnabled,
 		RelayBlockedCIDRs: cfg.RelayBlockedCIDRs,
+		LocalAdmin:        cfg.LocalAdmin,
 		Logf:              cfg.Logger.Printf,
 	})
 	return &Server{cfg: cfg, store: db, api: a, logger: cfg.Logger}, nil
@@ -172,7 +174,9 @@ func (s *Server) serveSession(sess netx.Session) {
 		go func(conn net.Conn) {
 			defer wg.Done()
 			defer conn.Close()
-			err := wire.Serve(conn, s.api.Authenticate, s.api)
+			err := wire.Serve(conn, func(h wire.Hello) (string, error) {
+				return s.api.AuthenticateRemote(h, conn.RemoteAddr().String())
+			}, s.api)
 			if err != nil && !errors.Is(err, os.ErrClosed) && s.verbose(err) {
 				s.logger.Printf("stream closed transport=%s: %v", sess.Transport(), err)
 			}

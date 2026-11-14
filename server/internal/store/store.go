@@ -165,6 +165,9 @@ func getJSON(b *bolt.Bucket, key string, v any) error {
 // ErrExists is returned when a uniqueness constraint is violated.
 var ErrExists = errors.New("already exists")
 
+// ErrMissingUser reports an unknown user id.
+var ErrMissingUser = errors.New("user not found")
+
 // CreateUser inserts a new user with a unique username.
 func (d *DB) CreateUser(u User) (User, error) {
 	err := d.db.Update(func(tx *bolt.Tx) error {
@@ -210,6 +213,20 @@ func (d *DB) GetUserByName(name string) (User, error) {
 func (d *DB) UpdateUser(u User) error {
 	return d.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketUsers), u.ID, u)
+	})
+}
+
+// DeleteUser removes a user record.
+func (d *DB) DeleteUser(id string) error {
+	return d.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketUsers)
+		if b == nil {
+			return bolt.ErrBucketNotFound
+		}
+		if b.Get([]byte(id)) == nil {
+			return ErrMissingUser
+		}
+		return b.Delete([]byte(id))
 	})
 }
 

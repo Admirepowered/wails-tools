@@ -32,7 +32,10 @@ type Options struct {
 	RelayEnabled      bool
 	// RelayBlockedCIDRs reserves future restriction of relay targets.
 	RelayBlockedCIDRs []string
-	Logf              func(format string, args ...any)
+	// LocalAdmin lets loopback connections act as the first admin without a
+	// token (reserved local maintenance access).
+	LocalAdmin bool
+	Logf       func(format string, args ...any)
 }
 
 // API is the wire.Handler implementation.
@@ -86,6 +89,39 @@ func (a *API) Authenticate(h wire.Hello) (string, error) {
 		return "", wire.Errorf("forbidden", "account disabled")
 	}
 	return u.ID, nil
+}
+
+// AuthenticateRemote authenticates a session, granting unrestricted local
+// access for loopback connections when LocalAdmin is enabled.
+func (a *API) AuthenticateRemote(h wire.Hello, remote string) (string, error) {
+	if a.Opts.LocalAdmin && strings.TrimSpace(h.Token) == "" && isLoopback(remote) {
+		if id := a.firstAdminID(); id != "" {
+			return id, nil
+		}
+	}
+	return a.Authenticate(h)
+}
+
+func (a *API) firstAdminID() string {
+	users, err := a.DB.ListUsers()
+	if err != nil {
+		return ""
+	}
+	for _, u := range users {
+		if u.Role == "admin" {
+			return u.ID
+		}
+	}
+	return ""
+}
+
+func isLoopback(remote string) bool {
+	host := remote
+	if h, _, err := net.SplitHostPort(remote); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 // TrackConnection records a live stream for the online counter.

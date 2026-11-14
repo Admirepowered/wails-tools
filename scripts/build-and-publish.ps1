@@ -22,8 +22,9 @@ try {
     $m0 = Select-String -Path $versionFile0 -Pattern 'Version\s*=\s*"(\d+)\.(\d+)\.(\d+)"'
     if ($m0) {
       $major = [int]$m0.Matches[0].Groups[1].Value
-      $minor = [int]$m0.Matches[0].Groups[2].Value + 1
-      $Version = "$major.$minor.0"
+      $minor = [int]$m0.Matches[0].Groups[2].Value
+      $patch = [int]$m0.Matches[0].Groups[3].Value + 1
+      $Version = "$major.$minor.$patch"
       $raw = Get-Content $versionFile0 -Raw
       $raw = $raw -replace 'const Version = "[\d\.]+"', "const Version = `"$Version`""
       Set-Content -Path $versionFile0 -Value $raw -Encoding utf8
@@ -83,4 +84,5 @@ try {
 } finally {
   Pop-Location
 }
+
 

@@ -1,6 +1,6 @@
 # WailsTools
 
-> 当前版本：**v1.3.0**（每次发布构建自动 +0.1）
+> 当前版本：**v1.3.1**（每次发布构建补丁号 +1）
 
 一套 Go + Wails v2 的桌面客户端，以及配套的 Go 同步服务端。覆盖：云同步笔记、文件管理、SSH（含跳板与服务器中转）、FTP/FTPS、HTTP 下载工具、网盘管理（夸克 / UC / 百度）、按连接类型独立配置的代理。
 
@@ -220,6 +220,9 @@ $env:WT_PASS = 'password'
 
 ## 部署与发布
 
+服务端默认开启 `-local-admin`：来自回环地址（127.0.0.1 / ::1）且未携带令牌的连接会被视为管理员，便于通过 SSH 在服务器本机做维护；远程连接仍然需要账号密码。
+
+
 - 服务端已部署在 `s2.admirecn.de:8642`（systemd `wt-server.service`，UDP/QUIC 优先 + TCP 回退），详见 [docs/deploy.md](docs/deploy.md)。
 - 管理员在客户端「更新」页上传当前构建后，其他客户端即可从服务器自动更新；服务器不可用时回退 GitHub Release。
 - 源码仓库：<https://github.com/Admirepowered/wails-tools>
@@ -237,6 +240,9 @@ server/cmd/wt-server     服务端可执行
 server/internal/{api,store,auth,server}
 frontend/                React + TypeScript 界面
 ```
+
+
+
 
 
 
