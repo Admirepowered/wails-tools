@@ -136,6 +136,12 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.filesRename(body)
 	case "files.usage":
 		return ctx.filesUsage()
+	case "subs.get":
+		return ctx.subsGet()
+	case "subs.put":
+		return ctx.subsPut(body)
+	case "files.extract":
+		return ctx.filesExtract(body)
 	case "relay.check":
 		return map[string]any{"enabled": a.Opts.RelayEnabled}, nil
 	// ---- client update distribution (public reads, admin writes) ----------
@@ -728,7 +734,8 @@ func (c *callCtx) filesUsage() (any, error) {
 }
 
 type filePathReq struct {
-	Path string `json:"path"`
+	Path   string `json:"path"`
+	Offset int64  `json:"offset"`
 }
 
 // fileGetHeader precedes the raw bytes of a download.
@@ -765,10 +772,24 @@ func (c *callCtx) filesGet(body json.RawMessage, conn net.Conn) error {
 		_ = wire.WriteFrame(conn, fileGetHeader{Error: "not_found"})
 		return wire.Errorf("not_found", "not a file")
 	}
-	if err := wire.WriteFrame(conn, fileGetHeader{OK: true, Size: info.Size()}); err != nil {
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > info.Size() {
+		offset = info.Size()
+	}
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			_ = wire.WriteFrame(conn, fileGetHeader{Error: "internal"})
+			return err
+		}
+	}
+	remaining := info.Size() - offset
+	if err := wire.WriteFrame(conn, fileGetHeader{OK: true, Size: remaining}); err != nil {
 		return err
 	}
-	_, err = io.CopyN(conn, f, info.Size())
+	_, err = io.CopyN(conn, f, remaining)
 	return err
 }
 
@@ -776,6 +797,7 @@ type filePutReq struct {
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
 	Truncate bool   `json:"truncate"`
+	Offset   int64  `json:"offset"`
 }
 
 // filePutAck is written after the raw upload body has been consumed.
@@ -833,6 +855,12 @@ func (c *callCtx) filesPut(body json.RawMessage, conn net.Conn) error {
 		return wire.Errorf("internal", "%v", err)
 	}
 	defer f.Close()
+	if req.Offset > 0 {
+		if _, err := f.Seek(req.Offset, io.SeekStart); err != nil {
+			ack(filePutAck{Error: "internal", Detail: err.Error()})
+			return wire.Errorf("internal", "%v", err)
+		}
+	}
 	written, err := io.CopyN(f, conn, req.Size)
 	if err != nil && err != io.EOF {
 		ack(filePutAck{Error: "internal", Detail: "write failed: " + err.Error(), Size: written})

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, onEvent, type LocalListing, type RemoteEntry } from '../lib/api'
+import { api, onEvent, type LocalListing, type RemoteEntry, type TransferTask } from '../lib/api'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Stat, Tabs, Tag, useToast } from '../components/ui'
 import { basename, formatBytes, formatSpeed, formatTime, percent } from '../lib/format'
 import type { PageProps } from '../App'
@@ -76,6 +76,8 @@ export default function FilesPage({ serverStatus }: PageProps) {
   const [removing, setRemoving] = useState<RemoteEntry | null>(null)
 
   /* ---- 传输记录 ---- */
+  const [managed, setManaged] = useState<TransferTask[]>([])
+  const [managedBusy, setManagedBusy] = useState(false)
   const [transfers, setTransfers] = useState<TransferItem[]>([])
 
   const loadLocal = useCallback(
@@ -85,6 +87,7 @@ export default function FilesPage({ serverStatus }: PageProps) {
         const listing = await api.ListLocal(dir ?? '')
         setLocal(listing)
         setSelected([])
+        void api.SaveLastLocalDir(listing.path).catch(() => {})
       } catch (err) {
         toast.error(err)
       } finally {
@@ -121,8 +124,17 @@ export default function FilesPage({ serverStatus }: PageProps) {
   )
 
   useEffect(() => {
-    void loadLocal()
-  }, [loadLocal])
+    void (async () => {
+      let dir = ''
+      try {
+        dir = await api.LastLocalDir()
+      } catch {
+        dir = ''
+      }
+      await loadLocal(dir)
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (tab !== 'cloud' || !connected) return
@@ -131,6 +143,45 @@ export default function FilesPage({ serverStatus }: PageProps) {
     // 仅在切到云端页 / 连接状态变化时拉取，路径变化由各操作自行刷新
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, connected, loadCloud, loadUsage])
+
+  /* ---- 可暂停的传输 ---- */
+  const loadManaged = useCallback(async () => {
+    try {
+      setManaged(await api.ListTransfers())
+    } catch {
+      setManaged([])
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadManaged()
+  }, [loadManaged])
+
+  useEffect(() => {
+    const off = onEvent<TransferTask>('transfer:task', (item) => {
+      if (!item?.id) return
+      setManaged((prev) => {
+        const idx = prev.findIndex((t) => t.id === item.id)
+        if (idx === -1) return [item, ...prev]
+        const next = [...prev]
+        next[idx] = item
+        return next
+      })
+    })
+    return () => off()
+  }, [])
+
+  const managedAction = async (fn: () => Promise<void>) => {
+    setManagedBusy(true)
+    try {
+      await fn()
+      await loadManaged()
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setManagedBusy(false)
+    }
+  }
 
   /* ---- 传输事件 ---- */
   useEffect(() => {
@@ -481,6 +532,26 @@ export default function FilesPage({ serverStatus }: PageProps) {
                 </button>
                 <button
                   className="btn btn-sm"
+                  disabled={!isArchive(cloudEntry?.name ?? '')}
+                  title="在线解压 zip / tar / tar.gz"
+                  onClick={async () => {
+                    if (!cloudEntry) return
+                    setCloudBusy(true)
+                    try {
+                      const res = await api.ExtractCloudFile(cloudEntry.path)
+                      toast.push(`已解压 ${res.entries ?? 0} 个文件到 ${res.dir ?? ''}`)
+                      await loadCloud(cloudPath)
+                    } catch (err) {
+                      toast.error(err)
+                    } finally {
+                      setCloudBusy(false)
+                    }
+                  }}
+                >
+                  在线解压
+                </button>
+                <button
+                  className="btn btn-sm"
                   disabled={!cloudEntry}
                   onClick={() => {
                     if (!cloudEntry) return
@@ -530,7 +601,98 @@ export default function FilesPage({ serverStatus }: PageProps) {
       {tab === 'transfers' && (
         <div className="card">
           <div className="row">
-            <h3 className="card-title">传输记录</h3>
+            <h3 className="card-title">可暂停的传输</h3>
+            <div className="spacer" />
+            <button className="btn btn-sm" disabled={managedBusy} onClick={() => loadManaged()}>
+              刷新
+            </button>
+          </div>
+          <p className="card-desc">SFTP / FTP / 云端传输支持暂停与断点续传；暂停后点「继续」从上次位置接着传。</p>
+          {managed.length === 0 ? (
+            <Empty icon="⇅" title="暂无传输任务" hint="上传或下载文件后会出现，可暂停、继续或取消" />
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>文件</th>
+                  <th>进度</th>
+                  <th>状态</th>
+                  <th className="right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {managed.map((t) => {
+                  const pct = t.total > 0 ? Math.min(100, (t.done / t.total) * 100) : 0
+                  return (
+                    <tr key={t.id}>
+                      <td className="small">{t.kind}</td>
+                      <td className="truncate" title={t.path}>
+                        {t.label}
+                      </td>
+                      <td style={{ minWidth: 160 }}>
+                        <Progress percent={pct} indeterminate={t.status === 'running' && t.total <= 0} />
+                        <div className="small faint">
+                          {formatBytes(t.done)}
+                          {t.total > 0 ? ` / ${formatBytes(t.total)}` : ''}
+                        </div>
+                      </td>
+                      <td>
+                        {t.status === 'running' ? (
+                          <Tag kind="ok">传输中</Tag>
+                        ) : t.status === 'paused' ? (
+                          <Tag kind="warn">已暂停</Tag>
+                        ) : t.status === 'done' ? (
+                          <Tag kind="ok">已完成</Tag>
+                        ) : t.status === 'canceled' ? (
+                          <Tag kind="bad">已取消</Tag>
+                        ) : (
+                          <Tag kind="bad" >失败</Tag>
+                        )}
+                        {t.error ? <div className="small" style={{ color: 'var(--danger)' }}>{t.error}</div> : null}
+                      </td>
+                      <td className="right">
+                        <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
+                          {t.status === 'running' ? (
+                            <button className="btn btn-sm" disabled={managedBusy} onClick={() => managedAction(() => api.PauseTransfer(t.id))}>
+                              暂停
+                            </button>
+                          ) : null}
+                          {t.status === 'paused' ? (
+                            <button className="btn btn-sm" disabled={managedBusy} onClick={() => managedAction(() => api.ResumeTransfer(t.id))}>
+                              继续
+                            </button>
+                          ) : null}
+                          {t.status === 'running' || t.status === 'paused' ? (
+                            <button className="btn btn-danger btn-sm" disabled={managedBusy} onClick={() => managedAction(() => api.CancelTransfer(t.id))}>
+                              取消
+                            </button>
+                          ) : null}
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() =>
+                              managedAction(async () => {
+                                await api.RemoveTransfer(t.id)
+                              })
+                            }
+                          >
+                            移除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {tab === 'transfers' && (
+        <div className="card">
+          <div className="row">
+            <h3 className="card-title">实时进度</h3>
             <div className="spacer" />
             {transfers.length > 0 ? (
               <button className="btn btn-sm btn-ghost" onClick={() => setTransfers((prev) => prev.filter((t) => !t.finished))}>
@@ -738,4 +900,10 @@ function transferLabel(kind: string): string {
     default:
       return kind || '传输'
   }
+}
+
+
+function isArchive(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.endsWith('.zip') || lower.endsWith('.tar') || lower.endsWith('.tar.gz') || lower.endsWith('.tgz')
 }

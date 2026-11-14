@@ -226,6 +226,24 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             </p>
           </div>
           <div className="spacer" />
+          <button
+            className="btn"
+            disabled={busy !== ''}
+            onClick={async () => {
+              setBusy('sync')
+              try {
+                const res = await api.SyncSubscriptions()
+                await load()
+                toast.push(res.message || '订阅已同步')
+              } catch (err) {
+                toast.error(err)
+              } finally {
+                setBusy('')
+              }
+            }}
+          >
+            同步订阅
+          </button>
           <button className="btn" onClick={refreshAll} disabled={busy !== '' || list.length === 0}>
             全部刷新
           </button>
@@ -760,6 +778,7 @@ function NodeEditor({
     </Modal>
   )
 }
+
 
 
 

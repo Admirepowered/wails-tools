@@ -419,3 +419,99 @@ func (c *Client) Exists(p string) bool {
 	}
 	return false
 }
+
+// DownloadFrom resumes a remote file download at offset.
+func (c *Client) DownloadFrom(ctx context.Context, remotePath, localPath string, offset int64, onProgress func(Progress)) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var total int64
+	if size, err := c.conn.FileSize(remotePath); err == nil {
+		total = size
+	}
+	resp, err := c.conn.RetrFrom(remotePath, uint64(offset))
+	if err != nil {
+		return offset, err
+	}
+	defer resp.Close()
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return offset, err
+	}
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset > 0 {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	lf, err := os.OpenFile(localPath, flags, 0o644)
+	if err != nil {
+		return offset, err
+	}
+	defer lf.Close()
+
+	done := offset
+	start := time.Now()
+	last := start
+	buf := make([]byte, 512*1024)
+	for {
+		select {
+		case <-ctx.Done():
+			return done, ctx.Err()
+		default:
+		}
+		n, rerr := resp.Read(buf)
+		if n > 0 {
+			if _, werr := lf.Write(buf[:n]); werr != nil {
+				return done, werr
+			}
+			done += int64(n)
+			now := time.Now()
+			if onProgress != nil && now.Sub(last) > 150*time.Millisecond {
+				last = now
+				onProgress(mkProgress(remotePath, done, total, start))
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return done, rerr
+		}
+	}
+	if onProgress != nil {
+		onProgress(mkProgress(remotePath, done, total, start))
+	}
+	return done, lf.Sync()
+}
+
+// UploadFrom resumes a remote file upload at offset.
+func (c *Client) UploadFrom(ctx context.Context, localPath, remotePath string, offset int64, onProgress func(Progress)) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	lf, err := os.Open(localPath)
+	if err != nil {
+		return offset, err
+	}
+	defer lf.Close()
+	st, err := lf.Stat()
+	if err != nil {
+		return offset, err
+	}
+	if offset > 0 {
+		if _, err := lf.Seek(offset, io.SeekStart); err != nil {
+			return offset, err
+		}
+	}
+	if dir := path.Dir(remotePath); dir != "" && dir != "." && dir != "/" {
+		_ = c.conn.MakeDir(dir)
+	}
+	rp := &readerProgress{r: lf, done: offset, total: st.Size(), start: time.Now(), last: time.Now(), path: remotePath, progress: onProgress}
+	if err := c.conn.StorFrom(remotePath, rp, uint64(offset)); err != nil {
+		return rp.done, err
+	}
+	if onProgress != nil {
+		onProgress(mkProgress(remotePath, rp.done, rp.total, rp.start))
+	}
+	return rp.done, nil
+}

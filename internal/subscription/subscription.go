@@ -181,6 +181,21 @@ func (s *Store) Delete(id string) error {
 	return s.persist()
 }
 
+// Replace swaps the whole subscription list (used by server sync).
+func (s *Store) Replace(items []Source) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items = items
+	return s.persist()
+}
+
+// Snapshot returns the raw list (used for syncing).
+func (s *Store) Snapshot() []Source {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Source(nil), s.items...)
+}
+
 // UpdateResult describes a refresh.
 type UpdateResult struct {
 	Source    Source `json:"source"`
@@ -220,6 +235,12 @@ func (m *Manager) Save(src Source) (Source, error) { return m.store.Save(src) }
 
 // Delete removes a subscription.
 func (m *Manager) Delete(id string) error { return m.store.Delete(id) }
+
+// Snapshot returns the raw subscription list.
+func (m *Manager) Snapshot() []Source { return m.store.Snapshot() }
+
+// Replace swaps the whole list (server sync).
+func (m *Manager) Replace(items []Source) error { return m.store.Replace(items) }
 
 // SetUpdateHandler registers a refresh callback (used for UI events).
 func (m *Manager) SetUpdateHandler(fn func(UpdateResult)) {

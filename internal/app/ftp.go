@@ -219,42 +219,32 @@ func (a *App) FTPRename(sessionID, from, to string) error {
 	return c.Rename(from, to)
 }
 
-// FTPDownload downloads a remote file with progress events.
+// FTPDownload starts a resumable FTP download (pause via PauseTransfer).
 func (a *App) FTPDownload(sessionID, remotePath, localPath string) (map[string]any, error) {
-	c, ok := a.ftp.get(sessionID)
-	if !ok {
+	if _, ok := a.ftp.get(sessionID); !ok {
 		return nil, errors.New("ftp session not found")
 	}
 	if localPath == "" {
-		localPath = filepath.Join(a.downloadDir(), path.Base(remotePath))
+		localPath = uniqueLocalPath(a.downloadDir(), path.Base(remotePath))
 	}
-	key := fmt.Sprintf("%s:%s", sessionID, remotePath)
-	n, err := c.Download(context.Background(), remotePath, localPath, func(p ftpx.Progress) {
-		a.emit("transfer:progress", map[string]any{"key": key, "kind": "ftp-download", "progress": p})
-	})
+	id, err := a.startFTPDownload(sessionID, remotePath, localPath)
 	if err != nil {
 		return nil, err
 	}
-	a.emit("transfer:done", map[string]any{"key": key, "kind": "ftp-download", "path": localPath, "bytes": n})
-	return map[string]any{"bytes": n, "path": localPath}, nil
+	return map[string]any{"transferId": id, "path": localPath}, nil
 }
 
-// FTPUpload uploads a local file to the FTP server.
+// FTPUpload starts a resumable FTP upload.
 func (a *App) FTPUpload(sessionID, localPath, remotePath string) (map[string]any, error) {
-	c, ok := a.ftp.get(sessionID)
-	if !ok {
+	if _, ok := a.ftp.get(sessionID); !ok {
 		return nil, errors.New("ftp session not found")
 	}
 	if remotePath == "" {
 		remotePath = path.Base(filepath.ToSlash(localPath))
 	}
-	key := fmt.Sprintf("%s:%s", sessionID, remotePath)
-	n, err := c.Upload(context.Background(), localPath, remotePath, func(p ftpx.Progress) {
-		a.emit("transfer:progress", map[string]any{"key": key, "kind": "ftp-upload", "progress": p})
-	})
+	id, err := a.startFTPUpload(sessionID, localPath, remotePath)
 	if err != nil {
 		return nil, err
 	}
-	a.emit("transfer:done", map[string]any{"key": key, "kind": "ftp-upload", "path": remotePath, "bytes": n})
-	return map[string]any{"bytes": n, "path": remotePath}, nil
+	return map[string]any{"transferId": id, "path": remotePath}, nil
 }

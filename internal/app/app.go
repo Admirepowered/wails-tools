@@ -27,6 +27,7 @@ import (
 	"wailstools/internal/shot"
 	"wailstools/internal/sshmgr"
 	"wailstools/internal/subscription"
+	"wailstools/internal/transfermgr"
 	"wailstools/internal/tray"
 	"wailstools/internal/updater"
 	"wailstools/internal/version"
@@ -51,6 +52,7 @@ type App struct {
 	quitting    bool
 	proxySvc    *proxysvc.Service
 	customNodes *proxysvc.NodeStore
+	transfers   *transfermgr.Manager
 
 	mu      sync.Mutex
 	terms   map[string]*sshmgr.Terminal
@@ -152,6 +154,7 @@ func New() (*App, error) {
 			a.customNodes = ns
 		}
 	}
+	a.initTransfers()
 	a.shots = shot.NewManager(store, nil)
 	a.shots.SetSavedHandler(func(item shot.Item) {
 		a.emit("screenshot:saved", item)
@@ -202,10 +205,29 @@ func (a *App) Startup(ctx context.Context) {
 	}
 	if a.settings.Get().Server.AutoConnect {
 		go func() {
-			c, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			c, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			if _, err := a.link.Connect(c); err != nil {
 				a.emit("server:error", err.Error())
+				return
+			}
+			// Restore the saved session so the account is logged in automatically.
+			if a.link.Token() != "" {
+				if u, err := a.link.Me(c); err == nil {
+					a.emit("server:login", map[string]any{"username": u.Username})
+				} else {
+					a.emit("server:error", "自动登录失败: "+err.Error())
+				}
+			}
+			if a.subs != nil {
+				sctx, scancel := context.WithTimeout(context.Background(), 40*time.Second)
+				defer scancel()
+				if _, err := a.SyncSubscriptions(); err != nil {
+					a.emit("subscription:error", err.Error())
+				} else {
+					a.emit("subscription:synced", map[string]any{"auto": true})
+				}
+				_ = sctx
 			}
 		}()
 	}

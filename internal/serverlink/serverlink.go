@@ -702,6 +702,51 @@ func (c *Client) OpenStream(ctx context.Context, method string, body any) (net.C
 	return wc.Conn(), closeFn, nil
 }
 
+// StatRemote returns the size of a cloud file.
+func (c *Client) StatRemote(ctx context.Context, remotePath string) (int64, error) {
+	var out struct {
+		Size  int64 `json:"size"`
+		IsDir bool  `json:"isDir"`
+	}
+	if err := c.Call(ctx, "files.stat", map[string]any{"path": remotePath}, &out); err != nil {
+		return 0, err
+	}
+	return out.Size, nil
+}
+
+// GetSubscriptions fetches the per-user subscription document.
+func (c *Client) GetSubscriptions(ctx context.Context) (json.RawMessage, int64, bool, error) {
+	var out struct {
+		Found         bool            `json:"found"`
+		Subscriptions json.RawMessage `json:"subscriptions"`
+		UpdatedAt     int64           `json:"updatedAt"`
+	}
+	if err := c.Call(ctx, "subs.get", nil, &out); err != nil {
+		return nil, 0, false, err
+	}
+	return out.Subscriptions, out.UpdatedAt, out.Found, nil
+}
+
+// PutSubscriptions stores the subscription document on the server.
+func (c *Client) PutSubscriptions(ctx context.Context, payload []byte) (int64, error) {
+	var out struct {
+		UpdatedAt int64 `json:"updatedAt"`
+	}
+	if err := c.Call(ctx, "subs.put", map[string]any{"subscriptions": json.RawMessage(payload)}, &out); err != nil {
+		return 0, err
+	}
+	return out.UpdatedAt, nil
+}
+
+// ExtractCloudArchive unpacks a zip/tar archive stored in the cloud space.
+func (c *Client) ExtractCloudArchive(ctx context.Context, p string) (map[string]any, error) {
+	var out map[string]any
+	if err := c.Call(ctx, "files.extract", map[string]any{"path": p}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DialTCP opens a raw TCP stream to target through the server relay.
 func (c *Client) DialTCP(ctx context.Context, target string) (net.Conn, error) {
 	wc, _, err := c.openStream(ctx, "relay")
@@ -749,3 +794,159 @@ func JoinRemotePath(parts ...string) string {
 }
 
 var _ = json.Marshal
+
+// DownloadFrom resumes a cloud download at offset.
+func (c *Client) DownloadFrom(ctx context.Context, remotePath, localPath string, offset int64, onProgress func(done, total int64)) (int64, error) {
+	wc, closeFn, err := c.openStream(ctx, "file")
+	if err != nil {
+		return offset, err
+	}
+	defer closeFn()
+	if err := wc.OpenStream("files.get", map[string]any{"path": remotePath, "offset": offset}); err != nil {
+		return offset, err
+	}
+	conn := wc.Conn()
+	var hdr struct {
+		OK    bool   `json:"ok"`
+		Size  int64  `json:"size"`
+		Error string `json:"error"`
+	}
+	if err := wire.ReadFrame(conn, &hdr); err != nil {
+		return offset, fmt.Errorf("download header: %w", err)
+	}
+	if !hdr.OK {
+		msg := hdr.Error
+		if msg == "" {
+			msg = "not found"
+		}
+		return offset, fmt.Errorf("download failed: %s", msg)
+	}
+	if err := os.MkdirAll(filepathDir(localPath), 0o755); err != nil {
+		return offset, err
+	}
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset > 0 {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	f, err := os.OpenFile(localPath, flags, 0o644)
+	if err != nil {
+		return offset, err
+	}
+	defer f.Close()
+	total := offset + hdr.Size
+	done := offset
+	buf := make([]byte, 256*1024)
+	last := time.Now()
+	for done-offset < hdr.Size {
+		want := int64(len(buf))
+		if rem := hdr.Size - (done - offset); rem < want {
+			want = rem
+		}
+		n, rerr := conn.Read(buf[:want])
+		if n > 0 {
+			if _, werr := f.Write(buf[:n]); werr != nil {
+				return done, werr
+			}
+			done += int64(n)
+			if onProgress != nil && time.Since(last) > 150*time.Millisecond {
+				last = time.Now()
+				onProgress(done, total)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return done, rerr
+		}
+	}
+	if onProgress != nil {
+		onProgress(done, total)
+	}
+	if done-offset != hdr.Size {
+		return done, fmt.Errorf("incomplete download: %d of %d bytes", done-offset, hdr.Size)
+	}
+	return done, f.Sync()
+}
+
+// UploadFrom resumes a cloud upload at offset.
+func (c *Client) UploadFrom(ctx context.Context, localPath, remotePath string, offset int64, onProgress func(done, total int64)) (int64, error) {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return offset, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return offset, err
+	}
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return offset, err
+		}
+	}
+	total := st.Size()
+	remaining := total - offset
+	if remaining < 0 {
+		remaining = 0
+	}
+	wc, closeFn, err := c.openStream(ctx, "file")
+	if err != nil {
+		return offset, err
+	}
+	defer closeFn()
+	if err := wc.OpenStream("files.put", map[string]any{
+		"path": remotePath, "size": remaining, "truncate": offset == 0, "offset": offset,
+	}); err != nil {
+		return offset, err
+	}
+	conn := wc.Conn()
+	buf := make([]byte, 256*1024)
+	done := offset
+	last := time.Now()
+	for done-offset < remaining {
+		select {
+		case <-ctx.Done():
+			return done, ctx.Err()
+		default:
+		}
+		n, rerr := f.Read(buf)
+		if n > 0 {
+			if _, werr := conn.Write(buf[:n]); werr != nil {
+				return done, werr
+			}
+			done += int64(n)
+			if onProgress != nil && time.Since(last) > 150*time.Millisecond {
+				last = time.Now()
+				onProgress(done, total)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return done, rerr
+		}
+	}
+	if onProgress != nil {
+		onProgress(done, total)
+	}
+	var ack struct {
+		OK     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Detail string `json:"detail"`
+	}
+	if err := wire.ReadFrame(conn, &ack); err != nil {
+		return done, fmt.Errorf("upload acknowledgement failed: %w", err)
+	}
+	if !ack.OK {
+		detail := ack.Detail
+		if detail == "" {
+			detail = ack.Error
+		}
+		return done, fmt.Errorf("upload rejected: %s", detail)
+	}
+	return done, nil
+}

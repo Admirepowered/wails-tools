@@ -161,38 +161,28 @@ func (a *App) SFTPWriteFile(sessionID, path, content string) error {
 	return a.ssh.SFTPWriteFile(sessionID, path, content)
 }
 
-// SFTPDownload downloads a remote file, emitting progress events.
+// SFTPDownload starts a resumable remote download (pause via PauseTransfer).
 func (a *App) SFTPDownload(sessionID, remotePath, localPath string) (map[string]any, error) {
 	if localPath == "" {
-		localPath = filepath.Join(a.downloadDir(), filepath.Base(remotePath))
+		localPath = uniqueLocalPath(a.downloadDir(), filepath.Base(remotePath))
 	}
-	ctx := context.Background()
-	key := fmt.Sprintf("%s:%s", sessionID, remotePath)
-	n, err := a.ssh.SFTPDownload(ctx, sessionID, remotePath, localPath, func(p sshmgr.Progress) {
-		a.emit("transfer:progress", map[string]any{"key": key, "kind": "sftp-download", "progress": p})
-	})
+	id, err := a.startSFTPDownload(sessionID, remotePath, localPath)
 	if err != nil {
 		return nil, err
 	}
-	a.emit("transfer:done", map[string]any{"key": key, "kind": "sftp-download", "path": localPath, "bytes": n})
-	return map[string]any{"bytes": n, "path": localPath}, nil
+	return map[string]any{"transferId": id, "path": localPath}, nil
 }
 
-// SFTPUpload uploads a local file to the remote host.
+// SFTPUpload starts a resumable upload to the remote host.
 func (a *App) SFTPUpload(sessionID, localPath, remotePath string) (map[string]any, error) {
 	if remotePath == "" {
 		remotePath = filepath.ToSlash(filepath.Base(localPath))
 	}
-	ctx := context.Background()
-	key := fmt.Sprintf("%s:%s", sessionID, remotePath)
-	n, err := a.ssh.SFTPUpload(ctx, sessionID, localPath, remotePath, func(p sshmgr.Progress) {
-		a.emit("transfer:progress", map[string]any{"key": key, "kind": "sftp-upload", "progress": p})
-	})
+	id, err := a.startSFTPUpload(sessionID, localPath, remotePath)
 	if err != nil {
 		return nil, err
 	}
-	a.emit("transfer:done", map[string]any{"key": key, "kind": "sftp-upload", "path": remotePath, "bytes": n})
-	return map[string]any{"bytes": n, "path": remotePath}, nil
+	return map[string]any{"transferId": id, "path": remotePath}, nil
 }
 
 // ---- interactive terminal ------------------------------------------------

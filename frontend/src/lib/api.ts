@@ -603,6 +603,27 @@ export interface NodeTestResult {
   error?: string
 }
 
+export interface TransferTask {
+  id: string
+  kind: string
+  label: string
+  path: string
+  total: number
+  done: number
+  status: string
+  error?: string
+  startedAt: string
+  updatedAt: string
+}
+
+export interface SubSyncResult {
+  local: number
+  remote: number
+  merged: number
+  pushed: boolean
+  message: string
+}
+
 export interface ActiveProxyInfo {
   mode: string
   running: boolean
@@ -833,6 +854,17 @@ const rawApi = {
       req,
     ),
 
+  // transfers
+  ListTransfers: () => call<TransferTask[]>('ListTransfers'),
+  PauseTransfer: (id: string) => call<void>('PauseTransfer', id),
+  ResumeTransfer: (id: string) => call<void>('ResumeTransfer', id),
+  CancelTransfer: (id: string) => call<void>('CancelTransfer', id),
+  RemoveTransfer: (id: string) => call<void>('RemoveTransfer', id),
+  SyncSubscriptions: () => call<SubSyncResult>('SyncSubscriptions'),
+  ExtractCloudFile: (path: string) => call<Record<string, unknown>>('ExtractCloudFile', path),
+  SaveLastLocalDir: (dir: string) => call<void>('SaveLastLocalDir', dir),
+  LastLocalDir: () => call<string>('LastLocalDir'),
+
   // proxy engine
   SubscriptionNodes: (sourceId: string) => call<MiproxyNode[]>('SubscriptionNodes', sourceId),
   ActivateProxyNode: (node: MiproxyNode) => call<Record<string, unknown>>('ActivateProxyNode', node),
@@ -925,6 +957,7 @@ const ARRAY_METHODS = [
   'NetdiskProviders',
   'ListServerFiles',
   'ListSubscriptions',
+  'ListTransfers',
   'SubscriptionNodes',
   'ListCustomNodes',
   'ListScreenshots',
@@ -966,6 +999,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

@@ -157,29 +157,19 @@ func (a *App) UploadToServer(localPaths []string, remoteDir string) (map[string]
 				if fi.IsDir() {
 					return a.link.MkdirRemote(ctx, remote)
 				}
-				key := "upload:" + p
-				n, err := a.link.Upload(ctx, p, remote, func(done, total int64) {
-					a.emit("transfer:progress", map[string]any{"key": key, "kind": "cloud-upload", "done": done, "total": total})
-				})
-				if err == nil {
-					a.emit("transfer:done", map[string]any{"key": key, "kind": "cloud-upload", "path": remote, "bytes": n})
-				}
+				_, err := a.startCloudUpload(p, remote)
 				return err
 			})
 			results = append(results, map[string]any{"local": lp, "error": errStr(err)})
 			continue
 		}
 		remote := serverlink.JoinRemotePath(remoteDir, filepath.ToSlash(filepath.Base(lp)))
-		key := "upload:" + lp
-		n, err := a.link.Upload(ctx, lp, remote, func(done, total int64) {
-			a.emit("transfer:progress", map[string]any{"key": key, "kind": "cloud-upload", "done": done, "total": total})
-		})
+		id, err := a.startCloudUpload(lp, remote)
 		if err != nil {
 			results = append(results, map[string]any{"local": lp, "error": err.Error()})
 			continue
 		}
-		a.emit("transfer:done", map[string]any{"key": key, "kind": "cloud-upload", "path": remote, "bytes": n})
-		results = append(results, map[string]any{"local": lp, "remote": remote, "bytes": n})
+		results = append(results, map[string]any{"local": lp, "remote": remote, "transferId": id})
 	}
 	return map[string]any{"results": results}, nil
 }
@@ -198,16 +188,11 @@ func (a *App) DownloadFromServer(remotePath, localDir string) (map[string]any, e
 		base := strings.TrimSuffix(filepath.Base(target), ext)
 		target = filepath.Join(localDir, fmt.Sprintf("%s-%s%s", base, strconv.FormatInt(time.Now().Unix(), 10), ext))
 	}
-	ctx := context.Background()
-	key := "cloud:" + remotePath
-	n, err := a.link.Download(ctx, remotePath, target, func(done, total int64) {
-		a.emit("transfer:progress", map[string]any{"key": key, "kind": "cloud-download", "done": done, "total": total})
-	})
+	id, err := a.startCloudDownload(remotePath, target)
 	if err != nil {
 		return nil, err
 	}
-	a.emit("transfer:done", map[string]any{"key": key, "kind": "cloud-download", "path": target, "bytes": n})
-	return map[string]any{"bytes": n, "path": target}, nil
+	return map[string]any{"transferId": id, "path": target}, nil
 }
 
 // RelayStatus reports whether SSH-via-server is available.

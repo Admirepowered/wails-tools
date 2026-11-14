@@ -122,6 +122,8 @@ type UISettings struct {
 	Theme    string `json:"theme"`
 	Language string `json:"language"`
 	Density  string `json:"density"`
+	// LastLocalDir remembers the last local folder visited by the file manager.
+	LastLocalDir string `json:"lastLocalDir,omitempty"`
 }
 
 // UpdateSettings configures the auto-update behaviour.
@@ -186,9 +188,10 @@ func Default() Settings {
 			AutoResume:     true,
 		},
 		Server: ServerSettings{
-			Host:      "s2.admirecn.de",
-			Port:      8642,
-			PreferUDP: true,
+			Host:        "s2.admirecn.de",
+			Port:        8642,
+			PreferUDP:   true,
+			AutoConnect: true,
 		},
 		UI: UISettings{Theme: "dark", Language: "zh-CN", Density: "comfortable"},
 		Update: UpdateSettings{

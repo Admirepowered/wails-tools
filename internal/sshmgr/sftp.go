@@ -373,3 +373,151 @@ func CheckFTPPathMatches(p string) string {
 }
 
 var _ = fmt.Sprintf
+
+// SFTPDownloadFrom resumes a remote download at offset.
+func (m *Manager) SFTPDownloadFrom(ctx context.Context, sessionID, remotePath, localPath string, offset int64, onProgress func(Progress)) (int64, error) {
+	cli, closeFn, err := m.sftpFor(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	defer closeFn()
+
+	fi, err := cli.Stat(remotePath)
+	if err != nil {
+		return offset, err
+	}
+	if fi.IsDir() {
+		return offset, errors.New("remote path is a directory")
+	}
+	rf, err := cli.Open(remotePath)
+	if err != nil {
+		return offset, err
+	}
+	defer rf.Close()
+	if offset > 0 {
+		if _, err := rf.Seek(offset, io.SeekStart); err != nil {
+			return offset, err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return offset, err
+	}
+	flags := os.O_CREATE | os.O_WRONLY
+	if offset > 0 {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	lf, err := os.OpenFile(localPath, flags, 0o644)
+	if err != nil {
+		return offset, err
+	}
+	defer lf.Close()
+
+	total := fi.Size()
+	done := offset
+	start := time.Now()
+	last := start
+	buf := make([]byte, 512*1024)
+	for {
+		select {
+		case <-ctx.Done():
+			return done, ctx.Err()
+		default:
+		}
+		n, rerr := rf.Read(buf)
+		if n > 0 {
+			if _, werr := lf.Write(buf[:n]); werr != nil {
+				return done, werr
+			}
+			done += int64(n)
+			now := time.Now()
+			if onProgress != nil && now.Sub(last) > 120*time.Millisecond {
+				last = now
+				onProgress(buildProgress(remotePath, done, total, start))
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return done, rerr
+		}
+	}
+	if onProgress != nil {
+		onProgress(buildProgress(remotePath, done, total, start))
+	}
+	return done, lf.Sync()
+}
+
+// SFTPUploadFrom resumes a remote upload at offset.
+func (m *Manager) SFTPUploadFrom(ctx context.Context, sessionID, localPath, remotePath string, offset int64, onProgress func(Progress)) (int64, error) {
+	cli, closeFn, err := m.sftpFor(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	defer closeFn()
+
+	lf, err := os.Open(localPath)
+	if err != nil {
+		return offset, err
+	}
+	defer lf.Close()
+	st, err := lf.Stat()
+	if err != nil {
+		return offset, err
+	}
+	if offset > 0 {
+		if _, err := lf.Seek(offset, io.SeekStart); err != nil {
+			return offset, err
+		}
+	}
+	if dir := path.Dir(remotePath); dir != "" && dir != "." {
+		_ = cli.MkdirAll(dir)
+	}
+	rf, err := cli.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE)
+	if err != nil {
+		return offset, err
+	}
+	defer rf.Close()
+	if offset > 0 {
+		if _, err := rf.Seek(offset, io.SeekStart); err != nil {
+			return offset, err
+		}
+	}
+
+	total := st.Size()
+	done := offset
+	start := time.Now()
+	last := start
+	buf := make([]byte, 512*1024)
+	for {
+		select {
+		case <-ctx.Done():
+			return done, ctx.Err()
+		default:
+		}
+		n, rerr := lf.Read(buf)
+		if n > 0 {
+			if _, werr := rf.Write(buf[:n]); werr != nil {
+				return done, werr
+			}
+			done += int64(n)
+			now := time.Now()
+			if onProgress != nil && now.Sub(last) > 120*time.Millisecond {
+				last = now
+				onProgress(buildProgress(remotePath, done, total, start))
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return done, rerr
+		}
+	}
+	if onProgress != nil {
+		onProgress(buildProgress(remotePath, done, total, start))
+	}
+	return done, nil
+}
