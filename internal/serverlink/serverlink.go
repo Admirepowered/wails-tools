@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"wailstools/internal/machineid"
 	"wailstools/internal/netx"
 	"wailstools/internal/settings"
 	"wailstools/internal/wire"
@@ -86,6 +87,11 @@ type Client struct {
 	user    *User
 	pin     string
 	onState func(Status)
+
+	// machineOverride lets CLI tools suppress the machine fingerprint so their
+	// logins never collapse a real device registration.
+	machineOverride string
+	machineSet      bool
 }
 
 // New creates a client.
@@ -303,10 +309,10 @@ func (c *Client) Login(ctx context.Context, username, password string) (Status, 
 		User  User   `json:"user"`
 		Token string `json:"token"`
 	}
-	devID, devName := c.deviceIdentity()
+	devID, devName, machine := c.deviceIdentity()
 	if err := c.Call(ctx, "auth.login", map[string]any{
 		"username": username, "password": password,
-		"deviceId": devID, "deviceName": devName,
+		"deviceId": devID, "deviceName": devName, "machineId": machine,
 	}, &out); err != nil {
 		return c.Status(), err
 	}
@@ -961,10 +967,25 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // deviceIdentity returns a stable per-install id and the host name.
-func (c *Client) deviceIdentity() (string, string) {
+// SetMachineID overrides the machine fingerprint reported on login. Passing an
+// empty string disables it (used by the CLI tools).
+func (c *Client) SetMachineID(id string) {
+	c.mu.Lock()
+	c.machineOverride = id
+	c.machineSet = true
+	c.mu.Unlock()
+}
+
+func (c *Client) deviceIdentity() (string, string, string) {
 	host, _ := os.Hostname()
 	if host == "" {
 		host = "windows"
 	}
-	return c.store.DeviceID(), host
+	c.mu.RLock()
+	machine, overridden := c.machineOverride, c.machineSet
+	c.mu.RUnlock()
+	if !overridden {
+		machine = machineid.ID()
+	}
+	return c.store.DeviceID(), host, machine
 }

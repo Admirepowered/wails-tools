@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"wailstools/internal/machineid"
 	"wailstools/internal/paths"
 )
 
@@ -480,9 +481,15 @@ func (s *Store) DeviceID() string {
 	if id != "" {
 		return id
 	}
-	buf := make([]byte, 16)
-	_, _ = rand.Read(buf)
-	id = hex.EncodeToString(buf)
+	// Prefer the machine fingerprint so reinstalling or clearing settings does
+	// not create a second "device" for the same computer.
+	if machine := machineid.ID(); machine != "" {
+		id = "m-" + machine
+	} else {
+		buf := make([]byte, 16)
+		_, _ = rand.Read(buf)
+		id = hex.EncodeToString(buf)
+	}
 	_, _ = s.Update(func(cfg *Settings) error {
 		cfg.Server.DeviceID = id
 		return nil

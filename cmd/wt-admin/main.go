@@ -65,6 +65,7 @@ func main() {
 	}
 
 	link := serverlink.New(store, nil)
+	link.SetMachineID("")
 	defer link.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

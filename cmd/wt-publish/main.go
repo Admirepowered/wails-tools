@@ -67,6 +67,9 @@ func main() {
 	link := serverlink.New(store, func(format string, args ...any) {
 		fmt.Printf("  · "+format+"\n", args...)
 	})
+	// The uploader is a tool, not a device: never report this machine's
+	// fingerprint, or the user's real device row would be replaced.
+	link.SetMachineID("")
 	defer link.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)

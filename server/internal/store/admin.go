@@ -15,6 +15,7 @@ var bucketMeta = []byte("meta")
 type Device struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
+	Machine  string `json:"machine,omitempty"`
 	LastSeen string `json:"lastSeen"`
 }
 
@@ -97,19 +98,19 @@ func (d *DB) ListDevices(userID string) []Device {
 }
 
 // AddDevice registers a new device for a user.
-func (d *DB) AddDevice(userID, id, name string) error {
+func (d *DB) AddDevice(userID, id, name, machine string) error {
 	if userID == "" || id == "" {
 		return errors.New("invalid device")
 	}
 	return d.db.Update(func(tx *bolt.Tx) error {
 		devices := readDevices(tx, userID)
-		devices = append(devices, Device{ID: id, Name: name, LastSeen: time.Now().UTC().Format(time.RFC3339)})
+		devices = append(devices, Device{ID: id, Name: name, Machine: machine, LastSeen: time.Now().UTC().Format(time.RFC3339)})
 		return putDevices(tx, userID, devices)
 	})
 }
 
 // TouchDevice updates a device's last-seen timestamp.
-func (d *DB) TouchDevice(userID, id, name string) error {
+func (d *DB) TouchDevice(userID, id, name, machine string) error {
 	return d.db.Update(func(tx *bolt.Tx) error {
 		devices := readDevices(tx, userID)
 		for i := range devices {
@@ -118,11 +119,40 @@ func (d *DB) TouchDevice(userID, id, name string) error {
 				if name != "" {
 					devices[i].Name = name
 				}
+				if machine != "" {
+					devices[i].Machine = machine
+				}
 				return putDevices(tx, userID, devices)
 			}
 		}
 		return nil
 	})
+}
+
+// DeleteDevicesByMachine removes every registration for a machine, returning the
+// ids that were dropped (used to collapse duplicate rows created before the
+// machine fingerprint existed).
+func (d *DB) DeleteDevicesByMachine(userID, machine string) ([]string, error) {
+	if machine == "" {
+		return nil, nil
+	}
+	var removed []string
+	err := d.db.Update(func(tx *bolt.Tx) error {
+		devices := readDevices(tx, userID)
+		out := make([]Device, 0, len(devices))
+		for _, dev := range devices {
+			if dev.Machine == machine {
+				removed = append(removed, dev.ID)
+				continue
+			}
+			out = append(out, dev)
+		}
+		if len(removed) == 0 {
+			return nil
+		}
+		return putDevices(tx, userID, out)
+	})
+	return removed, err
 }
 
 // DeleteDevice removes a device registration.

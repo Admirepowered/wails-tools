@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -246,31 +247,51 @@ func (c *callCtx) adminDevicesSelfRemove(body json.RawMessage) (any, error) {
 
 // ---- device registration on login ---------------------------------------
 
-// registerDevice enforces the per-user device cap and updates last-seen.
-func (c *callCtx) registerDevice(userID, deviceID, deviceName string) error {
+// registerDevice enforces the per-user device cap and updates last-seen. It
+// also collapses duplicates that belong to the same physical machine, so
+// reinstalling the client or clearing its settings never eats a second slot.
+func (c *callCtx) registerDevice(userID, deviceID, deviceName, machineID string) error {
 	deviceID = strings.TrimSpace(deviceID)
 	if deviceID == "" {
 		return nil
 	}
+	deviceName = strings.TrimSpace(deviceName)
+	machineID = strings.TrimSpace(machineID)
+
+	// Drop devices that have not logged in for a long time.
 	cutoff := time.Now().UTC().Add(-deviceTTL)
-	devices := c.api.DB.ListDevices(userID)
-	active := make([]store.Device, 0, len(devices))
-	for _, d := range devices {
+	for _, d := range c.api.DB.ListDevices(userID) {
 		if seen, err := time.Parse(time.RFC3339, d.LastSeen); err == nil && seen.Before(cutoff) {
 			_ = c.api.DB.DeleteDevice(userID, d.ID)
-			continue
 		}
-		active = append(active, d)
 	}
-	for _, d := range active {
+
+	for _, d := range c.api.DB.ListDevices(userID) {
 		if d.ID == deviceID {
-			return c.api.DB.TouchDevice(userID, deviceID, deviceName)
+			return c.api.DB.TouchDevice(userID, deviceID, deviceName, machineID)
 		}
 	}
-	if len(active) >= maxDevicesPerUser {
+
+	if machineID != "" {
+		// Same machine, different id: keep only the current registration.
+		if removed, _ := c.api.DB.DeleteDevicesByMachine(userID, machineID); len(removed) > 0 {
+			c.api.DB.Audit(store.AuditEntry{UserID: userID, Action: "device-dedupe",
+				Detail: fmt.Sprintf("machine %s replaced %v", machineID, removed)})
+		}
+		// Legacy rows created before the fingerprint existed: match the hostname.
+		if deviceName != "" {
+			for _, d := range c.api.DB.ListDevices(userID) {
+				if d.Machine == "" && d.Name == deviceName {
+					_ = c.api.DB.DeleteDevice(userID, d.ID)
+				}
+			}
+		}
+	}
+
+	if len(c.api.DB.ListDevices(userID)) >= maxDevicesPerUser {
 		return wire.Errorf("device_limit", "该账号已达 %d 台设备上限，请在管理页移除旧设备", maxDevicesPerUser)
 	}
-	return c.api.DB.AddDevice(userID, deviceID, deviceName)
+	return c.api.DB.AddDevice(userID, deviceID, deviceName, machineID)
 }
 
 var errNoUser = errors.New("no user")

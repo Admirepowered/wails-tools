@@ -337,6 +337,7 @@ func (c *callCtx) register(body json.RawMessage) (any, error) {
 type loginReq struct {
 	DeviceID   string `json:"deviceId"`
 	DeviceName string `json:"deviceName"`
+	MachineID  string `json:"machineId"`
 	Username   string `json:"username"`
 	Password   string `json:"password"`
 	Label      string `json:"label"`
@@ -359,7 +360,7 @@ func (c *callCtx) login(body json.RawMessage) (any, error) {
 	if u.Disabled {
 		return nil, wire.Errorf("forbidden", "account disabled")
 	}
-	if err := c.registerDevice(u.ID, req.DeviceID, req.DeviceName); err != nil {
+	if err := c.registerDevice(u.ID, req.DeviceID, req.DeviceName, req.MachineID); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
