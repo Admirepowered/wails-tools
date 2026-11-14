@@ -892,9 +892,9 @@ const rawApi = {
     ),
 
   // proxy chain, rules, geoip, latency, media, hotkey
-  GetProxyChain: () => call<ProxyChainSettings>('GetProxyChain'),
-  SaveProxyChain: (cfg: ProxyChainSettings) => call<ProxyChainSettings>('SaveProxyChain', cfg),
-  SetProxyChainMode: (mode: string) => call<ProxyChainSettings>('SetProxyChainMode', mode),
+  GetProxyChain: () => call<Record<string, unknown>>('GetProxyChain'),
+  SaveProxyChain: (cfg: ProxyChainSettings) => call<Record<string, unknown>>('SaveProxyChain', cfg),
+  SetProxyChainMode: (mode: string) => call<Record<string, unknown>>('SetProxyChainMode', mode),
   GetDirectRules: () => call<DirectRuleSettings>('GetDirectRules'),
   SaveDirectRules: (cfg: DirectRuleSettings) => call<DirectRuleSettings>('SaveDirectRules', cfg),
   GeoIPStatus: () => call<Record<string, unknown>>('GeoIPStatus'),
@@ -1018,12 +1018,6 @@ const ARRAY_METHODS = [
   'ListServerFiles',
   'ListSubscriptions',
   'ListTransfers',
-  'GetProxyChain',
-  'GetDirectRules',
-  'GeoIPStatus',
-  'GeoIPCountries',
-  'LoadLatencyResults',
-  'HotkeySupported',
   'SubscriptionNodes',
   'ListCustomNodes',
   'ListScreenshots',
@@ -1065,6 +1059,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

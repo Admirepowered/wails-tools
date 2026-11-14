@@ -157,56 +157,60 @@ func (a *App) RestartEngine() (proxysvc.Status, error) {
 // ---- chain / rules settings ---------------------------------------------
 
 // GetProxyChain returns the configured chain.
-func (a *App) GetProxyChain() settings.ProxyChainSettings {
+func (a *App) GetProxyChain() map[string]any {
 	cfg := a.chainCfg
 	if a.log != nil {
 		a.log.Printf("GetProxyChain -> mode=%s nodeIds=%v", cfg.Mode, cfg.NodeIDs)
 	}
-	return cfg
+	ids := cfg.NodeIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	return map[string]any{"mode": cfg.Mode, "nodeIds": ids}
 }
 
 // SaveProxyChain stores the chain and restarts the engine when it is running.
-func (a *App) SaveProxyChain(cfg settings.ProxyChainSettings) (settings.ProxyChainSettings, error) {
+func (a *App) SaveProxyChain(cfg settings.ProxyChainSettings) (map[string]any, error) {
 	if len(cfg.NodeIDs) > 2 {
 		cfg.NodeIDs = cfg.NodeIDs[:2]
 	}
 	a.chainCfg = cfg
 	if err := a.saveChainFile(cfg); err != nil {
-		return settings.ProxyChainSettings{}, err
+		return nil, err
 	}
 	if _, err := a.settings.Update(func(s *settings.Settings) error {
 		s.ProxyChain = cfg
 		return nil
 	}); err != nil {
-		return settings.ProxyChainSettings{}, err
+		return nil, err
 	}
 	if a.log != nil {
 		a.log.Printf("chain saved mode=%s nodeIds=%v", cfg.Mode, cfg.NodeIDs)
 	}
 	_, _ = a.RestartEngine()
-	return cfg, nil
+	return map[string]any{"mode": cfg.Mode, "nodeIds": cfg.NodeIDs}, nil
 }
 
 // SetProxyChainMode switches the chain mode without touching node selection,
 // so a late UI save cannot wipe the saved hops.
-func (a *App) SetProxyChainMode(mode string) (settings.ProxyChainSettings, error) {
+func (a *App) SetProxyChainMode(mode string) (map[string]any, error) {
 	cfg := a.chainCfg
 	cfg.Mode = mode
 	a.chainCfg = cfg
 	if err := a.saveChainFile(cfg); err != nil {
-		return settings.ProxyChainSettings{}, err
+		return nil, err
 	}
 	if _, err := a.settings.Update(func(s *settings.Settings) error {
 		s.ProxyChain = cfg
 		return nil
 	}); err != nil {
-		return settings.ProxyChainSettings{}, err
+		return nil, err
 	}
 	if a.log != nil {
 		a.log.Printf("chain mode -> %s (nodeIds kept %v)", cfg.Mode, cfg.NodeIDs)
 	}
 	_, _ = a.RestartEngine()
-	return cfg, nil
+	return map[string]any{"mode": cfg.Mode, "nodeIds": cfg.NodeIDs}, nil
 }
 
 // GetDirectRules returns the direct-rule configuration.

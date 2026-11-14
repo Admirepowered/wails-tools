@@ -512,8 +512,11 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
     void (async () => {
       // 分开加载：节点列表失败不能把链路配置一起清空。
       try {
-        const chain = await api.GetProxyChain()
-        setCfg({ mode: chain.mode || 'off', nodeIds: chain.nodeIds ?? [] })
+        const chain = (await api.GetProxyChain()) as Record<string, unknown>
+        setCfg({
+          mode: String(chain.mode ?? 'off') || 'off',
+          nodeIds: Array.isArray(chain.nodeIds) ? (chain.nodeIds as string[]) : [],
+        })
       } catch (err) {
         toast.error(err)
       }
@@ -528,8 +531,11 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
   const save = async (next: ProxyChainSettings) => {
     setBusy(true)
     try {
-      const saved = await api.SaveProxyChain(next)
-      setCfg({ mode: saved.mode, nodeIds: saved.nodeIds ?? [] })
+      const saved = (await api.SaveProxyChain(next)) as Record<string, unknown>
+      setCfg({
+        mode: String(saved.mode ?? next.mode),
+        nodeIds: Array.isArray(saved.nodeIds) ? (saved.nodeIds as string[]) : next.nodeIds ?? [],
+      })
       onChanged()
       toast.push('代理链路已更新')
     } catch (err) {
@@ -566,9 +572,12 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
           className="btn btn-sm"
           onClick={async () => {
             try {
-              const chain = await api.GetProxyChain()
+              const chain = (await api.GetProxyChain()) as Record<string, unknown>
               setRaw(JSON.stringify(chain))
-              chainCache = { mode: chain.mode || 'off', nodeIds: chain.nodeIds ?? [] }
+              chainCache = {
+                mode: String(chain.mode ?? 'off') || 'off',
+                nodeIds: Array.isArray(chain.nodeIds) ? (chain.nodeIds as string[]) : [],
+              }
               setCfg(chainCache)
               setLoaded(true)
             } catch (err) {
@@ -590,7 +599,12 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
             void api
               .SetProxyChainMode(mode)
               .then((saved) => {
-            chainCache = { mode: saved.mode, nodeIds: saved.nodeIds ?? cfg.nodeIds ?? [] }
+            chainCache = {
+              mode: String((saved as Record<string, unknown>).mode ?? mode),
+              nodeIds: Array.isArray((saved as Record<string, unknown>).nodeIds)
+                ? ((saved as Record<string, unknown>).nodeIds as string[])
+                : cfg.nodeIds ?? [],
+            }
             setCfg(chainCache)
           })
               .then(onChanged)
@@ -748,6 +762,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
