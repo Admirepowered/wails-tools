@@ -58,6 +58,7 @@ type App struct {
 	geo         *geodata.DB
 	media       *mediaRegistry
 	hotkey      *hotkey.Hotkey
+	log         *fileLogger
 
 	mu      sync.Mutex
 	terms   map[string]*sshmgr.Terminal
@@ -152,7 +153,11 @@ func New() (*App, error) {
 	a.subs.SetUpdateHandler(func(res subscription.UpdateResult) {
 		a.emit("subscription:updated", res)
 	})
-	a.proxySvc = proxysvc.New(nil)
+	a.proxySvc = proxysvc.New(func(format string, args ...any) {
+		if a.log != nil {
+			a.log.Printf(format, args...)
+		}
+	})
 	nodesDir, nerr := paths.Dir("nodes")
 	if nerr == nil {
 		if ns, err := proxysvc.OpenNodes(nodesDir); err == nil {
@@ -160,6 +165,7 @@ func New() (*App, error) {
 		}
 	}
 	if root != "" {
+		a.log = newFileLogger(root)
 		a.geo = geodata.Open(root)
 	}
 	a.media = newMediaRegistry()
@@ -298,6 +304,10 @@ func (a *App) Shutdown(ctx context.Context) {
 		a.shots.StopClipboardWatch()
 	}
 	a.stopTray()
+	if a.log != nil {
+		a.log.Printf("=== 退出 ===")
+		a.log.Close()
+	}
 	if a.hotkey != nil {
 		a.hotkey.Unregister()
 		a.hotkey = nil
@@ -319,6 +329,13 @@ func (a *App) quit() {
 }
 
 func (a *App) emit(event string, data ...any) {
+	if a.log != nil {
+		if len(data) > 0 {
+			a.logEvent(event, data[0])
+		} else {
+			a.log.Printf("event %s", event)
+		}
+	}
 	if a.ctx == nil {
 		return
 	}

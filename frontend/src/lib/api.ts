@@ -918,6 +918,8 @@ const rawApi = {
   RemoveTransfer: (id: string) => call<void>('RemoveTransfer', id),
   SyncSubscriptions: () => call<SubSyncResult>('SyncSubscriptions'),
   ExtractCloudFile: (path: string) => call<Record<string, unknown>>('ExtractCloudFile', path),
+  OpenLogDir: () => call<void>('OpenLogDir'),
+  LogPath: () => call<string>('LogPath'),
   SaveLastLocalDir: (dir: string) => call<void>('SaveLastLocalDir', dir),
   LastLocalDir: () => call<string>('LastLocalDir'),
 
@@ -1062,6 +1064,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

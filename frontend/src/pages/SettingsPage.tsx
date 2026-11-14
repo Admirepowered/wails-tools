@@ -197,6 +197,9 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
             </p>
           </div>
           <span className="small faint">修改后自动保存</span>
+          <button className="btn btn-sm" onClick={() => void api.OpenLogDir().catch((err) => toast.error(err))}>
+            打开日志
+          </button>
         </div>
 
         <div className="divider" />
@@ -552,6 +555,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     </div>
   )
 }
+
 
 
 

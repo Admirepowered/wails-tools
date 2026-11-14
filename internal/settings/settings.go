@@ -3,6 +3,7 @@
 package settings
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -376,12 +377,20 @@ func cloneProxy(p ProxySettings) ProxySettings {
 func (s *Store) Update(fn func(*Settings) error) (Settings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prev := s.cur
 	next := s.cur
 	next.Proxy = cloneProxy(s.cur.Proxy)
 	if err := fn(&next); err != nil {
 		return s.cur, err
 	}
 	next.normalize()
+	// 内容没有变化就不落盘，避免 settings.json 被无意义地反复重写。
+	if prevJSON, err := json.Marshal(prev); err == nil {
+		if nextJSON, err := json.Marshal(next); err == nil && bytes.Equal(prevJSON, nextJSON) {
+			s.cur = next
+			return next, nil
+		}
+	}
 	if err := s.persist(next); err != nil {
 		return s.cur, err
 	}
