@@ -247,7 +247,27 @@ func (a *App) Startup(ctx context.Context) {
 			defer cancel()
 			if _, err := a.link.Connect(c); err != nil {
 				a.emit("server:error", err.Error())
-				return
+				// 指数退避重试：5s,10s,20s,40s,60s（封顶）
+				delay := 5 * time.Second
+				for attempt := 0; attempt < 6; attempt++ {
+					time.Sleep(delay)
+					rctx, rcancel := context.WithTimeout(context.Background(), 20*time.Second)
+					_, rerr := a.link.Connect(rctx)
+					rcancel()
+					if rerr == nil {
+						a.emit("server:status", a.link.Status())
+						break
+					}
+					if delay < 60*time.Second {
+						delay *= 2
+						if delay > 60*time.Second {
+							delay = 60 * time.Second
+						}
+					}
+				}
+				if !a.link.Available() {
+					return
+				}
 			}
 			// Restore the saved session so the account is logged in automatically.
 			// 更新重启后令牌可能还没落盘，先等几次再判定是否已登录。

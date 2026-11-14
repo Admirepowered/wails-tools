@@ -505,12 +505,17 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
 
   useEffect(() => {
     void (async () => {
+      // 分开加载：节点列表失败不能把链路配置一起清空。
       try {
-        const [chain, custom] = await Promise.all([api.GetProxyChain(), api.ListCustomNodes()])
+        const chain = await api.GetProxyChain()
         setCfg({ mode: chain.mode || 'off', nodeIds: chain.nodeIds ?? [] })
-        setNodes(custom)
       } catch (err) {
         toast.error(err)
+      }
+      try {
+        setNodes(await api.ListCustomNodes())
+      } catch {
+        /* 节点列表失败时保留已加载的链路 */
       }
     })()
   }, [toast])
@@ -715,6 +720,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
