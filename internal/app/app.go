@@ -235,6 +235,11 @@ func (a *App) Startup(ctx context.Context) {
 			}
 		}()
 	}
+	if a.log != nil {
+		cfg := a.settings.Get()
+		a.log.Printf("settings loaded chain=%s/%v useGeoIP=%v countries=%v autoConnect=%v settingsPath=%s",
+			cfg.ProxyChain.Mode, cfg.ProxyChain.NodeIDs, cfg.DirectRules.UseGeoIP, cfg.DirectRules.Countries, cfg.Server.AutoConnect, a.settings.Path())
+	}
 	go a.restoreActiveNode()
 	if a.settings.Get().Server.AutoConnect {
 		go func() {
@@ -373,7 +378,14 @@ func (a *App) GetSettings() settings.Settings { return a.settings.Get() }
 
 // SaveSettings replaces the configuration.
 func (a *App) SaveSettings(next settings.Settings) (settings.Settings, error) {
-	return a.settings.Save(next)
+	prev := a.settings.Get()
+	saved, err := a.settings.Save(next)
+	if a.log != nil {
+		a.log.Printf("settings saved chain=%s/%v (was %s/%v) useGeoIP=%v (was %v) startup.tray=%v",
+			saved.ProxyChain.Mode, saved.ProxyChain.NodeIDs, prev.ProxyChain.Mode, prev.ProxyChain.NodeIDs,
+			saved.DirectRules.UseGeoIP, prev.DirectRules.UseGeoIP, saved.Startup.TrayEnabled)
+	}
+	return saved, err
 }
 
 // ProxyScopes lists the scopes shown on the proxy page.

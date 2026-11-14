@@ -431,8 +431,9 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
               onChange={async (v) => {
                 try {
                   const current = startup ?? { enabled: false, startMinimized: false, trayEnabled: true, closeToTray: true }
+                  const fresh = await api.GetSettings()
                   const saved = await api.SaveSettings({
-                    ...settings,
+                    ...fresh,
                     startup: { ...current, startMinimized: v },
                   })
                   setStartup(saved.startup ?? null)
@@ -557,6 +558,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     </div>
   )
 }
+
 
 
 
