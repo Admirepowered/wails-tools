@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +33,7 @@ func main() {
 		noUDP     = flag.Bool("no-udp", false, "force TCP transport")
 		showAdmin = flag.Bool("settings", false, "show server admin settings")
 		vault     = flag.Bool("vault", false, "list the encrypted secret bundles stored for this account")
+		subs      = flag.Bool("subs", false, "show the stored subscription/proxy-node document summary")
 		deviceID  = flag.String("device-id", "wt-admin-cli", "device identity reported on login")
 	)
 	flag.Parse()
@@ -174,6 +176,35 @@ func main() {
 		for _, b := range out.Blobs {
 			fmt.Printf("%-12s %8d bytes  %s\n", b.Kind, b.Size, b.UpdatedAt)
 		}
+
+	case *subs:
+		var out struct {
+			Found         bool            `json:"found"`
+			Subscriptions json.RawMessage `json:"subscriptions"`
+			UpdatedAt     int64           `json:"updatedAt"`
+		}
+		call("subs.get", nil, &out)
+		if !out.Found || len(out.Subscriptions) == 0 {
+			fmt.Println("no subscription document stored")
+			return
+		}
+		trimmed := strings.TrimSpace(string(out.Subscriptions))
+		if strings.HasPrefix(trimmed, "[") {
+			var legacy []json.RawMessage
+			_ = json.Unmarshal(out.Subscriptions, &legacy)
+			fmt.Printf("legacy v1 document: %d sources (%d bytes)\n", len(legacy), len(out.Subscriptions))
+			return
+		}
+		var doc struct {
+			Version int               `json:"version"`
+			Sources []json.RawMessage `json:"sources"`
+			Nodes   []json.RawMessage `json:"nodes"`
+		}
+		if err := json.Unmarshal(out.Subscriptions, &doc); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("v%d document: %d sources, %d custom nodes (%d bytes)\n",
+			doc.Version, len(doc.Sources), len(doc.Nodes), len(out.Subscriptions))
 
 	default:
 		_ = list
