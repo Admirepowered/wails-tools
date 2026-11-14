@@ -141,6 +141,7 @@ func parseTrojanLink(raw string) (Node, bool) {
 	// Trojan is TLS by definition unless explicitly disabled.
 	security := strings.ToLower(q.Get("security"))
 	node.TLS = security != "none"
+	node.SkipVerify = boolParam(q, "allowInsecure", "skipVerify", "insecure")
 	if node.Server == "" || node.Password == "" {
 		return Node{}, false
 	}
@@ -267,4 +268,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// boolParam reports whether any of the named query params is truthy.
+func boolParam(q url.Values, names ...string) bool {
+	for _, n := range names {
+		switch strings.ToLower(strings.TrimSpace(q.Get(n))) {
+		case "1", "true", "yes", "tls":
+			return true
+		}
+	}
+	return false
 }

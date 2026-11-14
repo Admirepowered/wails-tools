@@ -1,6 +1,6 @@
 # WailsTools
 
-> 当前版本：**v1.3.18**（每次发布构建补丁号 +1）
+> 当前版本：**v1.3.19**（每次发布构建补丁号 +1）
 
 一套 Go + Wails v2 的桌面客户端，以及配套的 Go 同步服务端。覆盖：云同步笔记、文件管理、SSH（含跳板与服务器中转）、FTP/FTPS、HTTP 下载工具、网盘管理（夸克 / UC / 百度）、按连接类型独立配置的代理。
 
@@ -240,6 +240,7 @@ server/cmd/wt-server     服务端可执行
 server/internal/{api,store,auth,server}
 frontend/                React + TypeScript 界面
 ```
+
 
 
 

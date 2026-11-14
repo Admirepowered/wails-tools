@@ -105,8 +105,13 @@ func (a *App) buildChain() ([]miproxy.Node, miproxy.RelayFunc) {
 		}
 	}
 	var relay miproxy.RelayFunc
-	if cfg.Mode == "server" && a.link != nil && a.link.Available() {
+	if cfg.Mode == "server" && a.link != nil {
 		relay = func(ctx context.Context, target string) (net.Conn, error) {
+			if !a.link.Available() {
+				if _, err := a.link.Connect(ctx); err != nil {
+					return nil, err
+				}
+			}
 			return a.link.DialTCP(ctx, target)
 		}
 	}
