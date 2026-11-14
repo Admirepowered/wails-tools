@@ -36,10 +36,19 @@ type Status struct {
 
 // DB wraps the maxmind database.
 type DB struct {
-	mu     sync.RWMutex
-	path   string
-	reader *maxminddb.Reader
-	status Status
+	mu        sync.RWMutex
+	path      string
+	reader    *maxminddb.Reader
+	status    Status
+	fallbacks []*http.Client
+}
+
+// SetFallbackClients configures clients tried after the SNI-bypass attempt.
+// The usual order is proxy first, then direct.
+func (d *DB) SetFallbackClients(clients ...*http.Client) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fallbacks = clients
 }
 
 // Open creates a manager rooted at dir (the database may be missing). Common
@@ -135,14 +144,40 @@ func (d *DB) Download(ctx context.Context, onProgress func(done, total int64)) e
 	tmp := d.path + ".download"
 	_ = os.Remove(tmp)
 
-	err := d.downloadDirect(ctx, tmp, onProgress)
-	if err != nil {
-		if derr := d.downloadBypass(ctx, tmp, onProgress); derr != nil {
-			d.mu.Lock()
-			d.status.Error = derr.Error()
-			d.mu.Unlock()
-			return fmt.Errorf("下载 geoip.metadb 失败: %v（直连: %v）", derr, err)
+	var errs []string
+	ok := false
+	// 访问 GitHub 一律先走 SNI 绕过，失败后依次回退代理、直连。
+	if err := d.downloadBypass(ctx, tmp, onProgress); err == nil {
+		ok = true
+	} else {
+		errs = append(errs, "sni: "+err.Error())
+		d.mu.RLock()
+		fallbacks := append([]*http.Client(nil), d.fallbacks...)
+		d.mu.RUnlock()
+		for _, client := range fallbacks {
+			if client == nil {
+				continue
+			}
+			if err := d.downloadWith(ctx, client, tmp, onProgress); err == nil {
+				ok = true
+				break
+			} else {
+				errs = append(errs, "fallback: "+err.Error())
+			}
 		}
+		if !ok {
+			if err := d.downloadDirect(ctx, tmp, onProgress); err == nil {
+				ok = true
+			} else {
+				errs = append(errs, "direct: "+err.Error())
+			}
+		}
+	}
+	if !ok {
+		d.mu.Lock()
+		d.status.Error = strings.Join(errs, " | ")
+		d.mu.Unlock()
+		return fmt.Errorf("下载 geoip.metadb 失败: %s", strings.Join(errs, " | "))
 	}
 	if err := os.Rename(tmp, d.path); err != nil {
 		return err
@@ -155,6 +190,23 @@ func (d *DB) Download(ctx context.Context, onProgress func(done, total int64)) e
 		return errors.New("geoip.metadb 无法解析")
 	}
 	return nil
+}
+
+func (d *DB) downloadWith(ctx context.Context, client *http.Client, target string, onProgress func(int64, int64)) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, DownloadURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "WailsTools/1.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return writeBody(resp.Body, resp.ContentLength, target, onProgress)
 }
 
 func (d *DB) downloadDirect(ctx context.Context, target string, onProgress func(int64, int64)) error {

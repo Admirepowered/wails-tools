@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +18,7 @@ import (
 	"wailstools/internal/miproxy"
 	"wailstools/internal/paths"
 	"wailstools/internal/proxysvc"
+	"wailstools/internal/proxyx"
 	"wailstools/internal/settings"
 )
 
@@ -210,11 +212,13 @@ func (a *App) geoDB() *geodata.DB {
 		db := geodata.Open(dir)
 		if db.Status().Ready {
 			a.geo = db
+			a.geo.SetFallbackClients(a.geoFallbackClients()...)
 			return db
 		}
 	}
 	if len(dirs) > 0 {
 		a.geo = geodata.Open(dirs[0])
+		a.geo.SetFallbackClients(a.geoFallbackClients()...)
 		return a.geo
 	}
 	a.geo = geodata.Open(".")
@@ -250,7 +254,7 @@ func (a *App) DownloadGeoIP() (geodata.Status, error) {
 	if db == nil {
 		return geodata.Status{}, errors.New("geoip 未初始化")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	key := "geoip"
 	err := db.Download(ctx, func(done, total int64) {
@@ -376,4 +380,21 @@ func (a *App) SaveLatencyResults(entries []LatencyEntry) error {
 // NodeLatencyKey builds the stable key used for latency history.
 func NodeLatencyKey(node miproxy.Node) string {
 	return fmt.Sprintf("%s|%s|%d|%s", node.Protocol, node.Server, node.Port, node.Name)
+}
+
+// geoFallbackClients returns the HTTP clients tried when the SNI bypass fails:
+// the configured proxy first (if any), then a direct connection.
+func (a *App) geoFallbackClients() []*http.Client {
+	clients := make([]*http.Client, 0, 2)
+	rule := settings.ProxyRule{Mode: "off"}
+	if a.settings != nil {
+		rule = a.settings.ProxyFor(settings.ScopeHTTP)
+	}
+	if rule.Mode != "" && rule.Mode != "off" {
+		if client, err := proxyx.HTTPClient(rule, 90*time.Second); err == nil {
+			clients = append(clients, client)
+		}
+	}
+	clients = append(clients, &http.Client{Timeout: 90 * time.Second})
+	return clients
 }
