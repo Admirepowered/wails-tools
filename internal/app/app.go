@@ -159,7 +159,9 @@ func New() (*App, error) {
 			a.customNodes = ns
 		}
 	}
-	a.geo = geodata.Open(root)
+	if root != "" {
+		a.geo = geodata.Open(root)
+	}
 	a.media = newMediaRegistry()
 	a.initTransfers()
 	a.shots = shot.NewManager(store, nil)

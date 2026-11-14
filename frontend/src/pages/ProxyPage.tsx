@@ -656,7 +656,8 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
         </button>
       </div>
       <p className="card-desc">命中的目标直接连接，不走代理。</p>
-      <div className="small faint mono truncate" title={geo?.path ?? ''}>数据库：{geo?.path ?? ''}</div>
+      <div className="small faint mono truncate" title={geo?.path ?? ''}>数据库：{geo?.path ?? '（未定位到文件）'}</div>
+      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{geo.error}</div> : null}
       {geo?.ready ? (
         <div className="small faint">大小 {((geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {geo.updatedAt ?? '—'}</div>
       ) : null}
@@ -694,6 +695,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 

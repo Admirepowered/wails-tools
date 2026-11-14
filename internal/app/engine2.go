@@ -182,15 +182,13 @@ func (a *App) SaveDirectRules(cfg settings.DirectRuleSettings) (settings.DirectR
 // GeoIPStatus reports the local geoip database, falling back to the default
 // per-user directory when the configured root has no database.
 func (a *App) GeoIPStatus() geodata.Status {
-	if a.geo == nil {
-		return geodata.Status{Error: "geoip 未初始化"}
-	}
-	st := a.geo.Status()
+	db := a.geoDB()
+	st := db.Status()
 	if st.Ready {
 		return st
 	}
 	for _, dir := range a.geoCandidateDirs() {
-		if dir == "" || dir == filepath.Dir(a.geo.Path()) {
+		if dir == "" || dir == filepath.Dir(db.Path()) {
 			continue
 		}
 		alt := geodata.Open(dir)
@@ -200,6 +198,27 @@ func (a *App) GeoIPStatus() geodata.Status {
 		}
 	}
 	return st
+}
+
+// geoDB returns the geoip database, creating it lazily when missing.
+func (a *App) geoDB() *geodata.DB {
+	if a.geo != nil {
+		return a.geo
+	}
+	dirs := a.geoCandidateDirs()
+	for _, dir := range dirs {
+		db := geodata.Open(dir)
+		if db.Status().Ready {
+			a.geo = db
+			return db
+		}
+	}
+	if len(dirs) > 0 {
+		a.geo = geodata.Open(dirs[0])
+		return a.geo
+	}
+	a.geo = geodata.Open(".")
+	return a.geo
 }
 
 // geoCandidateDirs lists every directory that may hold a geoip database.
@@ -227,28 +246,30 @@ func (a *App) geoCandidateDirs() []string {
 
 // DownloadGeoIP fetches geoip.metadb from the MetaCubeX release.
 func (a *App) DownloadGeoIP() (geodata.Status, error) {
-	if a.geo == nil {
+	db := a.geoDB()
+	if db == nil {
 		return geodata.Status{}, errors.New("geoip 未初始化")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	key := "geoip"
-	err := a.geo.Download(ctx, func(done, total int64) {
+	err := db.Download(ctx, func(done, total int64) {
 		a.emit("transfer:progress", map[string]any{"key": key, "kind": "geoip", "done": done, "total": total})
 	})
 	if err != nil {
-		return a.geo.Status(), err
+		return db.Status(), err
 	}
-	a.emit("geoip:updated", a.geo.Status())
-	return a.geo.Status(), nil
+	a.emit("geoip:updated", db.Status())
+	return db.Status(), nil
 }
 
 // GeoIPCountries lists country codes present in the database.
 func (a *App) GeoIPCountries() []string {
-	if a.geo == nil {
+	db := a.geoDB()
+	if db == nil {
 		return []string{}
 	}
-	list := a.geo.Countries()
+	list := db.Countries()
 	sort.Strings(list)
 	return list
 }
