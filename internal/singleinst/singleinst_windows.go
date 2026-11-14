@@ -4,6 +4,7 @@ package singleinst
 
 import (
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -19,19 +20,27 @@ var (
 
 func acquire(name string) (func(), error) {
 	ptr, _ := syscall.UTF16PtrFromString(`Local\` + name)
-	h, _, err := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(ptr)))
-	if h == 0 {
-		return func() {}, err
-	}
-	if errno, ok := err.(syscall.Errno); ok && errno == 183 { // ERROR_ALREADY_EXISTS
-		if title, terr := syscall.UTF16PtrFromString("WailsTools"); terr == nil {
-			if hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(title))); hwnd != 0 {
-				procShowWindow.Call(hwnd, 9) // SW_RESTORE
-				procSetForeground.Call(hwnd)
-			}
+	// 更新重启时旧进程可能还在退出，最多等 10 秒。
+	for attempt := 0; ; attempt++ {
+		h, _, err := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(ptr)))
+		if h == 0 {
+			return func() {}, err
+		}
+		errno, ok := err.(syscall.Errno)
+		if !ok || errno != 183 {
+			return func() { procCloseHandle.Call(h) }, nil
 		}
 		procCloseHandle.Call(h)
-		return nil, ErrAlreadyRunning
+		if attempt >= 20 {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	return func() { procCloseHandle.Call(h) }, nil
+	if title, terr := syscall.UTF16PtrFromString("WailsTools"); terr == nil {
+		if hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(title))); hwnd != 0 {
+			procShowWindow.Call(hwnd, 9) // SW_RESTORE
+			procSetForeground.Call(hwnd)
+		}
+	}
+	return nil, ErrAlreadyRunning
 }
