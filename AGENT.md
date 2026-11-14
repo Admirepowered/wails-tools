@@ -119,3 +119,27 @@ wails build
 - 订阅页「全部更新」仍在顶部（属批量操作，保留）。
 - geoip 国家列表在 UI 只显示前若干项（已把 CN/HK 等常用置顶）。
 - 传输暂停对个别不支持 REST/续传的 FTP 服务器可能从头重传。
+---
+
+## 六、2026-11-15 决策记录（破坏性改动已授权）
+
+用户明确：当前只有他一个用户，**允许破坏性改动**；此次更新后旧客户端会被删除，不需要兼容旧版协议。
+
+### 6.1 设备上限（每用户最多 5 台）
+- 客户端持久化 `server.deviceId`（首次生成 UUID）与 `deviceName`（主机名）。
+- 登录/心跳上报设备；服务端 `devices` 桶：`userID -> {deviceId: lastSeen}`。
+- 新设备且已达 5 台 → 返回 `device_limit`；管理端可移除设备；30 天未活跃自动过期。
+
+### 6.2 管理页并入「同步服务」
+- 仅 `role=admin` 可见；区块：公开注册开关、用户列表、新增/删除用户、改角色、移除设备。
+- 服务端新增（全部要求 admin）：`admin.users.list|create|delete|setRole`、`admin.settings.get|set`、`admin.devices.list|remove`。
+- **注册的第二个用户起默认 role=user；第一个注册用户自动 admin。**
+- 关闭公开注册后，`auth.register` 仅在后端无用户时可用；其余由管理员创建。
+
+### 6.3 登录协议变更（破坏性）
+- hello 帧增加 `deviceId` / `deviceName`；`auth.login` 返回 `role`、`deviceCount`。
+- `ServerStatus().user` 增加 `role`，前端据此显示管理区块。
+
+### 6.4 教训
+- 绑定层禁止按方法名批量做类型转换（v1.3.40 根因）；只对确实返回数组的方法启用 `coerceList`。
+- 配置读写必须单一事实来源（内存优先，磁盘仅持久化）；详见 §三。
