@@ -594,7 +594,7 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
 function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
   const toast = useToast()
   const [cfg, setCfg] = useState<DirectRuleSettings>({ useGeoIP: false, countries: [], rules: [] })
-  const [geo, setGeo] = useState<GeoIPStatus | null>(null)
+  const [geo, setGeo] = useState<Record<string, unknown> | null>(null)
   const [countries, setCountries] = useState<string[]>([])
   const [diag, setDiag] = useState<Record<string, unknown> | null>(null)
   const [busy, setBusy] = useState(false)
@@ -636,7 +636,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     setBusy(true)
     try {
       const status = await api.DownloadGeoIP()
-      setGeo(status)
+        setGeo(status as unknown as Record<string, unknown>)
       setCountries(await api.GeoIPCountries())
       toast.push('geoip 数据库已更新')
     } catch (err) {
@@ -665,17 +665,19 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
         </button>
       </div>
       <p className="card-desc">命中的目标直接连接，不走代理。</p>
-      <div className="small faint mono truncate" title={geo?.path ?? ''}>数据库：{geo?.path ?? '（未定位到文件）'}</div>
-      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{geo.error}</div> : null}
+      {geo?.ready ? (
+        <div className="small faint">大小 {(Number(geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {String(geo.updatedAt ?? '—')}</div>
+      ) : null}
+      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{String(geo.error)}</div> : null}
       {diag ? (
         <div className="small faint mono" style={{ fontSize: 11 }}>
           exists={String(diag.fileExists ?? '' )} size={String(diag.fileSize ?? '' )} rootDir={String(diag.rootDir ?? '' )} err={String(diag.error ?? '-')}
         </div>
       ) : null}
       {geo?.ready ? (
-        <div className="small faint">大小 {((geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {geo.updatedAt ?? '—'}</div>
+        <div className="small faint">大小 {(Number(geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {String(geo.updatedAt ?? '—')}</div>
       ) : null}
-      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{geo.error}</div> : null}
+      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{String(geo.error)}</div> : null}
       {diag ? (
         <div className="small faint mono" style={{ fontSize: 11 }}>
           exists={String(diag.fileExists ?? '' )} size={String(diag.fileSize ?? '' )} rootDir={String(diag.rootDir ?? '' )} err={String(diag.error ?? '-')}
@@ -714,6 +716,8 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
+
 
 
 

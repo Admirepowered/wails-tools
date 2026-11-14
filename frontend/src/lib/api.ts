@@ -896,7 +896,7 @@ const rawApi = {
   SaveProxyChain: (cfg: ProxyChainSettings) => call<ProxyChainSettings>('SaveProxyChain', cfg),
   GetDirectRules: () => call<DirectRuleSettings>('GetDirectRules'),
   SaveDirectRules: (cfg: DirectRuleSettings) => call<DirectRuleSettings>('SaveDirectRules', cfg),
-  GeoIPStatus: () => call<GeoIPStatus>('GeoIPStatus'),
+  GeoIPStatus: () => call<Record<string, unknown>>('GeoIPStatus'),
   GeoIPDiag: () => call<Record<string, unknown>>('GeoIPDiag'),
   DownloadGeoIP: () => call<GeoIPStatus>('DownloadGeoIP'),
   GeoIPCountries: () => call<string[]>('GeoIPCountries'),
@@ -1061,6 +1061,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

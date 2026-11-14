@@ -183,23 +183,37 @@ func (a *App) SaveDirectRules(cfg settings.DirectRuleSettings) (settings.DirectR
 
 // GeoIPStatus reports the local geoip database, falling back to the default
 // per-user directory when the configured root has no database.
-func (a *App) GeoIPStatus() geodata.Status {
+func (a *App) GeoIPStatus() map[string]any {
 	db := a.geoDB()
 	st := db.Status()
-	if st.Ready {
-		return st
-	}
-	for _, dir := range a.geoCandidateDirs() {
-		if dir == "" || dir == filepath.Dir(db.Path()) {
-			continue
+	if !st.Ready {
+		for _, dir := range a.geoCandidateDirs() {
+			if dir == "" || dir == filepath.Dir(db.Path()) {
+				continue
+			}
+			alt := geodata.Open(dir)
+			if alt.Status().Ready {
+				a.geo = alt
+				st = alt.Status()
+				break
+			}
 		}
-		alt := geodata.Open(dir)
-		if alt.Status().Ready {
-			a.geo = alt
-			return alt.Status()
-		}
 	}
-	return st
+	out := map[string]any{
+		"ready":       st.Ready,
+		"path":        st.Path,
+		"size":        st.Size,
+		"updatedAt":   st.UpdatedAt,
+		"downloading": st.Downloading,
+		"error":       st.Error,
+	}
+	if info, err := os.Stat(st.Path); err == nil {
+		out["exists"] = true
+		out["fileSize"] = info.Size()
+	} else {
+		out["exists"] = false
+	}
+	return out
 }
 
 // geoDB returns the geoip database, creating it lazily when missing.
