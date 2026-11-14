@@ -58,27 +58,24 @@ func (d *DB) SetAllowRegister(v bool) error {
 	})
 }
 
-// ListDevices returns the devices registered for a user.
-func (d *DB) ListDevices(userID string) []Device {
+// readDevices decodes a user's device list inside an existing transaction.
+// Never call ListDevices from inside db.Update: bbolt holds the meta lock for
+// write transactions, so a nested View would deadlock.
+func readDevices(tx *bolt.Tx, userID string) []Device {
 	out := []Device{}
-	if userID == "" {
+	b := tx.Bucket(bucketDevices)
+	if b == nil || userID == "" {
 		return out
 	}
-	_ = d.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketDevices)
-		if b == nil {
-			return nil
-		}
-		raw := b.Get([]byte(userID))
-		if raw == nil {
-			return nil
-		}
-		return json.Unmarshal(raw, &out)
-	})
+	raw := b.Get([]byte(userID))
+	if raw == nil {
+		return out
+	}
+	_ = json.Unmarshal(raw, &out)
 	return out
 }
 
-func (d *DB) putDevices(tx *bolt.Tx, userID string, devices []Device) error {
+func putDevices(tx *bolt.Tx, userID string, devices []Device) error {
 	raw, err := json.Marshal(devices)
 	if err != nil {
 		return err
@@ -86,26 +83,42 @@ func (d *DB) putDevices(tx *bolt.Tx, userID string, devices []Device) error {
 	return tx.Bucket(bucketDevices).Put([]byte(userID), raw)
 }
 
+// ListDevices returns the devices registered for a user.
+func (d *DB) ListDevices(userID string) []Device {
+	out := []Device{}
+	if userID == "" {
+		return out
+	}
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		out = readDevices(tx, userID)
+		return nil
+	})
+	return out
+}
+
 // AddDevice registers a new device for a user.
 func (d *DB) AddDevice(userID, id, name string) error {
+	if userID == "" || id == "" {
+		return errors.New("invalid device")
+	}
 	return d.db.Update(func(tx *bolt.Tx) error {
-		devices := d.ListDevices(userID)
+		devices := readDevices(tx, userID)
 		devices = append(devices, Device{ID: id, Name: name, LastSeen: time.Now().UTC().Format(time.RFC3339)})
-		return d.putDevices(tx, userID, devices)
+		return putDevices(tx, userID, devices)
 	})
 }
 
 // TouchDevice updates a device's last-seen timestamp.
 func (d *DB) TouchDevice(userID, id, name string) error {
 	return d.db.Update(func(tx *bolt.Tx) error {
-		devices := d.ListDevices(userID)
+		devices := readDevices(tx, userID)
 		for i := range devices {
 			if devices[i].ID == id {
 				devices[i].LastSeen = time.Now().UTC().Format(time.RFC3339)
 				if name != "" {
 					devices[i].Name = name
 				}
-				return d.putDevices(tx, userID, devices)
+				return putDevices(tx, userID, devices)
 			}
 		}
 		return nil
@@ -115,8 +128,8 @@ func (d *DB) TouchDevice(userID, id, name string) error {
 // DeleteDevice removes a device registration.
 func (d *DB) DeleteDevice(userID, id string) error {
 	return d.db.Update(func(tx *bolt.Tx) error {
-		devices := d.ListDevices(userID)
-		out := devices[:0]
+		devices := readDevices(tx, userID)
+		out := make([]Device, 0, len(devices))
 		found := false
 		for _, dev := range devices {
 			if dev.ID == id {
@@ -128,6 +141,17 @@ func (d *DB) DeleteDevice(userID, id string) error {
 		if !found {
 			return errors.New("device not found")
 		}
-		return d.putDevices(tx, userID, out)
+		return putDevices(tx, userID, out)
+	})
+}
+
+// DeleteUserDevices drops every device record for a deleted user.
+func (d *DB) DeleteUserDevices(userID string) {
+	_ = d.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketDevices)
+		if b == nil {
+			return nil
+		}
+		return b.Delete([]byte(userID))
 	})
 }

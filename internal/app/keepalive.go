@@ -52,8 +52,14 @@ func (a *App) startKeepalive() {
 				if u, err := a.link.Me(ctx); err == nil {
 					loggedIn = true
 					a.sess.loggedIn = true
-					a.sess.user = u.Username
-					a.emit("server:login", map[string]any{"username": u.Username, "auto": true})
+					a.setSessionUser(u)
+					a.refreshDeviceCount()
+					a.emit("server:login", map[string]any{"username": u.Username, "role": u.Role, "auto": true})
+				}
+			} else if loggedIn && a.sess.role == "" && a.link.Token() != "" {
+				// 角色未知（升级前登录的会话）：补拉一次用户记录。
+				if u, err := a.link.Me(ctx); err == nil {
+					a.setSessionUser(u)
 				}
 			}
 			cancel()

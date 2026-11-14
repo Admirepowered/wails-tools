@@ -384,6 +384,30 @@ export interface RemoteEntry {
   modTime: string
 }
 
+/* ---------------- server admin ---------------- */
+
+export interface AdminUser {
+  id: string
+  username: string
+  role: string
+  disabled: boolean
+  devices: number
+  quotaBytes: number
+  createdAt: string
+  lastLoginAt?: string
+}
+
+export interface AdminDevice {
+  id: string
+  name: string
+  lastSeen: string
+}
+
+export interface DeviceSummary {
+  devices: AdminDevice[]
+  maxDevices: number
+}
+
 /* ---------------- netdisk ---------------- */
 
 export interface NetdiskProvider {
@@ -800,7 +824,10 @@ const rawApi = {
   RegisterServer: (username: string, password: string, email: string, displayName: string) =>
     call<ServerStatus>('RegisterServer', username, password, email, displayName),
   LoginServer: (username: string, password: string) => call<ServerStatus>('LoginServer', username, password),
-  ServerSession: () => call<{ loggedIn: boolean; username: string; connected: boolean }>('ServerSession'),
+  ServerSession: () =>
+    call<{ loggedIn: boolean; username: string; role: string; isAdmin: boolean; deviceCount: number; connected: boolean }>(
+      'ServerSession',
+    ),
   LogoutServer: () => call<void>('LogoutServer'),
   ChangeServerPassword: (oldPassword: string, newPassword: string) =>
     call<Record<string, unknown>>('ChangeServerPassword', oldPassword, newPassword),
@@ -816,6 +843,20 @@ const rawApi = {
   DownloadFromServer: (remotePath: string, localDir: string) =>
     call<{ bytes: number; path: string }>('DownloadFromServer', remotePath, localDir),
   RelayStatus: () => call<{ available: boolean; detail: string }>('RelayStatus'),
+
+  // own devices + server admin
+  MyDevices: () => call<DeviceSummary>('MyDevices'),
+  RemoveMyDevice: (deviceId: string) => call<void>('RemoveMyDevice', deviceId),
+  AdminSettingsInfo: () => call<{ allowRegister: boolean; maxDevices: number }>('AdminSettingsInfo'),
+  AdminSetRegistration: (allow: boolean) =>
+    call<{ ok: boolean; allowRegister: boolean }>('AdminSetRegistration', allow),
+  AdminUsers: () => call<AdminUser[]>('AdminUsers'),
+  AdminCreateUser: (username: string, password: string, role: string) =>
+    call<{ ok: boolean; id: string }>('AdminCreateUser', username, password, role),
+  AdminDeleteUser: (id: string) => call<void>('AdminDeleteUser', id),
+  AdminSetUserRole: (id: string, role: string) => call<void>('AdminSetUserRole', id, role),
+  AdminDevices: (userId: string) => call<AdminDevice[]>('AdminDevices', userId),
+  AdminRemoveDevice: (userId: string, deviceId: string) => call<void>('AdminRemoveDevice', userId, deviceId),
 
   // netdisk
   NetdiskProviders: () => call<NetdiskProvider[]>('NetdiskProviders'),

@@ -26,30 +26,33 @@ func hashPassword(pw string) (string, error) {
 	return auth.HashPassword(pw)
 }
 
-// parseCreateSpec accepts "user" (random password) or "user:password".
-func parseCreateSpec(spec string) (string, string, error) {
+// parseCreateSpec accepts "user", "user:password" or "user:password:role".
+func parseCreateSpec(spec string) (string, string, string, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return "", "", errors.New("empty user spec")
+		return "", "", "", errors.New("empty user spec")
 	}
-	if i := strings.Index(spec, ":"); i >= 0 {
-		name := strings.TrimSpace(spec[:i])
-		pass := spec[i+1:]
-		if err := auth.ValidateUsername(name); err != nil {
-			return "", "", err
-		}
-		if pass == "" {
-			pass = randomPassword()
-			fmt.Printf("generated password for %s: %s\n", name, pass)
-		}
-		return name, pass, nil
+	parts := strings.SplitN(spec, ":", 3)
+	name := strings.TrimSpace(parts[0])
+	pass := ""
+	if len(parts) > 1 {
+		pass = parts[1]
 	}
-	if err := auth.ValidateUsername(spec); err != nil {
-		return "", "", err
+	role := "admin"
+	if len(parts) == 3 && strings.TrimSpace(parts[2]) != "" {
+		role = strings.ToLower(strings.TrimSpace(parts[2]))
 	}
-	pass := randomPassword()
-	fmt.Printf("generated password for %s: %s\n", spec, pass)
-	return spec, pass, nil
+	if role != "admin" && role != "user" {
+		return "", "", "", errors.New("role must be admin or user")
+	}
+	if err := auth.ValidateUsername(name); err != nil {
+		return "", "", "", err
+	}
+	if pass == "" {
+		pass = randomPassword()
+		fmt.Printf("generated password for %s: %s\n", name, pass)
+	}
+	return name, pass, role, nil
 }
 
 func randomPassword() string {

@@ -300,7 +300,10 @@ func (a *App) Startup(ctx context.Context) {
 						time.Sleep(2 * time.Second)
 					}
 					if u, err := a.link.Me(c); err == nil {
-						a.emit("server:login", map[string]any{"username": u.Username, "auto": true})
+						a.sess.loggedIn = true
+						a.setSessionUser(u)
+						a.refreshDeviceCount()
+						a.emit("server:login", map[string]any{"username": u.Username, "role": u.Role, "auto": true})
 						logged = true
 						break
 					} else {

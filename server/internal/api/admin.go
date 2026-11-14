@@ -14,6 +14,10 @@ import (
 // maxDevicesPerUser caps how many distinct devices may share one account.
 const maxDevicesPerUser = 5
 
+// deviceTTL drops devices that have not logged in for this long, so an old
+// machine can never permanently occupy a slot.
+const deviceTTL = 30 * 24 * time.Hour
+
 func (c *callCtx) requireAdmin() (store.User, error) {
 	uid, err := c.userID()
 	if err != nil {
@@ -35,7 +39,10 @@ func (c *callCtx) adminSettingsGet() (any, error) {
 	if _, err := c.requireAdmin(); err != nil {
 		return nil, err
 	}
-	return map[string]any{"allowRegister": c.api.DB.AllowRegister()}, nil
+	return map[string]any{
+		"allowRegister": c.api.DB.AllowRegister(),
+		"maxDevices":    maxDevicesPerUser,
+	}, nil
 }
 
 func (c *callCtx) adminSettingsSet(body json.RawMessage) (any, error) {
@@ -81,7 +88,8 @@ func (c *callCtx) adminUsersList() (any, error) {
 	for _, u := range users {
 		out = append(out, adminUserView{
 			ID: u.ID, Username: u.Username, Role: u.Role, Disabled: u.Disabled,
-			Devices: len(c.api.DB.ListDevices(u.ID)), QuotaBytes: u.QuotaBytes, CreatedAt: u.CreatedAt,
+			Devices: len(c.api.DB.ListDevices(u.ID)), QuotaBytes: u.QuotaBytes,
+			CreatedAt: u.CreatedAt, LastLoginAt: u.LastLoginAt,
 		})
 	}
 	return map[string]any{"users": out}, nil
@@ -116,6 +124,7 @@ func (c *callCtx) adminUsersCreate(body json.RawMessage) (any, error) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	u, err := c.api.DB.CreateUser(store.User{
+		ID:       newUserID(),
 		Username: req.Username, PasswordHash: hash, DisplayName: req.Username,
 		Role: role, QuotaBytes: c.api.Opts.DefaultQuota, CreatedAt: now, UpdatedAt: now,
 	})
@@ -143,6 +152,7 @@ func (c *callCtx) adminUsersDelete(body json.RawMessage) (any, error) {
 	if err := c.api.DB.DeleteUser(req.ID); err != nil {
 		return nil, wire.Errorf("not_found", "user not found")
 	}
+	c.api.DB.DeleteUserDevices(req.ID)
 	return map[string]any{"ok": true}, nil
 }
 
@@ -204,6 +214,36 @@ func (c *callCtx) adminDevicesRemove(body json.RawMessage) (any, error) {
 	return map[string]any{"ok": true}, nil
 }
 
+// ---- own devices (any authenticated user) --------------------------------
+
+func (c *callCtx) adminDevicesSelf() (any, error) {
+	uid, err := c.userID()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"devices":    c.api.DB.ListDevices(uid),
+		"maxDevices": maxDevicesPerUser,
+	}, nil
+}
+
+func (c *callCtx) adminDevicesSelfRemove(body json.RawMessage) (any, error) {
+	uid, err := c.userID()
+	if err != nil {
+		return nil, err
+	}
+	var req struct {
+		DeviceID string `json:"deviceId"`
+	}
+	if err := wire.Decode(body, &req); err != nil {
+		return nil, wire.Errorf("bad_request", "invalid body: %v", err)
+	}
+	if err := c.api.DB.DeleteDevice(uid, req.DeviceID); err != nil {
+		return nil, wire.Errorf("not_found", "device not found")
+	}
+	return map[string]any{"ok": true}, nil
+}
+
 // ---- device registration on login ---------------------------------------
 
 // registerDevice enforces the per-user device cap and updates last-seen.
@@ -212,13 +252,22 @@ func (c *callCtx) registerDevice(userID, deviceID, deviceName string) error {
 	if deviceID == "" {
 		return nil
 	}
+	cutoff := time.Now().UTC().Add(-deviceTTL)
 	devices := c.api.DB.ListDevices(userID)
+	active := make([]store.Device, 0, len(devices))
 	for _, d := range devices {
+		if seen, err := time.Parse(time.RFC3339, d.LastSeen); err == nil && seen.Before(cutoff) {
+			_ = c.api.DB.DeleteDevice(userID, d.ID)
+			continue
+		}
+		active = append(active, d)
+	}
+	for _, d := range active {
 		if d.ID == deviceID {
 			return c.api.DB.TouchDevice(userID, deviceID, deviceName)
 		}
 	}
-	if len(devices) >= maxDevicesPerUser {
+	if len(active) >= maxDevicesPerUser {
 		return wire.Errorf("device_limit", "该账号已达 %d 台设备上限，请在管理页移除旧设备", maxDevicesPerUser)
 	}
 	return c.api.DB.AddDevice(userID, deviceID, deviceName)

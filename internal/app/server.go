@@ -18,7 +18,18 @@ import (
 func (a *App) ServerStatus() serverlink.Status {
 	st := a.link.Status()
 	if a.sess.loggedIn && a.sess.user != "" {
-		st.User = &serverlink.User{Username: a.sess.user}
+		if st.User != nil {
+			// Keep the server-supplied fields (quota etc.) and refresh the role
+			// from the session, which is what gates the admin UI.
+			u := *st.User
+			u.Role = a.sess.role
+			if u.Username == "" {
+				u.Username = a.sess.user
+			}
+			st.User = &u
+		} else {
+			st.User = &serverlink.User{Username: a.sess.user, Role: a.sess.role}
+		}
 	}
 	return st
 }
@@ -50,7 +61,20 @@ func (a *App) RegisterServer(username, password, email, displayName string) (ser
 			return serverlink.Status{}, err
 		}
 	}
-	return a.link.Register(ctx, strings.TrimSpace(username), password, strings.TrimSpace(email), strings.TrimSpace(displayName))
+	st, err := a.link.Register(ctx, strings.TrimSpace(username), password, strings.TrimSpace(email), strings.TrimSpace(displayName))
+	if err == nil {
+		a.sess.loggedIn = true
+		a.sess.user = strings.TrimSpace(username)
+		a.sess.role = ""
+		if st.User != nil {
+			a.setSessionUser(*st.User)
+		}
+		a.refreshDeviceCount()
+		if a.onLogin != nil {
+			a.onLogin()
+		}
+	}
+	return st, err
 }
 
 // LoginServer authenticates against the server.
@@ -66,6 +90,11 @@ func (a *App) LoginServer(username, password string) (serverlink.Status, error) 
 	if err == nil {
 		a.sess.loggedIn = true
 		a.sess.user = strings.TrimSpace(username)
+		a.sess.role = ""
+		if st.User != nil {
+			a.setSessionUser(*st.User)
+		}
+		a.refreshDeviceCount()
 		if a.onLogin != nil {
 			a.onLogin()
 		}
@@ -77,6 +106,8 @@ func (a *App) LoginServer(username, password string) (serverlink.Status, error) 
 func (a *App) LogoutServer() error {
 	a.sess.loggedIn = false
 	a.sess.user = ""
+	a.sess.role = ""
+	a.sess.deviceCount = 0
 	if a.onLogout != nil {
 		a.onLogout()
 	}

@@ -188,6 +188,10 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.adminDevicesList(body)
 	case "admin.devices.remove":
 		return ctx.adminDevicesRemove(body)
+	case "admin.devices.self":
+		return ctx.adminDevicesSelf()
+	case "admin.devices.selfRemove":
+		return ctx.adminDevicesSelfRemove(body)
 	case "subs.get":
 		return ctx.subsGet()
 	case "subs.put":
@@ -364,7 +368,12 @@ func (c *callCtx) login(body json.RawMessage) (any, error) {
 		return nil, wire.Errorf("internal", "%v", err)
 	}
 	c.api.DB.Audit(store.AuditEntry{UserID: u.ID, Action: "login"})
-	return map[string]any{"user": u.Public(), "token": token, "expiresAt": exp}, nil
+	return map[string]any{
+		"user":        u.Public(),
+		"token":       token,
+		"expiresAt":   exp,
+		"deviceCount": len(c.api.DB.ListDevices(u.ID)),
+	}, nil
 }
 
 func (c *callCtx) me() (any, error) {

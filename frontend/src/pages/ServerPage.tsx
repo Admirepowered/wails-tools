@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, onEvent, type RemoteEntry, type ServerStatus, type Settings } from '../lib/api'
+import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type ServerStatus, type Settings } from '../lib/api'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Switch, Tabs, Tag, useToast } from '../components/ui'
-import { formatBytes, formatTime, percent } from '../lib/format'
+import { formatBytes, formatTime, percent, relativeTime } from '../lib/format'
 import type { PageProps } from '../App'
 
 type AuthTab = 'login' | 'register'
@@ -75,11 +75,25 @@ export default function ServerPage(props: PageProps) {
   // relay
   const [relay, setRelay] = useState<{ available: boolean; detail: string } | null>(null)
 
+  // devices + admin
+  const [myDevices, setMyDevices] = useState<DeviceSummary | null>(null)
+  const [allowRegister, setAllowRegister] = useState(true)
+  const [maxDevices, setMaxDevices] = useState(5)
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([])
+  const [adminBusy, setAdminBusy] = useState(false)
+  const [newUserName, setNewUserName] = useState('')
+  const [newUserPass, setNewUserPass] = useState('')
+  const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user')
+  const [deviceUser, setDeviceUser] = useState<AdminUser | null>(null)
+  const [devices, setDevices] = useState<AdminDevice[]>([])
+  const [delUser, setDelUser] = useState<AdminUser | null>(null)
+
   const synced = useRef(false)
   const status = props.serverStatus ?? localStatus
   const connected = status?.connected === true
   const authed = !!status?.user
   const user = status?.user
+  const isAdmin = user?.role === 'admin'
 
   /* ---------------- settings sync ---------------- */
 
@@ -123,6 +137,26 @@ export default function ServerPage(props: PageProps) {
       toast.error(err)
     }
   }, [toast])
+
+  const loadMyDevices = useCallback(async () => {
+    try {
+      setMyDevices(await api.MyDevices())
+    } catch {
+      setMyDevices(null)
+    }
+  }, [])
+
+  const loadAdmin = useCallback(async () => {
+    if (!isAdmin) return
+    try {
+      const info = await api.AdminSettingsInfo()
+      setAllowRegister(!!info.allowRegister)
+      setMaxDevices(Number(info.maxDevices) || 5)
+      setAdminUsers(await api.AdminUsers())
+    } catch (err) {
+      toast.error(err)
+    }
+  }, [isAdmin, toast])
 
   const loadUsage = useCallback(async () => {
     try {
@@ -198,6 +232,16 @@ export default function ServerPage(props: PageProps) {
     void loadCloud(cloudPath)
     void loadUsage()
   }, [connected, authed, cloudPath, loadCloud, loadUsage])
+
+  useEffect(() => {
+    if (!connected || !authed) {
+      setMyDevices(null)
+      setAdminUsers([])
+      return
+    }
+    void loadMyDevices()
+    void loadAdmin()
+  }, [connected, authed, isAdmin, loadMyDevices, loadAdmin])
 
   const refreshCloud = useCallback(() => {
     void loadCloud(cloudPath)
@@ -485,6 +529,98 @@ export default function ServerPage(props: PageProps) {
       await api.RemoveServerFile(entry.path, entry.isDir)
       toast.push('已删除')
       refreshCloud()
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  /* ---------------- devices & admin ---------------- */
+
+  const toggleRegister = async (next: boolean) => {
+    setAllowRegister(next)
+    try {
+      const res = await api.AdminSetRegistration(next)
+      setAllowRegister(!!res.allowRegister)
+      toast.push(res.allowRegister ? '已开启公开注册' : '已关闭公开注册')
+    } catch (err) {
+      setAllowRegister(!next)
+      toast.error(err)
+    }
+  }
+
+  const createUser = async () => {
+    const name = newUserName.trim()
+    if (!name) {
+      toast.push('请输入用户名', 'warn')
+      return
+    }
+    if (!checkPasswordLength(newUserPass)) return
+    setAdminBusy(true)
+    try {
+      await api.AdminCreateUser(name, newUserPass, newUserRole)
+      setNewUserName('')
+      setNewUserPass('')
+      setNewUserRole('user')
+      toast.push('用户已创建')
+      await loadAdmin()
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setAdminBusy(false)
+    }
+  }
+
+  const removeUser = async () => {
+    const target = delUser
+    if (!target) return
+    setDelUser(null)
+    try {
+      await api.AdminDeleteUser(target.id)
+      toast.push(`已删除 ${target.username}`)
+      await loadAdmin()
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const setRole = async (target: AdminUser, role: 'admin' | 'user') => {
+    try {
+      await api.AdminSetUserRole(target.id, role)
+      toast.push(role === 'admin' ? `${target.username} 已设为管理员` : `${target.username} 已设为普通用户`)
+      await loadAdmin()
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const openDevices = async (target: AdminUser) => {
+    setDeviceUser(target)
+    setDevices([])
+    try {
+      setDevices(await api.AdminDevices(target.id))
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const removeAdminDevice = async (deviceId: string) => {
+    const target = deviceUser
+    if (!target) return
+    try {
+      await api.AdminRemoveDevice(target.id, deviceId)
+      setDevices(await api.AdminDevices(target.id))
+      await loadAdmin()
+      toast.push('设备已移除')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const removeMyDevice = async (deviceId: string) => {
+    try {
+      await api.RemoveMyDevice(deviceId)
+      await loadMyDevices()
+      toast.push('设备已移除')
     } catch (err) {
       toast.error(err)
     }
@@ -913,6 +1049,179 @@ export default function ServerPage(props: PageProps) {
           </div>
         )}
       </div>
+
+      {authed ? (
+        <div className="card">
+          <div className="row">
+            <div style={{ flex: 1 }}>
+              <h3 className="card-title">
+                我的设备
+                {myDevices ? (
+                  <Tag kind={myDevices.devices.length >= myDevices.maxDevices ? 'warn' : 'info'}>
+                    {myDevices.devices.length}/{myDevices.maxDevices}
+                  </Tag>
+                ) : null}
+              </h3>
+              <p className="card-desc" style={{ margin: 0 }}>
+                同一账号最多可登录 {myDevices?.maxDevices ?? maxDevices} 台设备。设备满额时先在这里移除旧设备，再用新机器登录。
+              </p>
+            </div>
+          </div>
+          {myDevices && myDevices.devices.length > 0 ? (
+            <div className="list" style={{ marginTop: 10 }}>
+              {myDevices.devices.map((d) => (
+                <div key={d.id} className="file-row">
+                  <span className="file-icon">🖥</span>
+                  <span className="file-name">{d.name || d.id.slice(0, 8)}</span>
+                  <span className="file-size">{d.lastSeen ? relativeTime(d.lastSeen) : '—'}</span>
+                  <button className="btn btn-ghost btn-sm" title="移除该设备" onClick={() => void removeMyDevice(d.id)}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="small faint" style={{ marginTop: 10 }}>
+              暂无已登记设备，下次登录时会自动登记本机。
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {isAdmin ? (
+        <div className="card">
+          <div className="row">
+            <div style={{ flex: 1 }}>
+              <h3 className="card-title">
+                服务器管理
+                <Tag kind="info">管理员</Tag>
+              </h3>
+              <p className="card-desc" style={{ margin: 0 }}>
+                管理注册开关、账号权限与设备绑定。第一个注册的账号默认是管理员。
+              </p>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="small faint">公开注册</span>
+              <Switch checked={allowRegister} onChange={(v) => void toggleRegister(v)} />
+            </div>
+          </div>
+
+          <div className="list" style={{ marginTop: 12 }}>
+            {adminUsers.length === 0 ? (
+              <div className="small faint">暂无用户</div>
+            ) : (
+              adminUsers.map((u) => {
+                const self = u.username === user?.username
+                return (
+                  <div key={u.id} className="file-row">
+                    <span className="file-icon">{u.role === 'admin' ? '👑' : '👤'}</span>
+                    <span className="file-name">
+                      {u.username}
+                      {self ? '（我）' : ''}
+                    </span>
+                    <span className="file-size" style={{ width: 80 }}>
+                      <Tag kind={u.role === 'admin' ? 'info' : 'default'}>{u.role === 'admin' ? '管理员' : '用户'}</Tag>
+                    </span>
+                    <span className="file-size" style={{ width: 84, textAlign: 'right' }}>
+                      设备 {u.devices} 台
+                    </span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => void openDevices(u)}>
+                      设备
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={self}
+                      onClick={() => void setRole(u, u.role === 'admin' ? 'user' : 'admin')}
+                    >
+                      {u.role === 'admin' ? '降为普通' : '设为管理员'}
+                    </button>
+                    <button className="btn btn-danger btn-sm" disabled={self} onClick={() => setDelUser(u)}>
+                      删除
+                    </button>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          <div className="row" style={{ marginTop: 14, gap: 8, flexWrap: 'wrap' }}>
+            <input
+              className="input"
+              placeholder="用户名"
+              value={newUserName}
+              onChange={(e) => setNewUserName(e.target.value)}
+              style={{ maxWidth: 180 }}
+            />
+            <input
+              className="input"
+              type="password"
+              placeholder="密码"
+              value={newUserPass}
+              onChange={(e) => setNewUserPass(e.target.value)}
+              style={{ maxWidth: 180 }}
+            />
+            <Tabs
+              tabs={[
+                { id: 'user', label: '普通用户' },
+                { id: 'admin', label: '管理员' },
+              ]}
+              value={newUserRole}
+              onChange={setNewUserRole}
+            />
+            <button className="btn btn-primary btn-sm" onClick={() => void createUser()} disabled={adminBusy}>
+              新增用户
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {deviceUser ? (
+        <Modal
+          title={`${deviceUser.username} 的设备`}
+          onClose={() => {
+            setDeviceUser(null)
+            setDevices([])
+          }}
+          footer={
+            <button
+              className="btn"
+              onClick={() => {
+                setDeviceUser(null)
+                setDevices([])
+              }}
+            >
+              关闭
+            </button>
+          }
+        >
+          {devices.length === 0 ? (
+            <Empty icon="🖥" title="没有登记设备" hint="该账号还没有登录过任何设备" />
+          ) : (
+            <div className="list">
+              {devices.map((d) => (
+                <div key={d.id} className="file-row">
+                  <span className="file-icon">🖥</span>
+                  <span className="file-name">{d.name || d.id.slice(0, 8)}</span>
+                  <span className="file-size">{d.lastSeen ? relativeTime(d.lastSeen) : '—'}</span>
+                  <button className="btn btn-ghost btn-sm" title="移除该设备" onClick={() => void removeAdminDevice(d.id)}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      ) : null}
+
+      {delUser ? (
+        <Confirm
+          title="删除账号"
+          danger
+          message={`确定删除账号「${delUser.username}」吗？该账号的令牌会立即失效，此操作不可恢复。`}
+          onCancel={() => setDelUser(null)}
+          onConfirm={() => void removeUser()}
+        />
+      ) : null}
 
       {mkdirOpen ? (
         <Modal

@@ -35,6 +35,8 @@ func main() {
 		setPass    = flag.String("set-password", "", "set a user password and exit: username:password")
 		setRole    = flag.String("set-role", "", "set a user role and exit: username:role")
 		listUsers  = flag.Bool("list-users", false, "list registered users and exit")
+		listDev    = flag.String("list-devices", "", "list devices bound to a user and exit: username")
+		rmDevice   = flag.String("remove-device", "", "remove a device binding and exit: username:deviceID")
 		localAdmin = flag.Bool("local-admin", true, "allow loopback connections to act as admin without a token")
 	)
 	flag.Parse()
@@ -56,8 +58,8 @@ func main() {
 		LocalAdmin:        *localAdmin,
 	}
 
-	if *listUsers || *createUsr != "" || *deleteUsr != "" || *setPass != "" || *setRole != "" {
-		if err := adminCommand(*dataDir, *createUsr, *listUsers, *deleteUsr, *setPass, *setRole); err != nil {
+	if *listUsers || *createUsr != "" || *deleteUsr != "" || *setPass != "" || *setRole != "" || *listDev != "" || *rmDevice != "" {
+		if err := adminCommand(*dataDir, *createUsr, *listUsers, *deleteUsr, *setPass, *setRole, *listDev, *rmDevice); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
@@ -98,12 +100,39 @@ func defaultDataDir() string {
 	return home + string(os.PathSeparator) + ".wails-tools-server"
 }
 
-func adminCommand(dataDir, create string, list bool, del, pass, role string) error {
+func adminCommand(dataDir, create string, list bool, del, pass, role, listDev, rmDev string) error {
 	db, err := store.Open(dataDir)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if listDev != "" {
+		u, err := db.GetUserByName(strings.TrimSpace(listDev))
+		if err != nil {
+			return fmt.Errorf("user %q not found", listDev)
+		}
+		devices := db.ListDevices(u.ID)
+		for _, d := range devices {
+			fmt.Printf("%s\t%s\tlast-seen=%s\n", d.ID, d.Name, d.LastSeen)
+		}
+		fmt.Printf("%d device(s) for %s\n", len(devices), u.Username)
+		return nil
+	}
+	if rmDev != "" {
+		parts := strings.SplitN(rmDev, ":", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			return errors.New("remove-device expects username:deviceID")
+		}
+		u, err := db.GetUserByName(strings.TrimSpace(parts[0]))
+		if err != nil {
+			return fmt.Errorf("user %q not found", parts[0])
+		}
+		if err := db.DeleteDevice(u.ID, parts[1]); err != nil {
+			return fmt.Errorf("device %q not found for %s", parts[1], u.Username)
+		}
+		fmt.Printf("removed device %s from %s\n", parts[1], u.Username)
+		return nil
+	}
 	if del != "" {
 		u, err := db.GetUserByName(strings.TrimSpace(del))
 		if err != nil {
@@ -171,7 +200,7 @@ func adminCommand(dataDir, create string, list bool, del, pass, role string) err
 		}
 		return nil
 	}
-	user, pass, err := parseCreateSpec(create)
+	user, pass, role, err := parseCreateSpec(create)
 	if err != nil {
 		return err
 	}
@@ -185,7 +214,7 @@ func adminCommand(dataDir, create string, list bool, del, pass, role string) err
 		Username:     user,
 		PasswordHash: hash,
 		DisplayName:  user,
-		Role:         "admin",
+		Role:         role,
 		QuotaBytes:   100 << 30,
 		CreatedAt:    now,
 		UpdatedAt:    now,

@@ -57,6 +57,8 @@ func main() {
 		s.Server.Host = *host
 		s.Server.Port = *port
 		s.Server.DisableUDP = *noUDP
+		// A stable identity keeps every publish from consuming a device slot.
+		s.Server.DeviceID = "wt-publish-cli"
 		return nil
 	}); err != nil {
 		fatal(err)
@@ -79,6 +81,12 @@ func main() {
 	if _, err := link.Login(ctx, *user, *pass); err != nil {
 		fatal(fmt.Errorf("login: %w", err))
 	}
+	// The uploader is not a real device: release its slot when done.
+	defer func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer ccancel()
+		_ = link.Call(cctx, "admin.devices.selfRemove", map[string]any{"deviceId": "wt-publish-cli"}, nil)
+	}()
 	me, err := link.Me(ctx)
 	if err != nil {
 		fatal(err)
