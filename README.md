@@ -48,10 +48,10 @@
 | FTP 管理 | FTP / 隐式 FTPS / 显式 FTPS（AUTH TLS）、被动模式、目录浏览、上传/下载、新建/重命名/删除、多会话 |
 | 下载工具 | HTTP(S)、多连接分段下载、断点续传、自动重试、限速、进度/速度事件、任务队列与并发控制、按任务选择走代理或直连、文件名识别（Content-Disposition） |
 | 网盘管理 | 夸克网盘、UC 网盘、百度网盘：Cookie 账号、文件列表/搜索、上传、下载（解析直链后交给下载引擎）、分享、回收站、视频预览 || 代理 | HTTP CONNECT 与 SOCKS5、账号密码、按作用域（HTTP 下载 / 网盘 / SSH / FTP / 同步）分别设置走或不走代理、绕过列表（后缀与 CIDR）、连通性测试、一键全部直连 |
-| 代理订阅 | 订阅链接自动拉取节点（明文/Base64/Clash YAML），定时后台刷新，流量与到期信息；支持 VMess / VLESS / Trojan / Shadowsocks / HTTP / SOCKS5，选中节点一键启用 |
-| 代理引擎 | 由 C 版 miproxy/Pulse 内核重写为 Go：VMess（AEAD/legacy 头 + WS/TLS）、VLESS、Trojan、Shadowsocks(AEAD)、本地 SOCKS5+HTTP 混合入站、内部/外部共享与可选认证 |
+| 代理订阅 | 订阅链接自动拉取节点（明文/Base64/Clash YAML），定时后台刷新，流量与到期信息；支持 VMess / VLESS / Trojan / Shadowsocks / HTTP / SOCKS5，节点一键切换、整表批量测速（http://www.gstatic.com/generate_204）并显示延迟 |
+| 代理引擎 | 由 C 版 miproxy/Pulse 内核重写为 Go：VMess（AEAD/legacy 头 + WS/TLS）、VLESS、Trojan、Shadowsocks(AEAD)、本地 SOCKS5+HTTP 混合入站；「内部代理」模式一键让所有连接走当前节点，无需逐项配置；支持外部共享（0.0.0.0 + 认证）与系统代理开关 |
 | 截图自动保存 | 一键截屏（主屏/全部屏幕）自动落盘、剪贴板图片自动保存、命名模板与格式可选、缩略图画廊 |
-| 自动更新 | 服务端分发客户端构建（管理员上传、按平台/通道查询、SHA-256 校验），失败回退 GitHub Release；**绕过 SNI 检测**（固定 IP + Host 复用 + TLS ClientHello 分片） |
+| 自动更新 | **默认从同步服务器按哈希检查更新**（比较运行中可执行文件的 SHA-256 与服务器构建哈希，版本号仅作兜底）；服务端分发构建（管理员上传、按平台/通道查询、SHA-256 校验），失败回退 GitHub Release；**绕过 SNI 检测**（固定 IP + Host 复用 + TLS ClientHello 分片） |
 | 系统托盘 | 原生 Win32 托盘图标（无第三方依赖）：双击显示窗口、右键菜单（截图/同步/连接服务器/剪贴板/自启动/退出）、悬停显示连接状态、关闭窗口最小化到托盘 |
 | 开机自启动 | Windows 注册表 Run 项 / Linux autostart 桌面项，一键开关 |
 | 同步服务端 | 用户注册/登录（Argon2id）、令牌会话、每用户独立笔记与文件空间、配额、TCP 中转隧道、客户端构建分发、审计记录 |
@@ -202,6 +202,17 @@ cd frontend; npx tsc --noEmit    # 前端类型检查
 
 ---
 
+## 构建与自动发布
+
+```powershell
+# 构建并自动上传到同步服务器（需要管理员账号）
+$env:WT_USER = 'admin'
+$env:WT_PASS = 'password'
+./scripts/build-and-publish.ps1 -Channel stable -Notes "本次更新说明"
+```
+
+`cmd/wt-publish` 通过 wire 协议（UDP 优先）把 `build/bin/WailsTools.exe` 连同版本、平台、SHA-256 上传到服务器；客户端默认从服务器按哈希检查更新，哈希不同即提示更新。
+
 ## 部署与发布
 
 - 服务端已部署在 `s2.admirecn.de:8642`（systemd `wt-server.service`，UDP/QUIC 优先 + TCP 回退），详见 [docs/deploy.md](docs/deploy.md)。
@@ -221,6 +232,7 @@ server/cmd/wt-server     服务端可执行
 server/internal/{api,store,auth,server}
 frontend/                React + TypeScript 界面
 ```
+
 
 
 

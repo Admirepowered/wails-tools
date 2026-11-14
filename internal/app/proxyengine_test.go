@@ -27,7 +27,7 @@ func TestActivateProxyNodeEngine(t *testing.T) {
 	// A "direct" node makes the engine forward without an upstream proxy, so
 	// the test only depends on loopback.
 	node := miproxy.Node{Name: "local-direct", Protocol: miproxy.ProtoDirect}
-	res, err := a.ActivateProxyNode(node, nil, true, false, "", "")
+	res, err := a.ActivateProxyNode(node)
 	if err != nil {
 		t.Fatalf("activate: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestActivatePlainUpstreamNode(t *testing.T) {
 	a := &App{settings: store, proxySvc: proxysvc.New(nil)}
 
 	node := miproxy.Node{Name: "socks-up", Protocol: miproxy.ProtoSOCKS5, Server: "10.0.0.5", Port: 1080, Username: "u", Password: "p"}
-	res, err := a.ActivateProxyNode(node, []string{settings.ScopeHTTP}, false, false, "", "")
+	res, err := a.ActivateProxyNode(node)
 	if err != nil {
 		t.Fatalf("activate: %v", err)
 	}
@@ -99,9 +99,12 @@ func TestActivatePlainUpstreamNode(t *testing.T) {
 	if rule.Mode != "socks5" || rule.URL != "10.0.0.5:1080" || rule.Username != "u" {
 		t.Fatalf("unexpected rule: %+v", rule)
 	}
-	// Other scopes must be untouched.
-	if other := store.Get().Proxy.Resolve(settings.ScopeSSH); other.Mode == "socks5" && other.URL == rule.URL {
-		t.Fatalf("unexpected scope leak: %+v", other)
+	// Switching a node now applies to every scope.
+	if other := store.Get().Proxy.Resolve(settings.ScopeSSH); other.URL != rule.URL {
+		t.Fatalf("scope not switched: %+v", other)
+	}
+	if store.Get().Proxy.Mode != ProxyModeInternal {
+		t.Fatalf("mode not internal: %+v", store.Get().Proxy.Mode)
 	}
 }
 

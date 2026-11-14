@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type AppInfo, type AutostartStatus, type DownloadSettings, type Settings, type StartupSettings } from '../lib/api'
+import { useDebouncedValue } from '../lib/autosave'
 import { Field, Spinner, Switch, Tag, useToast } from '../components/ui'
 import { formatBytes } from '../lib/format'
 import type { PageProps } from '../App'
@@ -105,6 +106,18 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     setDownloads((prev) => ({ ...prev, ...patch }))
   }
 
+  // Seamless save: download defaults persist automatically.
+  const debouncedDownloads = useDebouncedValue(downloads, 800)
+  const downloadsFirstRun = useRef(true)
+  useEffect(() => {
+    if (downloadsFirstRun.current) {
+      downloadsFirstRun.current = false
+      return
+    }
+    void saveDownloads(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedDownloads])
+
   const pickDirectory = async () => {
     try {
       const dir = await api.PickDirectory('选择默认下载目录')
@@ -114,8 +127,8 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     }
   }
 
-  const saveDownloads = async () => {
-    setSavingDl(true)
+  const saveDownloads = async (silent = false) => {
+    if (!silent) setSavingDl(true)
     try {
       const merged: DownloadSettings & { verifyChecksums?: boolean } = {
         ...settings.downloads,
@@ -131,11 +144,11 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
       if (downloads.verifySupported) merged.verifyChecksums = downloads.verifyChecksums
       await api.SaveSettings({ ...settings, downloads: merged })
       await reloadSettings()
-      toast.push('下载设置已保存')
+      if (!silent) toast.push('下载设置已保存')
     } catch (err) {
       toast.error(err)
     } finally {
-      setSavingDl(false)
+      if (!silent) setSavingDl(false)
     }
   }
 
@@ -183,9 +196,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
               这些默认值会应用到新建的下载任务与网盘转存任务。
             </p>
           </div>
-          <button className="btn btn-primary" onClick={() => void saveDownloads()} disabled={savingDl}>
-            {savingDl ? '保存中…' : '保存'}
-          </button>
+          <span className="small faint">修改后自动保存</span>
         </div>
 
         <div className="divider" />
@@ -541,6 +552,9 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     </div>
   )
 }
+
+
+
 
 
 

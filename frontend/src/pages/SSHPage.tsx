@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 import {
   api,
   onEvent,
@@ -1496,41 +1499,81 @@ function SftpPane({ sessionId }: { sessionId: string }) {
   )
 }
 
-/* ---------------- terminal ---------------- */
-
-const TERM_KEYS: Record<string, string> = {
-  Enter: '\r',
-  Backspace: '\x7f',
-  Tab: '\t',
-  Escape: '\x1b',
-  ArrowUp: '\x1b[A',
-  ArrowDown: '\x1b[B',
-  ArrowRight: '\x1b[C',
-  ArrowLeft: '\x1b[D',
-  Home: '\x1b[H',
-  End: '\x1b[F',
-  Delete: '\x1b[3~',
-  PageUp: '\x1b[5~',
-  PageDown: '\x1b[6~',
-}
+/* ---------------- terminal (xterm.js) ---------------- */
 
 function TerminalPane({ sessionId }: { sessionId: string }) {
   const toast = useToast()
   const [termId, setTermId] = useState<string | null>(null)
-  const [output, setOutput] = useState('')
   const [closed, setClosed] = useState(false)
+  const [openKey, setOpenKey] = useState(0)
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const termRef = useRef<Terminal | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
   const idRef = useRef<string | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const boxRef = useRef<HTMLPreElement | null>(null)
+  const dataSubRef = useRef<{ dispose: () => void } | null>(null)
 
+  // Create the emulator once and keep it fitted to the container.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
+      lineHeight: 1.2,
+      scrollback: 5000,
+      theme: {
+        background: '#080a0e',
+        foreground: '#cfe8d8',
+        cursor: '#3ddc97',
+        selectionBackground: '#2a3040',
+        black: '#12141a',
+        brightBlack: '#6b7488',
+      },
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(host)
+    termRef.current = term
+    fitRef.current = fit
+    const fitNow = () => {
+      try {
+        fit.fit()
+      } catch {
+        /* the container may be hidden while switching tabs */
+      }
+    }
+    window.setTimeout(fitNow, 30)
+    const onResize = () => {
+      fitNow()
+      const id = idRef.current
+      if (id && term.cols > 0 && term.rows > 0) {
+        void api.ResizeTerminal(id, term.cols, term.rows).catch(() => {})
+      }
+    }
+    window.addEventListener('resize', onResize)
+    const observer = new ResizeObserver(onResize)
+    observer.observe(host)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      observer.disconnect()
+      dataSubRef.current?.dispose()
+      dataSubRef.current = null
+      term.dispose()
+      termRef.current = null
+    }
+  }, [])
+
+  // Open a PTY for the session and wire it to the emulator.
   useEffect(() => {
     let disposed = false
     let opened = ''
     void (async () => {
       try {
-        const width = boxRef.current?.clientWidth ?? 820
-        const cols = Math.max(40, Math.min(240, Math.floor(width / 7.4)))
-        const id = await api.OpenTerminal(sessionId, cols, 30)
+        const term = termRef.current
+        const cols = term && term.cols > 0 ? term.cols : 120
+        const rows = term && term.rows > 0 ? term.rows : 30
+        const id = await api.OpenTerminal(sessionId, cols, rows)
         if (disposed) {
           void api.CloseTerminal(id)
           return
@@ -1538,34 +1581,42 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
         opened = id
         idRef.current = id
         setTermId(id)
-        setOutput('')
         setClosed(false)
-        window.setTimeout(() => inputRef.current?.focus(), 80)
+        termRef.current?.reset()
+        termRef.current?.focus()
+        dataSubRef.current?.dispose()
+        dataSubRef.current = termRef.current?.onData((data) => {
+          const current = idRef.current
+          if (!current) return
+          void api.WriteTerminal(current, data).catch((err) => toast.error(err))
+        }) ?? null
       } catch (err) {
         toast.error(err)
         setClosed(true)
+        termRef.current?.writeln(`\x1b[31m${err instanceof Error ? err.message : String(err)}\x1b[0m`)
       }
     })()
     return () => {
       disposed = true
       idRef.current = null
+      dataSubRef.current?.dispose()
+      dataSubRef.current = null
       if (opened) void api.CloseTerminal(opened)
     }
-  }, [sessionId, toast])
+  }, [sessionId, openKey, toast])
 
   useEffect(() => {
     const offData = onEvent<{ id: string; data: string }>('ssh:terminal:data', (ev) => {
       if (!ev?.data || ev.id !== idRef.current) return
-      setOutput((prev) => {
-        const next = prev + ev.data
-        return next.length > 200_000 ? next.slice(next.length - 200_000) : next
-      })
+      termRef.current?.write(ev.data)
     })
     const offClosed = onEvent<{ id: string; error?: string }>('ssh:terminal:closed', (ev) => {
       if (ev?.id !== idRef.current) return
       idRef.current = null
       setTermId(null)
       setClosed(true)
+      const suffix = ev.error ? `\r\n\x1b[31m${ev.error}\x1b[0m` : ''
+      termRef.current?.writeln(`\r\n\x1b[33m[连接已结束]${suffix}`)
       toast.push(ev.error ? `终端已关闭：${ev.error}` : '终端已关闭', ev.error ? 'warn' : 'info')
     })
     return () => {
@@ -1573,36 +1624,6 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
       offClosed()
     }
   }, [toast])
-
-  useEffect(() => {
-    const box = boxRef.current
-    if (box) box.scrollTop = box.scrollHeight
-  }, [output])
-
-  const send = (data: string) => {
-    const id = idRef.current
-    if (!id) return
-    void api.WriteTerminal(id, data).catch((err) => toast.error(err))
-  }
-
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (!idRef.current || closed) return
-    if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'c') {
-      e.preventDefault()
-      send('\x03')
-      return
-    }
-    const mapped = TERM_KEYS[e.key]
-    if (mapped) {
-      e.preventDefault()
-      send(mapped)
-      return
-    }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault()
-      send(e.key)
-    }
-  }
 
   const closeTerm = () => {
     const id = idRef.current
@@ -1612,33 +1633,28 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
     if (id) void api.CloseTerminal(id).catch((err) => toast.error(err))
   }
 
+  const reopen = () => {
+    setClosed(false)
+    setTermId(null)
+    setOpenKey((k) => k + 1)
+  }
+
   return (
     <div className="col" style={{ gap: 10, minHeight: 0 }}>
       <div className="row">
-        <span className="small faint">会话内直接输入命令；方向键、Tab、Ctrl+C 均会转发到远端。</span>
+        <span className="small faint">完整终端仿真（xterm.js）：支持颜色、光标定位、全屏程序与快捷键。</span>
         <div className="spacer" />
         <Tag kind={closed ? 'bad' : termId ? 'ok' : 'info'}>{closed ? '已结束' : termId ? '已连接' : '打开中…'}</Tag>
         <button className="btn btn-sm" onClick={closeTerm} disabled={!termId}>
           关闭终端
         </button>
+        {closed ? (
+          <button className="btn btn-sm" onClick={reopen}>
+            重新打开
+          </button>
+        ) : null}
       </div>
-      <pre className="term" ref={boxRef} style={{ margin: 0 }} onClick={() => inputRef.current?.focus()}>
-        {output || (closed ? '（终端已结束）' : '正在建立终端会话…')}
-        <input
-          ref={inputRef}
-          className="mono"
-          value=""
-          onChange={() => {}}
-          onKeyDown={onKeyDown}
-          disabled={!termId || closed}
-          spellCheck={false}
-          autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          aria-label="终端输入"
-          style={{ caretColor: 'var(--accent)' }}
-        />
-      </pre>
+      <div className="term-xterm" ref={hostRef} onClick={() => termRef.current?.focus()} />
       <div className="small faint">提示：如终端无响应，可关闭后重新打开；断开连接时终端会自动关闭。</div>
     </div>
   )
@@ -1707,3 +1723,4 @@ function CommandPane({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+

@@ -491,6 +491,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   white-space: pre-wrap;
   word-break: break-word;
 }
+.term-xterm {
+  height: 460px;
+  min-height: 260px;
+  background: #080a0e;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 6px 6px 10px;
+  overflow: hidden;
+}
+.term-xterm .xterm { height: 100%; }
+.term-xterm .xterm-viewport { overflow-y: auto !important; }
+
 .term input {
   background: transparent;
   border: none;
@@ -522,3 +534,4 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .scope-head { display: flex; align-items: center; gap: 10px; }
 .scope-title { font-weight: 600; }
 .scope-desc { font-size: 11.5px; color: var(--text-faint); }
+

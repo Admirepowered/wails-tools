@@ -45,10 +45,16 @@ type Release struct {
 
 // CheckResult reports the outcome of an update check.
 type CheckResult struct {
-	Current   string          `json:"current"`
-	Latest    string          `json:"latest"`
-	Available bool            `json:"available"`
-	Source    string          `json:"source"`
+	Current   string `json:"current"`
+	Latest    string `json:"latest"`
+	Available bool   `json:"available"`
+	Source    string `json:"source"`
+	// CurrentHash is the SHA-256 of the running executable.
+	CurrentHash string `json:"currentHash,omitempty"`
+	// ReleaseHash is the SHA-256 the release expects.
+	ReleaseHash string `json:"releaseHash,omitempty"`
+	// SameBuild reports that the release is byte-identical to the running one.
+	SameBuild bool            `json:"sameBuild"`
 	Release   *Release        `json:"release,omitempty"`
 	Message   string          `json:"message"`
 	Error     string          `json:"error,omitempty"`
@@ -96,11 +102,32 @@ func CompareVersions(a, b string) int {
 	return 0
 }
 
+// SelfHash returns the SHA-256 of the running executable.
+func SelfHash() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return fileSHA256(exe)
+}
+
+// Check queries the configured sources for a newer build. A release counts as
+// an update when its hash differs from the running executable (default), or
+// when the version is newer.
+func CheckHashComparison(currentHash string, rel Release) (available bool, sameBuild bool) {
+	if rel.SHA256 != "" && currentHash != "" {
+		same := strings.EqualFold(rel.SHA256, currentHash)
+		return !same, same
+	}
+	return CompareVersions(rel.Version, version.Version) > 0, false
+}
+
 // Check queries the configured sources for a newer build.
 func (m *Manager) Check(ctx context.Context) (CheckResult, error) {
 	cfg := m.store.Get().Update
 	cur := version.Version
-	res := CheckResult{Current: cur, CheckedAt: time.Now().Format(time.RFC3339), Source: cfg.Source}
+	selfHash, _ := SelfHash()
+	res := CheckResult{Current: cur, CheckedAt: time.Now().Format(time.RFC3339), Source: cfg.Source, CurrentHash: selfHash}
 
 	tryServer := cfg.Source == "auto" || cfg.Source == "server"
 	tryGitHub := cfg.Source == "auto" || cfg.Source == "github"
@@ -112,11 +139,13 @@ func (m *Manager) Check(ctx context.Context) (CheckResult, error) {
 			res.Release = rel
 			res.Latest = rel.Version
 			res.Source = "server"
-			res.Available = CompareVersions(rel.Version, cur) > 0
+			res.Available, res.SameBuild = CheckHashComparison(selfHash, *rel)
+			res.CurrentHash = selfHash
+			res.ReleaseHash = rel.SHA256
 			if !res.Available {
-				res.Message = "已是最新版本（服务器）"
+				res.Message = "已是最新构建（哈希一致）"
 			} else {
-				res.Message = "发现新版本（服务器）"
+				res.Message = "发现新构建（哈希不同）"
 			}
 			m.recordCheck()
 			return res, nil
@@ -134,11 +163,13 @@ func (m *Manager) Check(ctx context.Context) (CheckResult, error) {
 			res.Release = rel
 			res.Latest = rel.Version
 			res.Source = "github"
-			res.Available = CompareVersions(rel.Version, cur) > 0
+			res.Available, res.SameBuild = CheckHashComparison(selfHash, *rel)
+			res.CurrentHash = selfHash
+			res.ReleaseHash = rel.SHA256
 			if !res.Available {
-				res.Message = "已是最新版本（GitHub）"
+				res.Message = "已是最新构建（GitHub）"
 			} else {
-				res.Message = "发现新版本（GitHub）"
+				res.Message = "发现新构建（GitHub）"
 			}
 			m.recordCheck()
 			return res, nil

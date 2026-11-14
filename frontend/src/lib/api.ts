@@ -142,7 +142,7 @@ export interface StartupSettings {
 }
 
 export interface Settings {
-  proxy: { default: ProxyRule; scopes?: Record<string, ProxyRule>; followSystem: boolean }
+  proxy: { mode?: string; default: ProxyRule; scopes?: Record<string, ProxyRule>; followSystem: boolean }
   downloads: DownloadSettings
   server: ServerSettings
   ui: { theme: string; language: string; density: string }
@@ -517,6 +517,9 @@ export interface UpdateStatus {
   checkedAt: string
   error?: string
   transport?: string
+  currentHash?: string
+  releaseHash?: string
+  sameBuild?: boolean
   release?: UpdateRelease
 }
 
@@ -590,6 +593,22 @@ export interface ProxyRuntimeSettings {
   port: number
   username?: string
   password?: string
+  systemProxy?: boolean
+}
+
+export interface NodeTestResult {
+  index: number
+  latencyMs: number
+  ok: boolean
+  error?: string
+}
+
+export interface ActiveProxyInfo {
+  mode: string
+  running: boolean
+  node?: MiproxyNode
+  addr?: string
+  external?: boolean
 }
 /* ---------------- events ---------------- */
 
@@ -816,14 +835,13 @@ const rawApi = {
 
   // proxy engine
   SubscriptionNodes: (sourceId: string) => call<MiproxyNode[]>('SubscriptionNodes', sourceId),
-  ActivateProxyNode: (
-    node: MiproxyNode,
-    scopes: string[],
-    all: boolean,
-    external: boolean,
-    username: string,
-    password: string,
-  ) => call<Record<string, unknown>>('ActivateProxyNode', node, scopes, all, external, username, password),
+  ActivateProxyNode: (node: MiproxyNode) => call<Record<string, unknown>>('ActivateProxyNode', node),
+  TestAllNodes: (nodes: MiproxyNode[]) => call<NodeTestResult[]>('TestAllNodes', nodes),
+  SetProxyMode: (mode: string) => call<Settings>('SetProxyMode', mode),
+  SetSystemProxy: (enabled: boolean) => call<Record<string, unknown>>('SetSystemProxy', enabled),
+  SystemProxyState: () =>
+    call<{ enabled: boolean; server: string; supported: boolean; setting: boolean }>('SystemProxyState'),
+  ActiveProxyNode: () => call<ActiveProxyInfo>('ActiveProxyNode'),
   DeactivateProxy: () => call<Settings>('DeactivateProxy'),
   ProxyRuntimeStatus: () => call<ProxyRuntimeStatus>('ProxyRuntimeStatus'),
   TestProxyNode: (node: MiproxyNode) =>
@@ -948,6 +966,8 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
 
 
 

@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, type ProxyInfo, type ProxyRule, type Settings, type TestResult } from '../lib/api'
+import {
+  api,
+  onEvent,
+  type ActiveProxyInfo,
+  type ProxyInfo,
+  type ProxyRule,
+  type ProxyRuntimeSettings,
+  type Settings,
+  type TestResult,
+} from '../lib/api'
 import { Field, Switch, Tag, useToast } from '../components/ui'
+import { useAutoSave } from '../lib/autosave'
 import type { PageProps } from '../App'
 
 const SCOPE_META: Record<string, { title: string; desc: string }> = {
@@ -23,6 +33,27 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
   const [tests, setTests] = useState<Record<string, TestResult | null>>({})
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [probeUrl, setProbeUrl] = useState('http://www.gstatic.com/generate_204')
+  const [dirty, setDirty] = useState<Record<string, boolean>>({})
+  const [mode, setMode] = useState<'off' | 'internal'>('off')
+  const [active, setActive] = useState<ActiveProxyInfo | null>(null)
+  const [runtimeCfg, setRuntimeCfg] = useState<ProxyRuntimeSettings>({ external: false, port: 7890 })
+  const [sysState, setSysState] = useState<{ enabled: boolean; server: string; supported: boolean; setting: boolean } | null>(null)
+
+  const loadRuntime = useCallback(async () => {
+    try {
+      const [info, cfg, sys] = await Promise.all([
+        api.ActiveProxyNode(),
+        api.GetProxyRuntimeSettings(),
+        api.SystemProxyState(),
+      ])
+      setActive(info)
+      setRuntimeCfg(cfg)
+      setSysState(sys)
+      setMode(info.mode === 'internal' ? 'internal' : 'off')
+    } catch (err) {
+      toast.error(err)
+    }
+  }, [toast])
 
   const load = useCallback(async () => {
     try {
@@ -42,10 +73,53 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
 
   useEffect(() => {
     void load()
-  }, [load])
+    void loadRuntime()
+  }, [load, loadRuntime])
+
+  useEffect(() => {
+    const off = onEvent('proxy:status', () => void loadRuntime())
+    return () => off()
+  }, [loadRuntime])
+
+  const switchMode = async (next: 'off' | 'internal') => {
+    try {
+      await api.SetProxyMode(next)
+      setMode(next)
+      await reloadSettings()
+      await loadRuntime()
+      await load()
+      toast.push(next === 'internal' ? '已切换到内部代理' : '已关闭代理，恢复直连')
+    } catch (err) {
+      toast.error(err)
+      await loadRuntime()
+    }
+  }
+
+  const saveRuntimeCfg = async () => {
+    try {
+      const saved = await api.SaveProxyRuntimeSettings(runtimeCfg)
+      setRuntimeCfg(saved)
+      await loadRuntime()
+      toast.push('本地代理设置已保存')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const toggleSystemProxy = async (enabled: boolean) => {
+    try {
+      await api.SetSystemProxy(enabled)
+      await loadRuntime()
+      toast.push(enabled ? '已开启系统代理' : '已关闭系统代理')
+    } catch (err) {
+      toast.error(err)
+      await loadRuntime()
+    }
+  }
 
   const update = (scope: string, patch: Partial<ScopeState>) => {
     setState((prev) => ({ ...prev, [scope]: { ...prev[scope], ...patch } }))
+    setDirty((prev) => ({ ...prev, [scope]: true }))
   }
 
   const updateRule = (scope: string, patch: Partial<ProxyRule>) => {
@@ -53,7 +127,32 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
       const cur = prev[scope] ?? { rule: normalizeRule(undefined), override: true }
       return { ...prev, [scope]: { ...cur, rule: { ...cur.rule, ...patch }, override: true } }
     })
+    setDirty((prev) => ({ ...prev, [scope]: true }))
   }
+
+  // Seamless save: dirty scopes are persisted shortly after editing stops.
+  useEffect(() => {
+    const scopes = Object.keys(dirty).filter((k) => dirty[k])
+    if (scopes.length === 0) return
+    const timer = window.setTimeout(() => {
+      setDirty({})
+      for (const scope of scopes) {
+        const st = state[scope]
+        if (!st) continue
+        void api
+          .SetProxy(scope, { ...st.rule, mode: st.rule.mode === 'inherit' ? 'off' : st.rule.mode })
+          .then(() => reloadSettings())
+          .catch((err) => toast.error(err))
+      }
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [dirty, state, reloadSettings, toast])
+
+  // The engine settings save themselves too.
+  useAutoSave(runtimeCfg, async (next) => {
+    const saved = await api.SaveProxyRuntimeSettings(next)
+    setRuntimeCfg(saved)
+  }, { delay: 700, onError: (err) => toast.error(err) })
 
   const save = async (scope: string) => {
     const st = state[scope]
@@ -160,6 +259,92 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
         </div>
       </div>
 
+      <div className="card">
+        <div className="row">
+          <div>
+            <h3 className="card-title">代理模式</h3>
+            <p className="card-desc" style={{ margin: 0 }}>
+              选择「内部代理」后，下载 / 网盘 / SSH / FTP 等连接会自动走当前订阅节点，无需逐个作用域配置。
+            </p>
+          </div>
+          <div className="spacer" />
+          <select className="select" style={{ width: 180 }} value={mode} onChange={(e) => switchMode(e.target.value as 'off' | 'internal')}>
+            <option value="off">关闭（直连）</option>
+            <option value="internal">内部代理</option>
+          </select>
+        </div>
+
+        <div className="row row-wrap" style={{ marginTop: 10, gap: 10 }}>
+          {active?.running && active.node ? (
+            <>
+              <Tag kind="ok">当前节点：{active.node.name}</Tag>
+              <span className="small faint mono">{active.addr}</span>
+              {active.external ? <Tag kind="warn">外部可用</Tag> : <Tag>仅本机</Tag>}
+            </>
+          ) : (
+            <Tag>未启用节点（在「订阅」页点节点上的「启用」）</Tag>
+          )}
+        </div>
+
+        <div className="divider" />
+
+        <div className="row row-wrap" style={{ gap: 16 }}>
+          <label className="row" style={{ gap: 8 }}>
+            <Switch checked={runtimeCfg.external} onChange={(v) => setRuntimeCfg({ ...runtimeCfg, external: v })} />
+            <span className="small">外部可用（0.0.0.0，供其它设备使用）</span>
+          </label>
+          <div className="field" style={{ width: 120 }}>
+            <input
+              className="input"
+              type="number"
+              min={1024}
+              max={65535}
+              value={runtimeCfg.port}
+              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, port: Number(e.target.value) || 7890 })}
+            />
+          </div>
+          <div className="field" style={{ width: 150 }}>
+            <input
+              className="input"
+              placeholder="用户名（可选）"
+              value={runtimeCfg.username ?? ''}
+              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, username: e.target.value })}
+            />
+          </div>
+          <div className="field" style={{ width: 150 }}>
+            <input
+              className="input"
+              type="password"
+              placeholder="密码（可选）"
+              value={runtimeCfg.password ?? ''}
+              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, password: e.target.value })}
+            />
+          </div>
+
+          <div className="spacer" />
+          <label className="row" style={{ gap: 8 }} title={runtimeCfg.external ? '把系统代理指向本机代理' : '需先打开「外部可用」'}>
+            <Switch
+              checked={sysState?.setting ?? false}
+              onChange={toggleSystemProxy}
+              title={runtimeCfg.external ? '' : '需先打开外部可用'}
+            />
+            <span className="small">系统代理</span>
+          </label>
+          {sysState ? (
+            sysState.supported ? (
+              <Tag kind={sysState.enabled ? 'ok' : 'default'}>
+                {sysState.enabled ? `已开启 ${sysState.server}` : '未开启'}
+              </Tag>
+            ) : (
+              <Tag kind="warn">当前平台不支持</Tag>
+            )
+          ) : null}
+        </div>
+        {!runtimeCfg.external ? (
+          <div className="small faint" style={{ marginTop: 6 }}>开启「外部可用」后才能打开系统代理。</div>
+        ) : null}
+      </div>
+
       <div className="grid-2" style={{ marginTop: 14 }}>
         {scopes.map((scope) => {
           const st = state[scope] ?? { rule: normalizeRule(undefined), override: false }
@@ -241,9 +426,7 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
               )}
 
               <div className="row">
-                <button className="btn btn-primary btn-sm" disabled={busy[scope]} onClick={() => save(scope)}>
-                  保存
-                </button>
+
                 <button className="btn btn-sm" disabled={!st.override || busy[scope]} onClick={() => followDefault(scope)}>
                   跟随默认
                 </button>
@@ -276,3 +459,7 @@ function normalizeRule(rule?: ProxyRule): ProxyRule {
     noProxy: rule.noProxy ?? [],
   }
 }
+
+
+
+

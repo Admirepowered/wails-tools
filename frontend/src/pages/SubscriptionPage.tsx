@@ -41,7 +41,6 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const [list, setList] = useState<SubscriptionSource[]>([])
   const [customNodes, setCustomNodes] = useState<MiproxyNode[]>([])
   const [runtime, setRuntime] = useState<ProxyRuntimeStatus | null>(null)
-  const [runtimeCfg, setRuntimeCfg] = useState<ProxyRuntimeSettings>({ external: false, port: 7890 })
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [selected, setSelected] = useState('')
@@ -50,23 +49,19 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const [nodeModal, setNodeModal] = useState<MiproxyNode | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
-  const [activate, setActivate] = useState<{ node: MiproxyNode; source: string } | null>(null)
-  const [applyScopes, setApplyScopes] = useState<string[]>(['http', 'netdisk'])
-  const [applyAll, setApplyAll] = useState(true)
+
   const [tests, setTests] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string } | null>>({})
 
   const load = useCallback(async () => {
     try {
-      const [items, custom, status, cfg] = await Promise.all([
+      const [items, custom, status] = await Promise.all([
         api.ListSubscriptions(),
         api.ListCustomNodes(),
         api.ProxyRuntimeStatus(),
-        api.GetProxyRuntimeSettings(),
       ])
       setList(items)
       setCustomNodes(custom)
       setRuntime(status)
-      setRuntimeCfg(cfg)
       setSelected((prev) => (prev && items.some((i) => i.id === prev) ? prev : items[0]?.id ?? ''))
     } catch (err) {
       toast.error(err)
@@ -129,23 +124,36 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
     }
   }
 
-  const doActivate = async () => {
-    if (!activate) return
+  const activateNode = async (node: MiproxyNode) => {
     setBusy('activate')
     try {
-      const res = await api.ActivateProxyNode(
-        activate.node,
-        applyScopes,
-        applyAll,
-        runtimeCfg.external,
-        runtimeCfg.username ?? '',
-        runtimeCfg.password ?? '',
-      )
+      const res = await api.ActivateProxyNode(node)
       await reloadSettings()
       setRuntime(await api.ProxyRuntimeStatus())
-      setActivate(null)
       const mode = res.mode === 'engine' ? '本地引擎' : '上游代理'
-      toast.push(`已启用 ${activate.node.name}（${mode}）`)
+      toast.push(`已切换节点：${node.name}（${mode}）`)
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const testAll = async (nodes: MiproxyNode[]) => {
+    if (nodes.length === 0) return
+    setBusy('testall')
+    try {
+      const results = await api.TestAllNodes(nodes)
+      setTests((prev) => {
+        const next = { ...prev }
+        results.forEach((r) => {
+          const node = nodes[r.index]
+          if (node) next[nodeKey(node, r.index)] = { ok: r.ok, latencyMs: r.latencyMs, error: r.error }
+        })
+        return next
+      })
+      const ok = results.filter((r) => r.ok).length
+      toast.push(`测速完成：${ok}/${results.length} 个节点可用`)
     } catch (err) {
       toast.error(err)
     } finally {
@@ -159,16 +167,6 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
       await reloadSettings()
       setRuntime(await api.ProxyRuntimeStatus())
       toast.push('已停止代理并恢复直连')
-    } catch (err) {
-      toast.error(err)
-    }
-  }
-
-  const saveRuntime = async (next: ProxyRuntimeSettings) => {
-    try {
-      const saved = await api.SaveProxyRuntimeSettings(next)
-      setRuntimeCfg(saved)
-      toast.push('本地代理设置已保存')
     } catch (err) {
       toast.error(err)
     }
@@ -327,10 +325,16 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
 
       {current && (
         <div className="card" style={{ marginTop: 14 }}>
-          <h3 className="card-title">
-            节点列表 · {current.name}
-            <Tag>{nodeRows.length}</Tag>
-          </h3>
+          <div className="row">
+            <h3 className="card-title" style={{ margin: 0 }}>
+              节点列表 · {current.name}
+              <Tag>{nodeRows.length}</Tag>
+            </h3>
+            <div className="spacer" />
+            <button className="btn btn-sm" disabled={busy === 'testall' || nodeRows.length === 0} onClick={() => testAll(nodeRows)}>
+              {busy === 'testall' ? '测速中…' : '全部测速'}
+            </button>
+          </div>
           <p className="card-desc">点击「启用」启动本地代理引擎并把所选作用域切到该节点。</p>
           {nodeRows.length === 0 ? (
             <Empty icon="◇" title="该订阅没有可用节点" hint="刷新订阅，或检查链接格式" />
@@ -342,6 +346,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                   <th>协议</th>
                   <th>服务器</th>
                   <th>传输</th>
+                  <th className="right">延迟</th>
                   <th className="right">操作</th>
                 </tr>
               </thead>
@@ -364,6 +369,9 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                         {(node.network ?? 'tcp').toUpperCase()}
                         {node.tls ? ' + TLS' : ''}
                       </td>
+                      <td className="right mono small">
+                        {result ? (result.ok ? `${result.latencyMs ?? 0} ms` : '失败') : '—'}
+                      </td>
                       <td className="right">
                         <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
                           {result ? (
@@ -374,13 +382,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                           <button className="btn btn-sm" onClick={() => testNode(node)}>
                             测速
                           </button>
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => {
-                              setActivate({ node, source: current.id })
-                              setApplyAll(true)
-                            }}
-                          >
+                          <button className="btn btn-primary btn-sm" disabled={busy === 'activate'} onClick={() => activateNode(node)}>
                             启用
                           </button>
                         </div>
@@ -401,6 +403,13 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             <Tag>{customNodes.length}</Tag>
           </h3>
           <div className="spacer" />
+          <button
+            className="btn btn-sm"
+            disabled={busy === 'testall' || customNodes.length === 0}
+            onClick={() => testAll(customNodes)}
+          >
+            {busy === 'testall' ? '测速中…' : '全部测速'}
+          </button>
           <button
             className="btn btn-sm"
             onClick={() =>
@@ -433,6 +442,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                 <th>协议</th>
                 <th>服务器</th>
                 <th>传输</th>
+                <th className="right">延迟</th>
                 <th className="right">操作</th>
               </tr>
             </thead>
@@ -455,6 +465,9 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                       {(node.network ?? 'tcp').toUpperCase()}
                       {node.tls ? ' + TLS' : ''}
                     </td>
+                    <td className="right mono small">
+                      {result ? (result.ok ? `${result.latencyMs ?? 0} ms` : '失败') : '—'}
+                    </td>
                     <td className="right">
                       <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
                         {result ? (
@@ -468,7 +481,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                         <button className="btn btn-sm" onClick={() => setNodeModal(node)}>
                           编辑
                         </button>
-                        <button className="btn btn-primary btn-sm" onClick={() => setActivate({ node, source: 'custom' })}>
+                        <button className="btn btn-primary btn-sm" disabled={busy === 'activate'} onClick={() => activateNode(node)}>
                           启用
                         </button>
                         <button
@@ -495,102 +508,8 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
         )}
       </div>
 
-      <div className="card">
-        <h3 className="card-title">本地代理与共享</h3>
-        <p className="card-desc">
-          默认只监听 127.0.0.1，供本程序内部使用；开启「外部可用」后监听 0.0.0.0，同一网络的其它设备也能把代理指向本机。
-        </p>
-        <div className="row row-wrap" style={{ gap: 18 }}>
-          <label className="row" style={{ gap: 8 }}>
-            <Switch checked={runtimeCfg.external} onChange={(v) => setRuntimeCfg({ ...runtimeCfg, external: v })} />
-            <span className="small">外部可用（0.0.0.0）</span>
-          </label>
-          <div className="field" style={{ width: 140 }}>
-            <input
-              className="input"
-              type="number"
-              min={1024}
-              max={65535}
-              value={runtimeCfg.port}
-              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, port: Number(e.target.value) || 7890 })}
-            />
-          </div>
-          <div className="field" style={{ width: 160 }}>
-            <input
-              className="input"
-              placeholder="用户名（可选）"
-              value={runtimeCfg.username ?? ''}
-              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, username: e.target.value })}
-            />
-          </div>
-          <div className="field" style={{ width: 160 }}>
-            <input
-              className="input"
-              type="password"
-              placeholder="密码（可选）"
-              value={runtimeCfg.password ?? ''}
-              onChange={(e) => setRuntimeCfg({ ...runtimeCfg, password: e.target.value })}
-            />
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={() => saveRuntime(runtimeCfg)}>
-            保存
-          </button>
-        </div>
-        <div className="small faint" style={{ marginTop: 8 }}>
-          设置作用域：{Object.keys(SCOPE_LABEL).map((k) => SCOPE_LABEL[k]).join('、')}；同步链路始终直连。
-        </div>
-      </div>
 
       {editing && <SubscriptionEditor initial={editing} onCancel={() => setEditing(null)} onSave={saveEditor} />}
-
-      {activate && (
-        <Modal
-          title="启用节点"
-          onClose={() => setActivate(null)}
-          footer={
-            <>
-              <button className="btn" onClick={() => setActivate(null)}>
-                取消
-              </button>
-              <button className="btn btn-primary" disabled={busy === 'activate'} onClick={doActivate}>
-                启用
-              </button>
-            </>
-          }
-        >
-          <div className="small dim">
-            {activate.node.name}（{PROTOCOL_LABEL[activate.node.protocol] ?? activate.node.protocol} ·{' '}
-            {activate.node.server}:{activate.node.port}）
-          </div>
-          <label className="row" style={{ gap: 8 }}>
-            <Switch checked={applyAll} onChange={setApplyAll} />
-            <span>应用到全部连接类型</span>
-          </label>
-          {!applyAll && (
-            <div className="col">
-              {Object.keys(SCOPE_LABEL).map((scope) => (
-                <label key={scope} className="row" style={{ gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={applyScopes.includes(scope)}
-                    onChange={(e) =>
-                      setApplyScopes((prev) =>
-                        e.target.checked ? [...new Set([...prev, scope])] : prev.filter((s) => s !== scope),
-                      )
-                    }
-                  />
-                  <span>{SCOPE_LABEL[scope]}</span>
-                </label>
-              ))}
-            </div>
-          )}
-          {runtimeCfg.external ? (
-            <div className="small faint">将以「外部可用」模式监听 0.0.0.0:{runtimeCfg.port}</div>
-          ) : (
-            <div className="small faint">将以「仅本机」模式监听 127.0.0.1（随机端口）</div>
-          )}
-        </Modal>
-      )}
 
       {nodeModal && (
         <NodeEditor
@@ -841,3 +760,6 @@ function NodeEditor({
     </Modal>
   )
 }
+
+
+

@@ -56,6 +56,8 @@ func (r ProxyRule) Clone() ProxyRule {
 
 // ProxySettings holds the global rule plus per-scope overrides.
 type ProxySettings struct {
+	// Mode is "off" or "internal" (route every scope through the local engine).
+	Mode    string               `json:"mode"`
 	Default ProxyRule            `json:"default"`
 	Scopes  map[string]ProxyRule `json:"scopes,omitempty"`
 	// FollowSystem additionally consults the OS proxy environment when no rule
@@ -84,6 +86,8 @@ type ProxyRuntimeSettings struct {
 	Port     int    `json:"port"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+	// SystemProxy mirrors the local proxy into the OS proxy settings.
+	SystemProxy bool `json:"systemProxy"`
 }
 
 // DownloadSettings tunes the HTTP download engine.
@@ -171,7 +175,7 @@ func Default() Settings {
 	dir, _ := paths.Root()
 	dl := filepath.Join(dir, "downloads")
 	return Settings{
-		Proxy: ProxySettings{Default: ProxyRule{Mode: proxyModeOff}},
+		Proxy: ProxySettings{Mode: "off", Default: ProxyRule{Mode: proxyModeOff}},
 		Downloads: DownloadSettings{
 			Directory:      dl,
 			MaxConcurrency: 3,
@@ -182,13 +186,13 @@ func Default() Settings {
 			AutoResume:     true,
 		},
 		Server: ServerSettings{
-			Host:      "127.0.0.1",
+			Host:      "s2.admirecn.de",
 			Port:      8642,
 			PreferUDP: true,
 		},
 		UI: UISettings{Theme: "dark", Language: "zh-CN", Density: "comfortable"},
 		Update: UpdateSettings{
-			Source:       "auto",
+			Source:       "server",
 			Channel:      "stable",
 			AutoCheck:    true,
 			GitHubRepo:   "Admirepowered/wails-tools",
@@ -277,8 +281,11 @@ func (c *Settings) normalize() {
 	if c.Proxy.Default.Mode == "" {
 		c.Proxy.Default.Mode = proxyModeOff
 	}
+	if c.Proxy.Mode == "" {
+		c.Proxy.Mode = "off"
+	}
 	if c.Update.Source == "" {
-		c.Update.Source = "auto"
+		c.Update.Source = "server"
 	}
 	if c.Update.Channel == "" {
 		c.Update.Channel = "stable"

@@ -5,12 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"wailstools/internal/miproxy"
 	"wailstools/internal/proxysvc"
 	"wailstools/internal/settings"
+	"wailstools/internal/sysproxy"
 )
+
+// Proxy mode values exposed to the UI.
+const (
+	ProxyModeOff      = "off"
+	ProxyModeInternal = "internal"
+)
+
+// NodeTestResult is the latency of one node.
+type NodeTestResult struct {
+	Index     int    `json:"index"`
+	LatencyMS int64  `json:"latencyMs"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+}
 
 // SubscriptionNodes returns the parsed protocol nodes of a subscription.
 func (a *App) SubscriptionNodes(sourceID string) ([]miproxy.Node, error) {
@@ -24,12 +40,17 @@ func (a *App) SubscriptionNodes(sourceID string) ([]miproxy.Node, error) {
 	return src.Nodes, nil
 }
 
-// ActivateProxyNode starts the local proxy engine for a node and points the
-// selected proxy scopes at it.
-func (a *App) ActivateProxyNode(node miproxy.Node, scopes []string, all bool, external bool, username, password string) (map[string]any, error) {
+// ActivateProxyNode switches the active node. All proxy scopes are pointed at
+// it, so no per-connection configuration is required.
+func (a *App) ActivateProxyNode(node miproxy.Node) (map[string]any, error) {
+	rt := a.settings.Get().ProxyRuntime
+	var rule settings.ProxyRule
+	mode := "engine"
+
 	if node.Protocol == miproxy.ProtoHTTP || node.Protocol == miproxy.ProtoSOCKS5 || node.Protocol == "" {
 		// Plain upstreams do not need the local engine.
-		rule := settings.ProxyRule{
+		mode = "upstream"
+		rule = settings.ProxyRule{
 			Mode:     string(node.Protocol),
 			URL:      hostPortOf(node.Server, node.Port),
 			Username: node.Username,
@@ -38,72 +59,99 @@ func (a *App) ActivateProxyNode(node miproxy.Node, scopes []string, all bool, ex
 		if rule.Mode == "" {
 			rule.Mode = "http"
 		}
-		cfg, err := a.applyProxyRule(rule, scopes, all)
+		if st := a.proxySvc.Status(); st.Running {
+			_ = a.proxySvc.Stop()
+			_ = a.disableSystemProxy()
+		}
+	} else {
+		opts := proxysvc.StartOptions{External: rt.External, Username: rt.Username, Password: rt.Password}
+		if rt.External && rt.Port > 0 {
+			opts.Port = rt.Port
+		}
+		st, err := a.proxySvc.Start(node, opts)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"mode": "upstream", "rule": rule, "settings": cfg, "node": node}, nil
-	}
-
-	opts := proxysvc.StartOptions{External: external, Username: username, Password: password}
-	if external {
-		if rt := a.settings.Get().ProxyRuntime; rt.Port > 0 {
-			opts.Port = rt.Port
+		port := portOfAddr(st.Addr)
+		rule = settings.ProxyRule{Mode: "socks5", URL: hostPortOf("127.0.0.1", port)}
+		if rt.External {
+			rule.Username = rt.Username
+			rule.Password = rt.Password
+		}
+		// Keep the OS proxy in sync when it was already enabled.
+		if rt.SystemProxy && rt.External {
+			if err := sysproxy.Enable(hostPortOf("127.0.0.1", port)); err != nil {
+				a.emit("proxy:error", "系统代理设置失败: "+err.Error())
+			}
 		}
 	}
-	st, err := a.proxySvc.Start(node, opts)
+
+	cfg, err := a.applyInternalMode(rule)
 	if err != nil {
 		return nil, err
 	}
-	port := portOfAddr(st.Addr)
-	rule := settings.ProxyRule{Mode: "socks5", URL: hostPortOf("127.0.0.1", port)}
-	if external {
-		rule.Username = username
-		rule.Password = password
-	}
-	cfg, err := a.applyProxyRule(rule, scopes, all)
-	if err != nil {
-		return nil, err
-	}
+	st := a.proxySvc.Status()
 	a.emit("proxy:status", st)
-	return map[string]any{"mode": "engine", "status": st, "rule": rule, "settings": cfg, "node": node}, nil
+	return map[string]any{"mode": mode, "status": st, "rule": rule, "settings": cfg, "node": node}, nil
 }
 
-func (a *App) applyProxyRule(rule settings.ProxyRule, scopes []string, all bool) (settings.Settings, error) {
+// applyInternalMode stores the rule for every scope and marks the mode.
+func (a *App) applyInternalMode(rule settings.ProxyRule) (settings.Settings, error) {
 	return a.settings.Update(func(s *settings.Settings) error {
+		s.Proxy.Mode = ProxyModeInternal
+		s.Proxy.Default = rule
 		if s.Proxy.Scopes == nil {
 			s.Proxy.Scopes = map[string]settings.ProxyRule{}
 		}
-		targets := scopes
-		if all {
-			targets = nil
-			for _, sc := range settings.Scopes {
-				if sc == settings.ScopeSync {
-					continue // the sync link uses QUIC/TCP directly
-				}
-				targets = append(targets, sc)
+		for _, sc := range settings.Scopes {
+			if sc == settings.ScopeSync {
+				// The sync link keeps its own QUIC/TCP transport.
+				s.Proxy.Scopes[sc] = settings.ProxyRule{Mode: "off"}
+				continue
 			}
-		}
-		if len(targets) == 0 {
-			return errors.New("请选择要应用的作用域")
-		}
-		for _, sc := range targets {
 			s.Proxy.Scopes[sc] = rule.Clone()
 		}
 		return nil
 	})
 }
 
-// DeactivateProxy stops the engine and clears the applied proxy scopes.
+// SetProxyMode switches between "off" (direct) and "internal" (route through
+// the active node without further configuration).
+func (a *App) SetProxyMode(mode string) (settings.Settings, error) {
+	switch mode {
+	case ProxyModeOff:
+		return a.DeactivateProxy()
+	case ProxyModeInternal:
+		st := a.proxySvc.Status()
+		if !st.Running {
+			return settings.Settings{}, errors.New("请先在订阅或自定义节点中启用一个节点")
+		}
+		rule := settings.ProxyRule{Mode: "socks5", URL: st.Addr}
+		rt := a.settings.Get().ProxyRuntime
+		if rt.External {
+			rule.Username = rt.Username
+			rule.Password = rt.Password
+		}
+		return a.applyInternalMode(rule)
+	default:
+		return settings.Settings{}, fmt.Errorf("未知代理模式 %q", mode)
+	}
+}
+
+// DeactivateProxy stops the engine, restores direct connections and turns the
+// system proxy off.
 func (a *App) DeactivateProxy() (settings.Settings, error) {
 	_ = a.proxySvc.Stop()
+	_ = a.disableSystemProxy()
 	cfg, err := a.settings.Update(func(s *settings.Settings) error {
+		s.Proxy.Mode = ProxyModeOff
 		off := settings.ProxyRule{Mode: "off"}
 		s.Proxy.Default = off
 		s.Proxy.Scopes = map[string]settings.ProxyRule{}
 		for _, sc := range settings.Scopes {
 			s.Proxy.Scopes[sc] = off.Clone()
 		}
+		s.ProxyRuntime.SystemProxy = false
 		return nil
 	})
 	if err == nil {
@@ -118,15 +166,92 @@ func (a *App) ProxyRuntimeStatus() proxysvc.Status { return a.proxySvc.Status() 
 // ProxyEngineAvailable reports whether the engine supports this platform.
 func (a *App) ProxyEngineAvailable() bool { return true }
 
-// TestProxyNode measures reachability of a node without activating it.
+// TestProxyNode measures a single node against the standard probe URL.
 func (a *App) TestProxyNode(node miproxy.Node) map[string]any {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	ms, err := proxysvc.Probe(ctx, node, "")
+	ms, err := proxysvc.Probe(ctx, node, proxysvc.ProbeURL)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}
 	}
 	return map[string]any{"ok": true, "latencyMs": ms}
+}
+
+// TestAllNodes measures every node concurrently (bounded) and returns the
+// results in input order.
+func (a *App) TestAllNodes(nodes []miproxy.Node) []NodeTestResult {
+	results := make([]NodeTestResult, len(nodes))
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for i := range nodes {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer cancel()
+			ms, err := proxysvc.Probe(ctx, nodes[idx], proxysvc.ProbeURL)
+			res := NodeTestResult{Index: idx, LatencyMS: ms, OK: err == nil}
+			if err != nil {
+				res.Error = err.Error()
+			}
+			results[idx] = res
+		}(i)
+	}
+	wg.Wait()
+	return results
+}
+
+// SetSystemProxy mirrors the local proxy into the OS settings. External mode
+// must be enabled first, as requested by the UI flow.
+func (a *App) SetSystemProxy(enabled bool) (map[string]any, error) {
+	rt := a.settings.Get().ProxyRuntime
+	if enabled {
+		if !rt.External {
+			return nil, errors.New("请先打开「外部可用」再开启系统代理")
+		}
+		st := a.proxySvc.Status()
+		if !st.Running {
+			return nil, errors.New("请先启用一个节点")
+		}
+		if !sysproxy.Supported() {
+			return nil, sysproxy.ErrUnsupported
+		}
+		if err := sysproxy.Enable(st.Addr); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := a.disableSystemProxy(); err != nil {
+			return nil, err
+		}
+	}
+	cfg, err := a.settings.Update(func(s *settings.Settings) error {
+		s.ProxyRuntime.SystemProxy = enabled
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"enabled": enabled, "state": sysproxy.Current(), "settings": cfg}, nil
+}
+
+// SystemProxyState reports the OS proxy configuration.
+func (a *App) SystemProxyState() map[string]any {
+	state := sysproxy.Current()
+	return map[string]any{
+		"enabled":   state.Enabled,
+		"server":    state.Server,
+		"supported": state.Supported,
+		"setting":   a.settings.Get().ProxyRuntime.SystemProxy,
+	}
+}
+
+func (a *App) disableSystemProxy() error {
+	if !sysproxy.Supported() {
+		return nil
+	}
+	return sysproxy.Disable()
 }
 
 // ListCustomNodes returns user-defined nodes.
@@ -167,11 +292,29 @@ func (a *App) GetProxyRuntimeSettings() settings.ProxyRuntimeSettings {
 
 // SaveProxyRuntimeSettings stores the engine bind configuration.
 func (a *App) SaveProxyRuntimeSettings(next settings.ProxyRuntimeSettings) (settings.ProxyRuntimeSettings, error) {
+	// Turning external mode off must also drop the system proxy.
+	if !next.External && next.SystemProxy {
+		next.SystemProxy = false
+		_ = a.disableSystemProxy()
+	}
 	cfg, err := a.settings.Update(func(s *settings.Settings) error {
 		s.ProxyRuntime = next
 		return nil
 	})
 	return cfg.ProxyRuntime, err
+}
+
+// ActiveProxyNode returns the node currently served by the engine.
+func (a *App) ActiveProxyNode() map[string]any {
+	st := a.proxySvc.Status()
+	mode := a.settings.Get().Proxy.Mode
+	out := map[string]any{"mode": mode, "running": st.Running}
+	if st.Running && st.Node != nil {
+		out["node"] = st.Node
+		out["addr"] = st.Addr
+		out["external"] = st.External
+	}
+	return out
 }
 
 func hostPortOf(host string, port int) string {

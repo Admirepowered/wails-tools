@@ -158,6 +158,11 @@ export default function UpdatePage({ settings, reloadSettings }: PageProps) {
               <div className="spacer" />
               {status.checkedAt ? <span className="small faint">{formatTime(status.checkedAt)}</span> : null}
             </div>
+            <div className="row small faint mono" style={{ gap: 12 }}>
+              {status.currentHash ? <span title={status.currentHash}>本地 {status.currentHash.slice(0, 12)}…</span> : null}
+              {status.releaseHash ? <span title={status.releaseHash}>远端 {status.releaseHash.slice(0, 12)}…</span> : null}
+              {status.sameBuild ? <Tag kind="ok">哈希一致</Tag> : <Tag kind="warn">哈希不同</Tag>}
+            </div>
             {status.release && (
               <div className="row small faint">
                 <span className="mono">{status.release.filename}</span>
@@ -325,3 +330,4 @@ export default function UpdatePage({ settings, reloadSettings }: PageProps) {
     </div>
   )
 }
+

@@ -1,11 +1,14 @@
 package proxysvc
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,31 +132,51 @@ func (s *Service) Running() bool {
 	return s.srv != nil
 }
 
-// Probe starts a temporary proxy for the node and measures reachability.
-func Probe(ctx context.Context, node miproxy.Node, probeURL string) (int64, error) {
-	if probeURL == "" {
-		probeURL = "www.gstatic.com:80"
+// ProbeURL is the default reachability target.
+const ProbeURL = "http://www.gstatic.com/generate_204"
+
+// Probe measures whether a node can fetch ProbeURL, returning the latency.
+func Probe(ctx context.Context, node miproxy.Node, rawURL string) (int64, error) {
+	if rawURL == "" {
+		rawURL = ProbeURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return 0, err
+	}
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		host += ":80"
+	}
+	path := u.RequestURI()
+	if path == "" {
+		path = "/"
 	}
 	d := miproxy.NewDialer(node, 15*time.Second)
 	start := time.Now()
-	conn, err := d.Dial(ctx, probeURL)
+	conn, err := d.Dial(ctx, host)
 	if err != nil {
 		return 0, err
 	}
 	defer conn.Close()
-	host, _, _ := net.SplitHostPort(probeURL)
-	req := fmt.Sprintf("HEAD /generate_204 HTTP/1.1\r\nHost: %s\r\nUser-Agent: WailsTools/1.0\r\nConnection: close\r\n\r\n", host)
+	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: WailsTools/1.0\r\nAccept: */*\r\nConnection: close\r\n\r\n", path, u.Host)
 	_ = conn.SetDeadline(time.Now().Add(12 * time.Second))
 	if _, err := conn.Write([]byte(req)); err != nil {
 		return 0, err
 	}
-	buf := make([]byte, 64)
-	n, err := conn.Read(buf)
+	reader := bufio.NewReaderSize(conn, 4096)
+	statusLine, err := reader.ReadString('\n')
 	if err != nil {
 		return 0, err
 	}
-	if n < 12 || string(buf[:5]) != "HTTP/" {
+	fields := strings.Fields(statusLine)
+	if len(fields) < 2 || !strings.HasPrefix(fields[0], "HTTP/") {
 		return 0, errors.New("probe: unexpected response")
+	}
+	code := 0
+	fmt.Sscanf(fields[1], "%d", &code)
+	if code < 200 || code >= 400 {
+		return 0, fmt.Errorf("probe: HTTP %d", code)
 	}
 	return time.Since(start).Milliseconds(), nil
 }
