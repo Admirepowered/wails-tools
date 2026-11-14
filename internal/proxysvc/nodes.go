@@ -42,6 +42,16 @@ func OpenNodes(dir string) (*NodeStore, error) {
 	return s, nil
 }
 
+// OpenNodesFresh rebuilds the store when the existing file is unreadable.
+func OpenNodesFresh(dir string) (*NodeStore, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	s := &NodeStore{path: filepath.Join(dir, "custom-nodes.json")}
+	_ = os.Remove(s.path)
+	return s, nil
+}
+
 func (s *NodeStore) persist() error {
 	data, err := json.MarshalIndent(s.items, "", "  ")
 	if err != nil {

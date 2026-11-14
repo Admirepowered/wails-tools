@@ -254,6 +254,9 @@ func (a *App) disableSystemProxy() error {
 
 // ListCustomNodes returns user-defined nodes.
 func (a *App) ListCustomNodes() []miproxy.Node {
+	if a.customNodes == nil {
+		return []miproxy.Node{}
+	}
 	list := a.customNodes.List()
 	if list == nil {
 		return []miproxy.Node{}
@@ -263,14 +266,25 @@ func (a *App) ListCustomNodes() []miproxy.Node {
 
 // SaveCustomNode creates or updates a user-defined node.
 func (a *App) SaveCustomNode(node miproxy.Node) (miproxy.Node, error) {
+	if a.customNodes == nil {
+		return miproxy.Node{}, errors.New("自定义节点存储未初始化")
+	}
 	return a.customNodes.Save(node)
 }
 
 // DeleteCustomNode removes a user-defined node.
-func (a *App) DeleteCustomNode(id string) error { return a.customNodes.Delete(id) }
+func (a *App) DeleteCustomNode(id string) error {
+	if a.customNodes == nil {
+		return errors.New("自定义节点存储未初始化")
+	}
+	return a.customNodes.Delete(id)
+}
 
 // ImportNodeLinks parses share links pasted by the user and stores them.
 func (a *App) ImportNodeLinks(text string) ([]miproxy.Node, error) {
+	if a.customNodes == nil {
+		return nil, errors.New("自定义节点存储未初始化")
+	}
 	return a.customNodes.ImportLinks(text)
 }
 

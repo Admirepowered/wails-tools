@@ -162,6 +162,12 @@ func New() (*App, error) {
 	if nerr == nil {
 		if ns, err := proxysvc.OpenNodes(nodesDir); err == nil {
 			a.customNodes = ns
+		} else if ns, err2 := proxysvc.OpenNodesFresh(nodesDir); err2 == nil {
+			// 节点文件损坏时重建，避免所有节点相关调用 panic。
+			a.customNodes = ns
+			if a.log != nil {
+				a.log.Printf("custom nodes file reset: %v", err)
+			}
 		}
 	}
 	if root != "" {
