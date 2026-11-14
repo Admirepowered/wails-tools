@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,13 +36,11 @@ func (a *App) buildDirectFunc() func(host string) bool {
 		}
 		ips := resolveHostIPs(host)
 		for _, ip := range ips {
-			code := a.geo.Lookup(ip)
-			if code == "" {
-				continue
-			}
-			for _, want := range cfg.Countries {
-				if equalFold(code, want) {
-					return true
+			for _, code := range a.geo.LookupCodes(ip) {
+				for _, want := range cfg.Countries {
+					if equalFold(code, strings.TrimSpace(want)) {
+						return true
+					}
 				}
 			}
 		}

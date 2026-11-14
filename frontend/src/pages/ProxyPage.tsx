@@ -638,6 +638,11 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
   }
 
   const selected = cfg.countries ?? []
+  const pickerList = (() => {
+    const common = ['CN', 'HK', 'TW', 'JP', 'US', 'SG', 'KR', 'RU', 'GB', 'DE', 'CA', 'AU']
+    const all = [...common, ...countries, ...selected]
+    return all.filter((code, i) => all.indexOf(code) === i)
+  })()
   return (
     <div className="card">
       <div className="row">
@@ -656,8 +661,8 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
         <span className="small">按国家 IP 直连（geoip.metadb）</span>
       </label>
       {cfg.useGeoIP ? (
-        <div className="row row-wrap" style={{ gap: 6, marginTop: 8, maxHeight: 120, overflow: 'auto' }}>
-          {(countries.length > 0 ? countries : ['CN', 'HK', 'TW', 'JP', 'US']).slice(0, 60).map((code) => {
+        <div className="row row-wrap" style={{ gap: 6, marginTop: 8, maxHeight: 160, overflow: 'auto' }}>
+          {pickerList.map((code) => {
             const on = selected.includes(code)
             return (
               <button
@@ -684,5 +689,6 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 

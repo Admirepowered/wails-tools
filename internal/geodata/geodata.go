@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -218,39 +219,49 @@ func writeBody(body io.Reader, total int64, target string, onProgress func(int64
 	return f.Sync()
 }
 
-// record matches the MetaCubeX geoip.metadb schema.
-type record struct {
-	Country struct {
-		ISO string `maxminddb:"iso_code"`
-	} `maxminddb:"country"`
-	Code string `maxminddb:"code"`
-}
-
-// Lookup returns the ISO country code for an IP, or "" when unknown.
-func (d *DB) Lookup(ip net.IP) string {
+// LookupCodes returns every country code assigned to an IP. Meta-geoip records
+// are either a bare string ("cn") or an array of strings (["us","ca"]).
+func (d *DB) LookupCodes(ip net.IP) []string {
 	if ip == nil {
-		return ""
+		return nil
 	}
 	d.mu.RLock()
 	reader := d.reader
 	d.mu.RUnlock()
 	if reader == nil {
-		return ""
+		return nil
 	}
-	var rec record
-	if err := reader.Lookup(ip, &rec); err != nil {
-		return ""
+	var single string
+	if err := reader.Lookup(ip, &single); err == nil {
+		single = strings.TrimSpace(single)
+		if single != "" {
+			return []string{strings.ToUpper(single)}
+		}
 	}
-	if rec.Country.ISO != "" {
-		return strings.ToUpper(rec.Country.ISO)
+	var many []string
+	if err := reader.Lookup(ip, &many); err == nil {
+		out := make([]string, 0, len(many))
+		for _, code := range many {
+			code = strings.ToUpper(strings.TrimSpace(code))
+			if code != "" {
+				out = append(out, code)
+			}
+		}
+		return out
 	}
-	if rec.Code != "" {
-		return strings.ToUpper(rec.Code)
-	}
-	return ""
+	return nil
 }
 
-// Countries lists the ISO codes present in the database (best effort).
+// Lookup returns the primary country code for an IP, or "" when unknown.
+func (d *DB) Lookup(ip net.IP) string {
+	codes := d.LookupCodes(ip)
+	if len(codes) == 0 {
+		return ""
+	}
+	return codes[0]
+}
+
+// Countries lists the country codes present in the database.
 func (d *DB) Countries() []string {
 	d.refresh()
 	d.mu.RLock()
@@ -262,21 +273,26 @@ func (d *DB) Countries() []string {
 	seen := map[string]bool{}
 	networks := reader.Networks()
 	for networks.Next() {
-		var rec record
-		if _, err := networks.Network(&rec); err != nil {
+		var single string
+		if _, err := networks.Network(&single); err == nil {
+			if code := strings.ToUpper(strings.TrimSpace(single)); code != "" {
+				seen[code] = true
+			}
 			continue
 		}
-		code := rec.Country.ISO
-		if code == "" {
-			code = rec.Code
-		}
-		if code != "" {
-			seen[strings.ToUpper(code)] = true
+		var many []string
+		if _, err := networks.Network(&many); err == nil {
+			for _, code := range many {
+				if code = strings.ToUpper(strings.TrimSpace(code)); code != "" {
+					seen[code] = true
+				}
+			}
 		}
 	}
 	out := make([]string, 0, len(seen))
 	for code := range seen {
 		out = append(out, code)
 	}
+	sort.Strings(out)
 	return out
 }
