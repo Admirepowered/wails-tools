@@ -410,7 +410,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
               {busy === 'testall' ? '测速中…' : '全部测速'}
             </button>
           </div>
-          <p className="card-desc">点击「启用」启动本地代理引擎并把所选作用域切到该节点。</p>
+          <p className="card-desc">单击节点即启用；右键可测速。</p>
           {nodeRows.length === 0 ? (
             <Empty icon="◇" title="该订阅没有可用节点" hint="刷新订阅，或检查链接格式" />
           ) : (
@@ -431,7 +431,18 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                   const result = tests[key]
                   const active = runtime?.running && runtime.node?.name === node.name && runtime.node?.server === node.server
                   return (
-                    <tr key={key}>
+                    <tr
+                      key={key}
+                      onClick={() => void activateNode(node)}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        setMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          items: [{ label: '测速', action: () => void testNode(node) }],
+                        })
+                      }}
+                    >
                       <td className="truncate" title={node.name}>
                         {node.name}
                         {active ? <Tag kind="ok">使用中</Tag> : null}
@@ -521,7 +532,22 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                 const result = tests[key]
                 const active = runtime?.running && runtime.node?.id !== '' && runtime.node?.id === node.id
                 return (
-                  <tr key={key}>
+                  <tr
+                    key={key}
+                    onClick={() => void activateNode(node)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        items: [
+                          { label: '测速', action: () => void testNode(node) },
+                          { label: '编辑', action: () => setNodeModal(node) },
+                          { label: '删除', danger: true, action: () => void api.DeleteCustomNode(node.id ?? '').then(() => load()).then(() => toast.push('已删除节点')).catch((err) => toast.error(err)) },
+                        ],
+                      })
+                    }}
+                  >
                     <td className="truncate" title={node.name}>
                       {node.name}
                       {active ? <Tag kind="ok">使用中</Tag> : null}
@@ -839,6 +865,7 @@ function NodeEditor({
     </Modal>
   )
 }
+
 
 
 
