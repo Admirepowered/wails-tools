@@ -136,9 +136,21 @@ type ServerSettings struct {
 	DisableUDP  bool   `json:"disableUdp"`
 	AutoConnect bool   `json:"autoConnect"`
 	// DeviceID identifies this installation for the per-user device limit.
-	DeviceID      string `json:"deviceId,omitempty"`
-	LastUsed      string `json:"lastUsedTransport,omitempty"`
-	AllowInsecure bool   `json:"allowInsecure"`
+	DeviceID string `json:"deviceId,omitempty"`
+	// PasswordSealed keeps the account password on this machine only, sealed
+	// with the machine key. It never leaves the device; the server stores just
+	// an Argon2id hash. The password is needed to derive the secret-bundle key.
+	PasswordSealed string `json:"passwordSealed,omitempty"`
+	LastUsed       string `json:"lastUsedTransport,omitempty"`
+	AllowInsecure  bool   `json:"allowInsecure"`
+}
+
+// SecretSyncSettings controls end-to-end encrypted client secret sync.
+type SecretSyncSettings struct {
+	// Enabled turns automatic sync of SSH hosts/keys and FTP profiles on/off.
+	Enabled   bool   `json:"enabled"`
+	LastSync  string `json:"lastSync,omitempty"`
+	LastError string `json:"lastError,omitempty"`
 }
 
 // UISettings captures presentation preferences.
@@ -207,6 +219,7 @@ type Settings struct {
 	Update        UpdateSettings       `json:"update"`
 	Screenshots   ScreenshotSettings   `json:"screenshots"`
 	Startup       StartupSettings      `json:"startup"`
+	SecretSync    SecretSyncSettings   `json:"secretSync"`
 }
 
 // Default returns the built-in configuration.
@@ -249,6 +262,7 @@ func Default() Settings {
 		ProxyChain:   ProxyChainSettings{Mode: "off"},
 		DirectRules:  DirectRuleSettings{UseGeoIP: false},
 		Startup:      StartupSettings{TrayEnabled: true, CloseToTray: true},
+		SecretSync:   SecretSyncSettings{Enabled: true},
 		ProxyRuntime: ProxyRuntimeSettings{Port: 7890},
 	}
 }

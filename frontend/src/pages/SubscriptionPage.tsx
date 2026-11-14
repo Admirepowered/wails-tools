@@ -410,7 +410,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
               {busy === 'testall' ? '测速中…' : '全部测速'}
             </button>
           </div>
-          <p className="card-desc">单击节点即启用；右键可测速。</p>
+          <p className="card-desc">双击节点启用（单击只选中，避免误触）；右键可测速。</p>
           {nodeRows.length === 0 ? (
             <Empty icon="◇" title="该订阅没有可用节点" hint="刷新订阅，或检查链接格式" />
           ) : (
@@ -433,7 +433,8 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                   return (
                     <tr
                       key={key}
-                      onClick={() => void activateNode(node)}
+                      onDoubleClick={() => void activateNode(node)}
+                      title="双击启用该节点"
                       onContextMenu={(e) => {
                         e.preventDefault()
                         setMenu({
@@ -511,7 +512,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             添加节点
           </button>
         </div>
-        <p className="card-desc">手动添加或粘贴分享链接导入，支持与订阅节点同样的协议。</p>
+        <p className="card-desc">手动添加或粘贴分享链接导入，支持与订阅节点同样的协议。双击节点启用，右键可测速/编辑/删除。</p>
         {customNodes.length === 0 ? (
           <Empty icon="＋" title="还没有自定义节点" hint="点击「添加节点」或「导入节点链接」" />
         ) : (
@@ -534,7 +535,8 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                 return (
                   <tr
                     key={key}
-                    onClick={() => void activateNode(node)}
+                    onDoubleClick={() => void activateNode(node)}
+                    title="双击启用该节点"
                     onContextMenu={(e) => {
                       e.preventDefault()
                       setMenu({

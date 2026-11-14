@@ -31,6 +31,7 @@ func main() {
 		allow     = flag.String("registration", "", "public registration: on|off")
 		noUDP     = flag.Bool("no-udp", false, "force TCP transport")
 		showAdmin = flag.Bool("settings", false, "show server admin settings")
+		vault     = flag.Bool("vault", false, "list the encrypted secret bundles stored for this account")
 		deviceID  = flag.String("device-id", "wt-admin-cli", "device identity reported on login")
 	)
 	flag.Parse()
@@ -156,6 +157,23 @@ func main() {
 		var out map[string]any
 		call("admin.settings.get", nil, &out)
 		fmt.Printf("allowRegister=%v maxDevices=%v\n", out["allowRegister"], out["maxDevices"])
+
+	case *vault:
+		var out struct {
+			Blobs []struct {
+				Kind      string `json:"kind"`
+				UpdatedAt string `json:"updatedAt"`
+				Size      int    `json:"size"`
+			} `json:"blobs"`
+		}
+		call("vault.list", nil, &out)
+		if len(out.Blobs) == 0 {
+			fmt.Println("no encrypted secret bundles stored")
+			return
+		}
+		for _, b := range out.Blobs {
+			fmt.Printf("%-12s %8d bytes  %s\n", b.Kind, b.Size, b.UpdatedAt)
+		}
 
 	default:
 		_ = list

@@ -166,3 +166,33 @@ wails build
 - 服务端离线救援（需先 `systemctl stop wt-server`）：`wt-server -data /var/lib/wt-server -list-devices user`、`-remove-device user:deviceID`；`-create-user` 支持 `name:password:role`。
 - 服务端部署：`scripts/build-server` 交叉编译 → gzip → scp 到 `/tmp` → 停服务、`gunzip -c` 写新文件、`mv` 覆盖（避免 Text file busy）、启动。
 - 本次部署验证：`wt-admin -list` 输出 `admire admin`，`-settings` 返回 `allowRegister=true maxDevices=5`；设备上限实测第 6 台返回 `device_limit`（前 5 台通过，随后已清理探针设备）。
+
+---
+
+## 七、2026-11-15 第二批（v1.3.45）
+
+### 7.1 截图：自动上传 + 配额口径
+- **根因**：`app.New()` 里 `shots.SetSavedHandler` 被调了两次，第二次把上传回调整个覆盖掉，所以截图只保存、永不上传。现在合并成一个 handler：先 `screenshot:saved`，再按 `screenshots.autoUpload` 上传到 `/screenshots/`。
+- 配额口径：上传走普通 `files.put`，服务端 `RecalcUsage` 把 **所有文件元数据**（含 `/screenshots/`）加总，所以截图天然计入同一个 10 GiB 配额，不需要单独字段。上传成功后客户端补发 `server:usage` 事件刷新用量条。
+
+### 7.2 全局快捷键（Ctrl+Alt+S）
+- **根因**：窗口在注册线程创建，但 `GetMessageW` 循环跑在另一个 goroutine 的 OS 线程上。`RegisterHotKey` 把 `WM_HOTKEY` 投递到**创建窗口的那个线程**，消息循环不在同一线程就永远收不到 → 快捷键"注册成功但没反应"。
+- 修复：`runtime.LockOSThread()` 的专用 goroutine 里完成 建窗 + RegisterHotKey + GetMessage 循环，消息处理与注册在同一线程。`unregister` 从任意线程 `DestroyWindow` 即可（WM_DESTROY → PostQuitMessage 在循环线程执行）。
+
+### 7.3 节点切换改为双击
+- 订阅节点表和自定义节点表都是 `onDoubleClick` 才启用（单击只高亮/选中），避免浏览时误触切换代理。文案同步改成「双击节点启用」。
+
+### 7.4 敏感信息同步（密码加密、服务端只存密文）
+- **目标**：SSH 主机、SSH 私钥（RSA/Ed25519/ECDSA）、FTP 账号、已授信主机指纹在多设备间同步；服务器只保存密文；密码只存本机。
+- **密钥派生**：`Argon2id(password, salt = sha256("wails-tools/vault/v1/" + lower(username)), m=32MiB, t=3, p=2)` → 32 字节。salt 由用户名确定，所以任何设备只要知道密码就能解，不需要额外同步盐。**用原始密码，不用密码哈希**（哈希在服务端，客户端拿不到）。
+- **封装**：`internal/vaultsync` 把整个 bundle（hosts+keys+ftp+knownHosts）序列化后用 AES-256-GCM 加密，blob 前缀 `wtv1:`；服务端 `vault` 桶按 `userID\0kind` 存 `{data, updatedAt, size}`，单包上限 4 MiB。
+- **同步策略**：拉远端 → `vaultsync.Merge(local, remote)`（按 ID 取 `UpdatedAt`/`CreatedAt` 较新者，单边存在的保留，私钥优先保留有内容的）→ 应用到本地 store（`sshmgr.ApplyHosts/ApplyKeys`、`ftpx.Apply`）→ 有变化再推回。本地编辑后 3 秒防抖自动 push。
+- **密码本地存储**：`settings.server.passwordSealed` 用 `secretstore`（机器密钥 `master.key`，AES-GCM）封装；启动/自动登录时解封并重新派生密钥，因此 token 登录也能同步。登录、注册、密码修改都会刷新它。
+- **改密流程**：前端先弹确认；服务端 `auth.changePassword` 成功后立刻 `WipeVault(user)` 删除旧密文；客户端 `wipeSecretsAfterPasswordChange()` 清空本机 SSH 私钥、主机密码、FTP 密码，并用新密码重新派生密钥、推送一份"只有列表、没有密钥"的新 bundle。
+- **限制**：删除不会跨设备传播（合并是取并集）；如果一定要删干净，需要两端都删，或以后加 tombstone。
+
+### 7.5 教训（第二批）
+- 回调"注册两次"是静默覆盖：`SetXxxHandler` 这类 setter 不要连调两次，宁可写一个 handler 干两件事。
+- Win32 的消息投递有线程归属：`RegisterHotKey` / `CreateWindow` / `GetMessage` 必须在同一个 OS 线程；Go 侧必须 `LockOSThread`。
+- 客户端和服务端都可能"算错配额"：先把数据落到统一的元数据里，配额自然正确，不要为功能单独开计数。
+- 加密密钥只能来自**原始密码**：服务端只有哈希，客户端必须自己记密码（本机加密保存），这是设计前提而不是漏洞。

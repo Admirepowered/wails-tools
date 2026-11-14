@@ -66,7 +66,6 @@ type msgH struct {
 
 type handleState struct {
 	hwnd    windows.Handle
-	stop    chan struct{}
 	trigger func()
 }
 
@@ -78,52 +77,72 @@ var (
 	nextID     uintptr = 0xA001
 )
 
+const hotkeyClassName = "WailsToolsHotkeyWindow"
+
 func supported() bool { return true }
 
+// register creates the message-only window, registers the hotkey and pumps
+// messages on one dedicated OS thread. RegisterHotKey posts WM_HOTKEY to the
+// thread that created the window, so the window and its message loop must live
+// on the same thread — pumping on a different goroutine silently drops every
+// hotkey (the old behaviour: the shortcut appeared to do nothing).
 func register(combo string, trigger func()) (any, error) {
 	mods, vk, err := parseCombo(combo)
 	if err != nil {
 		return nil, err
 	}
-	hInstance, _, _ := procGetModuleHandleH.Call(0)
-	className, _ := windows.UTF16PtrFromString("WailsToolsHotkeyWindow")
-
-	classOnceH.Do(func() {
-		wc := wndClassExH{
-			CbSize:        uint32(unsafe.Sizeof(wndClassExH{})),
-			LpfnWndProc:   syscall.NewCallback(hotkeyWndProc),
-			HInstance:     windows.Handle(hInstance),
-			LpszClassName: className,
-		}
-		if atom, _, err := procRegisterClassExH.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 {
-			classErrH = fmt.Errorf("RegisterClassExW: %v", err)
-		}
-	})
-	if classErrH != nil {
-		return nil, classErrH
-	}
-
-	hwnd, _, err := procCreateWindowExH.Call(0, uintptr(unsafe.Pointer(className)), 0, 0, 0, 0, 0, 0, 0, 0, hInstance, 0)
-	if hwnd == 0 {
-		return nil, fmt.Errorf("CreateWindowExW: %v", err)
-	}
 
 	statesMu.Lock()
 	nextID++
 	id := nextID
-	st := &handleState{hwnd: windows.Handle(hwnd), stop: make(chan struct{}), trigger: trigger}
-	states[id] = st
 	statesMu.Unlock()
 
-	if ok, _, rerr := procRegisterHotKeyH.Call(hwnd, id, uintptr(mods), uintptr(vk)); ok == 0 {
-		procDestroyWindowH.Call(hwnd)
-		statesMu.Lock()
-		delete(states, id)
-		statesMu.Unlock()
-		return nil, fmt.Errorf("RegisterHotKey(%s): %v", combo, rerr)
-	}
-
+	ready := make(chan error, 1)
 	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
+		classOnceH.Do(func() {
+			hInstance, _, _ := procGetModuleHandleH.Call(0)
+			className, _ := windows.UTF16PtrFromString(hotkeyClassName)
+			wc := wndClassExH{
+				CbSize:        uint32(unsafe.Sizeof(wndClassExH{})),
+				LpfnWndProc:   syscall.NewCallback(hotkeyWndProc),
+				HInstance:     windows.Handle(hInstance),
+				LpszClassName: className,
+			}
+			if atom, _, rerr := procRegisterClassExH.Call(uintptr(unsafe.Pointer(&wc))); atom == 0 {
+				classErrH = fmt.Errorf("RegisterClassExW: %v", rerr)
+			}
+		})
+		if classErrH != nil {
+			ready <- classErrH
+			return
+		}
+
+		hInstance, _, _ := procGetModuleHandleH.Call(0)
+		className, _ := windows.UTF16PtrFromString(hotkeyClassName)
+		hwnd, _, cerr := procCreateWindowExH.Call(0, uintptr(unsafe.Pointer(className)), 0, 0, 0, 0, 0, 0, 0, 0, hInstance, 0)
+		if hwnd == 0 {
+			ready <- fmt.Errorf("CreateWindowExW: %v", cerr)
+			return
+		}
+
+		st := &handleState{hwnd: windows.Handle(hwnd), trigger: trigger}
+		statesMu.Lock()
+		states[id] = st
+		statesMu.Unlock()
+
+		if ok, _, rerr := procRegisterHotKeyH.Call(hwnd, id, uintptr(mods), uintptr(vk)); ok == 0 {
+			procDestroyWindowH.Call(hwnd)
+			statesMu.Lock()
+			delete(states, id)
+			statesMu.Unlock()
+			ready <- fmt.Errorf("RegisterHotKey(%s): %v", combo, rerr)
+			return
+		}
+		ready <- nil
+
 		var msg msgH
 		for {
 			ret, _, _ := procGetMessageH.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
@@ -134,7 +153,9 @@ func register(combo string, trigger func()) (any, error) {
 			procDispatchMsgH.Call(uintptr(unsafe.Pointer(&msg)))
 		}
 	}()
-	runtime.KeepAlive(st)
+	if err := <-ready; err != nil {
+		return nil, err
+	}
 	return id, nil
 }
 
@@ -151,6 +172,7 @@ func unregister(handle any) {
 		return
 	}
 	procUnregisterHotKeyH.Call(uintptr(st.hwnd), id)
+	// DestroyWindow is safe from any thread; WM_DESTROY then quits the loop.
 	procDestroyWindowH.Call(uintptr(st.hwnd))
 }
 

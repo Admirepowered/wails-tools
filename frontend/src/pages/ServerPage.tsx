@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type ServerStatus, type Settings } from '../lib/api'
+import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type SecretSyncStatus, type ServerStatus, type Settings } from '../lib/api'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Switch, Tabs, Tag, useToast } from '../components/ui'
 import { formatBytes, formatTime, percent, relativeTime } from '../lib/format'
 import type { PageProps } from '../App'
@@ -88,6 +88,12 @@ export default function ServerPage(props: PageProps) {
   const [devices, setDevices] = useState<AdminDevice[]>([])
   const [delUser, setDelUser] = useState<AdminUser | null>(null)
 
+  // encrypted secret sync
+  const [secretSync, setSecretSync] = useState<SecretSyncStatus | null>(null)
+  const [secretBusy, setSecretBusy] = useState(false)
+  const [unlockPass, setUnlockPass] = useState('')
+  const [pwdConfirm, setPwdConfirm] = useState(false)
+
   const synced = useRef(false)
   const status = props.serverStatus ?? localStatus
   const connected = status?.connected === true
@@ -143,6 +149,14 @@ export default function ServerPage(props: PageProps) {
       setMyDevices(await api.MyDevices())
     } catch {
       setMyDevices(null)
+    }
+  }, [])
+
+  const loadSecretSync = useCallback(async () => {
+    try {
+      setSecretSync(await api.SecretSyncStatus())
+    } catch {
+      setSecretSync(null)
     }
   }, [])
 
@@ -241,7 +255,8 @@ export default function ServerPage(props: PageProps) {
     }
     void loadMyDevices()
     void loadAdmin()
-  }, [connected, authed, isAdmin, loadMyDevices, loadAdmin])
+    void loadSecretSync()
+  }, [connected, authed, isAdmin, loadMyDevices, loadAdmin, loadSecretSync])
 
   const refreshCloud = useCallback(() => {
     void loadCloud(cloudPath)
@@ -434,17 +449,83 @@ export default function ServerPage(props: PageProps) {
       toast.push('两次输入的新密码不一致', 'warn')
       return
     }
+    // Confirm before touching anything: rotating the password destroys every
+    // secret that was encrypted with the old one.
+    setPwdConfirm(true)
+  }
+
+  const applyChangePassword = async () => {
+    setPwdConfirm(false)
     setPwdBusy(true)
     try {
-      await api.ChangeServerPassword(pwdOld, pwdNew)
+      const res = await api.ChangeServerPassword(pwdOld, pwdNew)
       setPwdOld('')
       setPwdNew('')
       setPwdNew2('')
-      toast.push('密码已修改')
+      const cleared = typeof res?.vaultCleared === 'number' ? Number(res.vaultCleared) : 0
+      toast.push(cleared > 0 ? `密码已修改；服务端已删除 ${cleared} 个旧密钥包` : '密码已修改')
+      await loadSecretSync()
+      void props.reloadSettings()
     } catch (err) {
       toast.error(err)
     } finally {
       setPwdBusy(false)
+    }
+  }
+
+  /* ---------------- encrypted secret sync ---------------- */
+
+  const syncSecrets = async () => {
+    setSecretBusy(true)
+    try {
+      const res = await api.SyncSecretsNow()
+      const applied = res?.applied ?? {}
+      const parts: string[] = []
+      if (applied.hosts) parts.push(`主机 +${applied.hosts}`)
+      if (applied.keys) parts.push(`密钥 +${applied.keys}`)
+      if (applied.ftp) parts.push(`FTP +${applied.ftp}`)
+      toast.push(parts.length ? `密钥已同步（${parts.join('，')}）` : '密钥已同步')
+      await loadSecretSync()
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setSecretBusy(false)
+    }
+  }
+
+  const toggleSecretSync = async (enabled: boolean) => {
+    try {
+      setSecretSync(await api.SetSecretSyncEnabled(enabled))
+      toast.push(enabled ? '已开启密钥自动同步' : '已关闭密钥自动同步')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const forgetSavedPassword = async () => {
+    try {
+      setSecretSync(await api.ForgetSavedPassword())
+      toast.push('已删除本机保存的密码')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const unlockSecretSync = async () => {
+    if (!unlockPass) {
+      toast.push('请输入账号密码', 'warn')
+      return
+    }
+    setSecretBusy(true)
+    try {
+      await api.UnlockSecretSync(unlockPass)
+      setUnlockPass('')
+      toast.push('加密同步已启用')
+      await loadSecretSync()
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setSecretBusy(false)
     }
   }
 
@@ -837,6 +918,9 @@ export default function ServerPage(props: PageProps) {
                 />
               </Field>
             </div>
+            <div className="small faint" style={{ marginTop: 8 }}>
+              注意：密码是密钥包的唯一钥匙。修改密码后，已同步的 SSH 私钥与保存的主机/FTP 密码将无法解密，会被自动清除（主机名、地址、公钥等列表信息保留）。
+            </div>
             <div className="row">
               <div className="spacer" />
               <button className="btn btn-primary btn-sm" onClick={() => void doChangePassword()} disabled={pwdBusy}>
@@ -1088,6 +1172,72 @@ export default function ServerPage(props: PageProps) {
         </div>
       ) : null}
 
+      {authed ? (
+        <div className="card">
+          <div className="row">
+            <div style={{ flex: 1 }}>
+              <h3 className="card-title">
+                密钥与凭据同步
+                {secretSync?.keyReady ? <Tag kind="ok">密钥就绪</Tag> : <Tag kind="warn">等待密码</Tag>}
+                {secretSync && !secretSync.enabled ? <Tag>已关闭</Tag> : null}
+              </h3>
+              <p className="card-desc" style={{ margin: 0 }}>
+                SSH 主机、SSH 私钥（RSA）、FTP 账号与已授信指纹在本机用<b>账号原始密码</b>加密后上传，服务器只保存密文和密码哈希。换机登录同一账号即可解密，无需重新导入。
+              </p>
+            </div>
+            <label className="row" style={{ gap: 8 }}>
+              <span className="small faint">自动同步</span>
+              <Switch checked={!!secretSync?.enabled} onChange={(v) => void toggleSecretSync(v)} />
+            </label>
+          </div>
+
+          <div className="row row-wrap" style={{ marginTop: 12, gap: 16 }}>
+            <span className="small faint">SSH 主机 {secretSync?.hosts ?? 0}</span>
+            <span className="small faint">SSH 密钥 {secretSync?.keys ?? 0}</span>
+            <span className="small faint">FTP 账号 {secretSync?.ftp ?? 0}</span>
+            <span className="small faint">最近同步 {secretSync?.lastSync ? formatTime(secretSync.lastSync) : '—'}</span>
+            {secretSync?.hasPassword ? <span className="small faint">密码已存本机</span> : <span className="small faint">本机未保存密码</span>}
+          </div>
+
+          {secretSync?.lastError ? (
+            <div className="small" style={{ color: 'var(--danger)', marginTop: 8 }}>
+              {secretSync.lastError}
+            </div>
+          ) : null}
+          {secretSync && !secretSync.keyReady ? (
+            <div className="row" style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                type="password"
+                placeholder="输入账号密码以启用加密同步"
+                value={unlockPass}
+                onChange={(e) => setUnlockPass(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void unlockSecretSync()}
+                style={{ maxWidth: 260 }}
+              />
+              <button className="btn btn-sm" disabled={secretBusy} onClick={() => void unlockSecretSync()}>
+                {secretBusy ? '启用中…' : '启用同步'}
+              </button>
+              <span className="small faint">密码只保存在本机（用机器密钥加密），服务器仍只有哈希。</span>
+            </div>
+          ) : null}
+
+          <div className="row" style={{ marginTop: 12, gap: 8 }}>
+            <button className="btn btn-sm" disabled={secretBusy || !secretSync?.keyReady} onClick={() => void syncSecrets()}>
+              {secretBusy ? '同步中…' : '立即同步'}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={!secretSync?.hasPassword}
+              title="删除本机保存的密码与内存中的密钥（云端密文保留）"
+              onClick={() => void forgetSavedPassword()}
+            >
+              忘记本机密码
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {isAdmin ? (
         <div className="card">
           <div className="row">
@@ -1220,6 +1370,16 @@ export default function ServerPage(props: PageProps) {
           message={`确定删除账号「${delUser.username}」吗？该账号的令牌会立即失效，此操作不可恢复。`}
           onCancel={() => setDelUser(null)}
           onConfirm={() => void removeUser()}
+        />
+      ) : null}
+
+      {pwdConfirm ? (
+        <Confirm
+          title="修改密码"
+          danger
+          message="修改密码会立即删除服务器上所有用它加密的密钥包，并清空本机保存的 SSH 私钥、主机密码与 FTP 密码。这些内容无法恢复，需要重新生成或导入。确定继续？"
+          onCancel={() => setPwdConfirm(false)}
+          onConfirm={() => void applyChangePassword()}
         />
       ) : null}
 

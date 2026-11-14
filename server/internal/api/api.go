@@ -196,6 +196,16 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.subsGet()
 	case "subs.put":
 		return ctx.subsPut(body)
+	case "vault.get":
+		return ctx.vaultGet(body)
+	case "vault.put":
+		return ctx.vaultPut(body)
+	case "vault.list":
+		return ctx.vaultList()
+	case "vault.delete":
+		return ctx.vaultDelete(body)
+	case "vault.wipe":
+		return ctx.vaultWipe()
 	case "files.extract":
 		return ctx.filesExtract(body)
 	case "relay.check":
@@ -430,8 +440,11 @@ func (c *callCtx) changePassword(body json.RawMessage) (any, error) {
 	if err := c.api.DB.UpdateUser(u); err != nil {
 		return nil, wire.Errorf("internal", "%v", err)
 	}
-	c.api.DB.Audit(store.AuditEntry{UserID: uid, Action: "change-password"})
-	return map[string]any{"ok": true}, nil
+	// Secret bundles are encrypted with a key derived from the old password:
+	// they can never be opened again, so drop them instead of keeping garbage.
+	removed, _ := c.api.DB.WipeVault(uid)
+	c.api.DB.Audit(store.AuditEntry{UserID: uid, Action: "change-password", Detail: fmt.Sprintf("vault blobs dropped: %d", removed)})
+	return map[string]any{"ok": true, "vaultCleared": removed}, nil
 }
 
 // ---- notes ---------------------------------------------------------------

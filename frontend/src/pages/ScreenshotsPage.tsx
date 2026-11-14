@@ -63,9 +63,17 @@ export default function ScreenshotsPage(_props: PageProps) {
       setWatching(!!ev?.watching)
       if (ev?.error) toast.push(ev.error, 'warn')
     })
+    const offUploaded = onEvent<{ path: string; name: string }>('screenshot:uploaded', (ev) => {
+      if (ev?.name) toast.push(`已上传到云端：${ev.name}`)
+    })
+    const offFailed = onEvent<string>('screenshot:upload-failed', (err) => {
+      if (err) toast.push(`截图上传失败：${err}`, 'warn')
+    })
     return () => {
       off()
       offWatch()
+      offUploaded()
+      offFailed()
     }
   }, [load, toast])
 
@@ -195,7 +203,7 @@ export default function ScreenshotsPage(_props: PageProps) {
               </label>
               <label className="row" style={{ gap: 8 }}>
                 <Switch checked={autoUpload} onChange={(v) => void saveAutoUpload(v)} />
-                <span className="small">截图自动同步到服务器</span>
+                <span className="small">截图自动同步到服务器（计入 10GB 配额）</span>
               </label>
               <div className="row" style={{ gap: 8 }}>
                 <span className="small">全局快捷键</span>

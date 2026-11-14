@@ -70,6 +70,8 @@ func (a *App) RegisterServer(username, password, email, displayName string) (ser
 			a.setSessionUser(*st.User)
 		}
 		a.refreshDeviceCount()
+		a.rememberPassword(username, password)
+		a.scheduleSecretSync()
 		if a.onLogin != nil {
 			a.onLogin()
 		}
@@ -95,6 +97,10 @@ func (a *App) LoginServer(username, password string) (serverlink.Status, error) 
 			a.setSessionUser(*st.User)
 		}
 		a.refreshDeviceCount()
+		// The secret bundle key is derived from the raw password; remember it
+		// locally (sealed) and sync the encrypted bundle.
+		a.rememberPassword(username, password)
+		a.scheduleSecretSync()
 		if a.onLogin != nil {
 			a.onLogin()
 		}
@@ -108,6 +114,7 @@ func (a *App) LogoutServer() error {
 	a.sess.user = ""
 	a.sess.role = ""
 	a.sess.deviceCount = 0
+	a.vaultState.clear()
 	if a.onLogout != nil {
 		a.onLogout()
 	}
@@ -117,6 +124,9 @@ func (a *App) LogoutServer() error {
 }
 
 // ChangeServerPassword rotates the account password.
+//
+// The server drops the encrypted secret bundles it stored, because they are
+// keyed by the old password; the caller is warned by the UI before this runs.
 func (a *App) ChangeServerPassword(oldPassword, newPassword string) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -125,6 +135,18 @@ func (a *App) ChangeServerPassword(oldPassword, newPassword string) (map[string]
 		"oldPassword": oldPassword, "newPassword": newPassword,
 	}, &out); err != nil {
 		return nil, err
+	}
+	// Everything encrypted with the old password is gone now.
+	wiped := a.wipeSecretsAfterPasswordChange()
+	for k, v := range wiped {
+		out[k] = v
+	}
+	if user := strings.TrimSpace(a.sess.user); user != "" {
+		a.rememberPassword(user, newPassword)
+		if a.settings.Get().SecretSync.Enabled && a.link.Available() {
+			// Push a fresh (metadata-only) bundle under the new key.
+			go func() { _, _ = a.SyncSecrets() }()
+		}
 	}
 	return out, nil
 }

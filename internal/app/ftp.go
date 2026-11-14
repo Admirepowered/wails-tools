@@ -70,11 +70,21 @@ func (a *App) SaveFTPProfile(p ftpx.Profile) (ftpx.Profile, error) {
 		p.CreatedAt = now
 	}
 	p.UpdatedAt = now
-	return a.ftp.store.Save(p)
+	saved, err := a.ftp.store.Save(p)
+	if err == nil {
+		a.scheduleSecretSync()
+	}
+	return saved, err
 }
 
 // DeleteFTPProfile removes a profile.
-func (a *App) DeleteFTPProfile(id string) error { return a.ftp.store.Delete(id) }
+func (a *App) DeleteFTPProfile(id string) error {
+	err := a.ftp.store.Delete(id)
+	if err == nil {
+		a.scheduleSecretSync()
+	}
+	return err
+}
 
 // ---- sessions ------------------------------------------------------------
 

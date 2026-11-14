@@ -24,11 +24,21 @@ func (a *App) ListSSHHosts() []sshmgr.Host {
 
 // SaveSSHHost creates or updates a host.
 func (a *App) SaveSSHHost(h sshmgr.Host) (sshmgr.Host, error) {
-	return a.ssh.Store.SaveHost(h)
+	saved, err := a.ssh.Store.SaveHost(h)
+	if err == nil {
+		a.scheduleSecretSync()
+	}
+	return saved, err
 }
 
 // DeleteSSHHost removes a host.
-func (a *App) DeleteSSHHost(id string) error { return a.ssh.Store.DeleteHost(id) }
+func (a *App) DeleteSSHHost(id string) error {
+	err := a.ssh.Store.DeleteHost(id)
+	if err == nil {
+		a.scheduleSecretSync()
+	}
+	return err
+}
 
 // GetSSHHost returns one host.
 func (a *App) GetSSHHost(id string) (sshmgr.Host, error) {
@@ -46,16 +56,30 @@ func (a *App) ListSSHKeys() []sshmgr.Key { return a.ssh.Store.ListKeys() }
 
 // GenerateSSHKey creates an RSA/Ed25519/ECDSA key pair.
 func (a *App) GenerateSSHKey(opts sshmgr.GenerateOptions) (sshmgr.Key, error) {
-	return a.ssh.Store.GenerateKey(opts)
+	key, err := a.ssh.Store.GenerateKey(opts)
+	if err == nil {
+		a.scheduleSecretSync()
+	}
+	return key, err
 }
 
 // ImportSSHKey imports an existing private key.
 func (a *App) ImportSSHKey(opts sshmgr.ImportOptions) (sshmgr.Key, error) {
-	return a.ssh.Store.ImportKey(opts)
+	key, err := a.ssh.Store.ImportKey(opts)
+	if err == nil {
+		a.scheduleSecretSync()
+	}
+	return key, err
 }
 
 // DeleteSSHKey removes a key.
-func (a *App) DeleteSSHKey(id string) error { return a.ssh.Store.DeleteKey(id) }
+func (a *App) DeleteSSHKey(id string) error {
+	err := a.ssh.Store.DeleteKey(id)
+	if err == nil {
+		a.scheduleSecretSync()
+	}
+	return err
+}
 
 // ExportSSHPrivateKey returns the private key PEM for download/backup.
 func (a *App) ExportSSHPrivateKey(id string) (string, error) {

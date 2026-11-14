@@ -57,6 +57,7 @@ type App struct {
 	transfers   *transfermgr.Manager
 	geo         *geodata.DB
 	sess        sessionState
+	vaultState  vaultState
 	onLogin     func()
 	onLogout    func()
 	chainCfg    settings.ProxyChainSettings
@@ -185,6 +186,9 @@ func New() (*App, error) {
 	a.initTransfers()
 	a.shots = shot.NewManager(store, nil)
 	a.shots.SetSavedHandler(func(item shot.Item) {
+		a.emit("screenshot:saved", item)
+		// Auto-upload: screenshots live in the cloud store under /screenshots/
+		// and therefore count towards the same 10 GiB account quota.
 		if !a.settings.Get().Screenshots.AutoUpload || a.link == nil || !a.link.Available() {
 			return
 		}
@@ -198,10 +202,10 @@ func New() (*App, error) {
 				return
 			}
 			a.emit("screenshot:uploaded", map[string]any{"path": target, "name": filepath.Base(item.Path)})
+			if usage, err := a.ServerUsage(); err == nil {
+				a.emit("server:usage", usage)
+			}
 		}()
-	})
-	a.shots.SetSavedHandler(func(item shot.Item) {
-		a.emit("screenshot:saved", item)
 	})
 	return a, nil
 }
@@ -303,6 +307,9 @@ func (a *App) Startup(ctx context.Context) {
 						a.sess.loggedIn = true
 						a.setSessionUser(u)
 						a.refreshDeviceCount()
+						if a.restoreVaultKey() {
+							a.scheduleSecretSync()
+						}
 						a.emit("server:login", map[string]any{"username": u.Username, "role": u.Role, "auto": true})
 						logged = true
 						break

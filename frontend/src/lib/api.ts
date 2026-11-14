@@ -408,6 +408,30 @@ export interface DeviceSummary {
   maxDevices: number
 }
 
+/* ---------------- encrypted secret sync ---------------- */
+
+export interface SecretSyncStatus {
+  enabled: boolean
+  keyReady: boolean
+  hasPassword: boolean
+  username: string
+  lastSync?: string
+  lastError?: string
+  connected: boolean
+  loggedIn: boolean
+  hosts: number
+  keys: number
+  ftp: number
+}
+
+export interface SecretSyncResult {
+  ok: boolean
+  pushed: boolean
+  updatedAt: string
+  applied: Record<string, number>
+  counts: Record<string, number>
+}
+
 /* ---------------- netdisk ---------------- */
 
 export interface NetdiskProvider {
@@ -857,6 +881,13 @@ const rawApi = {
   AdminSetUserRole: (id: string, role: string) => call<void>('AdminSetUserRole', id, role),
   AdminDevices: (userId: string) => call<AdminDevice[]>('AdminDevices', userId),
   AdminRemoveDevice: (userId: string, deviceId: string) => call<void>('AdminRemoveDevice', userId, deviceId),
+
+  // encrypted secret sync (SSH hosts/keys, FTP profiles)
+  SecretSyncStatus: () => call<SecretSyncStatus>('SecretSyncStatus'),
+  SyncSecretsNow: () => call<SecretSyncResult>('SyncSecretsNow'),
+  UnlockSecretSync: (password: string) => call<SecretSyncResult>('UnlockSecretSync', password),
+  SetSecretSyncEnabled: (enabled: boolean) => call<SecretSyncStatus>('SetSecretSyncEnabled', enabled),
+  ForgetSavedPassword: () => call<SecretSyncStatus>('ForgetSavedPassword'),
 
   // netdisk
   NetdiskProviders: () => call<NetdiskProvider[]>('NetdiskProviders'),
