@@ -23,7 +23,7 @@ func newFileLogger(root string) *fileLogger {
 		return &fileLogger{}
 	}
 	path := filepath.Join(dir, "app.log")
-	f, err := os.Create(path) // truncate on every start
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644) // 每次启动清空
 	if err != nil {
 		return &fileLogger{}
 	}
@@ -41,6 +41,8 @@ func (l *fileLogger) Printf(format string, args ...any) {
 	defer l.mu.Unlock()
 	line := fmt.Sprintf(format, args...)
 	fmt.Fprintf(l.file, "%s %s\n", time.Now().Format("15:04:05.000"), line)
+	// 立即落盘，保证运行中用别的程序也能看到最新日志。
+	_ = l.file.Sync()
 }
 
 // Close flushes and closes the log.
