@@ -337,7 +337,10 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             return (
               <div
                 key={src.id}
-                className="scope-card"
+                className={`scope-card ${selected === src.id ? 'selected' : ''}`}
+                onClick={() => {
+                  if (selected !== src.id) setSelected(src.id)
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setMenu({
