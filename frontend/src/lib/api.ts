@@ -897,6 +897,7 @@ const rawApi = {
   GetDirectRules: () => call<DirectRuleSettings>('GetDirectRules'),
   SaveDirectRules: (cfg: DirectRuleSettings) => call<DirectRuleSettings>('SaveDirectRules', cfg),
   GeoIPStatus: () => call<GeoIPStatus>('GeoIPStatus'),
+  GeoIPDiag: () => call<Record<string, unknown>>('GeoIPDiag'),
   DownloadGeoIP: () => call<GeoIPStatus>('DownloadGeoIP'),
   GeoIPCountries: () => call<string[]>('GeoIPCountries'),
   ScopeInternalProxy: (scope: string) => call<boolean>('ScopeInternalProxy', scope),
@@ -1060,6 +1061,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

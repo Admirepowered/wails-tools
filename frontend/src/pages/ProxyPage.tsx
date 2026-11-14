@@ -596,18 +596,27 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
   const [cfg, setCfg] = useState<DirectRuleSettings>({ useGeoIP: false, countries: [], rules: [] })
   const [geo, setGeo] = useState<GeoIPStatus | null>(null)
   const [countries, setCountries] = useState<string[]>([])
+  const [diag, setDiag] = useState<Record<string, unknown> | null>(null)
   const [busy, setBusy] = useState(false)
   const [ruleText, setRuleText] = useState('')
 
   useEffect(() => {
     void (async () => {
       try {
-        const [rules, status] = await Promise.all([api.GetDirectRules(), api.GeoIPStatus()])
+        const rules = await api.GetDirectRules()
         setCfg({ useGeoIP: rules.useGeoIP, countries: rules.countries ?? [], rules: rules.rules ?? [] })
         setRuleText((rules.rules ?? []).join('\n'))
+      } catch (err) {
+        toast.error(err)
+      }
+      try {
+        const info = await api.GeoIPDiag()
+        setDiag(info)
+        const status = await api.GeoIPStatus()
         setGeo(status)
         if (status.ready) setCountries(await api.GeoIPCountries())
       } catch (err) {
+        setDiag({ error: String(err) })
         toast.error(err)
       }
     })()
@@ -658,10 +667,20 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
       <p className="card-desc">命中的目标直接连接，不走代理。</p>
       <div className="small faint mono truncate" title={geo?.path ?? ''}>数据库：{geo?.path ?? '（未定位到文件）'}</div>
       {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{geo.error}</div> : null}
+      {diag ? (
+        <div className="small faint mono" style={{ fontSize: 11 }}>
+          exists={String(diag.fileExists ?? '' )} size={String(diag.fileSize ?? '' )} rootDir={String(diag.rootDir ?? '' )} err={String(diag.error ?? '-')}
+        </div>
+      ) : null}
       {geo?.ready ? (
         <div className="small faint">大小 {((geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {geo.updatedAt ?? '—'}</div>
       ) : null}
       {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{geo.error}</div> : null}
+      {diag ? (
+        <div className="small faint mono" style={{ fontSize: 11 }}>
+          exists={String(diag.fileExists ?? '' )} size={String(diag.fileSize ?? '' )} rootDir={String(diag.rootDir ?? '' )} err={String(diag.error ?? '-')}
+        </div>
+      ) : null}
       <label className="row" style={{ gap: 8 }}>
         <Switch checked={cfg.useGeoIP} onChange={(v) => void save({ ...cfg, useGeoIP: v })} />
         <span className="small">按国家 IP 直连（geoip.metadb）</span>

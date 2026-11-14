@@ -397,3 +397,13 @@ func copyFile(src, dst string) error {
 	}
 	return out.Close()
 }
+
+// CandidatePaths lists the file names probed in dir.
+func CandidatePaths(dir string) []string {
+	names := []string{"geoip.metadb", "geoip.mmdb", "Country.mmdb", "country.mmdb"}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		out = append(out, dir+string(os.PathSeparator)+n)
+	}
+	return out
+}
