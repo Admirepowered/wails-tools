@@ -179,8 +179,22 @@ func (d *DB) Download(ctx context.Context, onProgress func(done, total int64)) e
 		d.mu.Unlock()
 		return fmt.Errorf("下载 geoip.metadb 失败: %s", strings.Join(errs, " | "))
 	}
+	// Windows 不允许替换正在被占用的文件：先释放当前 reader 再改名。
+	d.mu.Lock()
+	if d.reader != nil {
+		_ = d.reader.Close()
+		d.reader = nil
+	}
+	d.status.Ready = false
+	d.mu.Unlock()
 	if err := os.Rename(tmp, d.path); err != nil {
-		return err
+		_ = os.Remove(d.path)
+		if err2 := os.Rename(tmp, d.path); err2 != nil {
+			d.mu.Lock()
+			d.status.Error = "替换文件失败（被占用）: " + err2.Error()
+			d.mu.Unlock()
+			return fmt.Errorf("替换 geoip.metadb 失败: %w", err2)
+		}
 	}
 	d.load()
 	if st := d.Status(); !st.Ready {
