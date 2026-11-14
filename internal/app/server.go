@@ -15,7 +15,13 @@ import (
 )
 
 // ServerStatus reports the client <-> server link state.
-func (a *App) ServerStatus() serverlink.Status { return a.link.Status() }
+func (a *App) ServerStatus() serverlink.Status {
+	st := a.link.Status()
+	if a.sess.loggedIn && a.sess.user != "" {
+		st.User = &serverlink.User{Username: a.sess.user}
+	}
+	return st
+}
 
 // ConnectServer dials the configured server (UDP first, TCP fallback).
 func (a *App) ConnectServer() (serverlink.Status, error) {
@@ -57,14 +63,20 @@ func (a *App) LoginServer(username, password string) (serverlink.Status, error) 
 		}
 	}
 	st, err := a.link.Login(ctx, strings.TrimSpace(username), password)
-	if err == nil && a.onLogin != nil {
-		a.onLogin()
+	if err == nil {
+		a.sess.loggedIn = true
+		a.sess.user = strings.TrimSpace(username)
+		if a.onLogin != nil {
+			a.onLogin()
+		}
 	}
 	return st, err
 }
 
 // LogoutServer clears the session.
 func (a *App) LogoutServer() error {
+	a.sess.loggedIn = false
+	a.sess.user = ""
 	if a.onLogout != nil {
 		a.onLogout()
 	}

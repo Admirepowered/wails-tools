@@ -79,11 +79,17 @@ function Shell() {
     }
   }, [])
 
+
+  // 兼容早先插入的轮询代码：会话状态直接用连接状态刷新。
+  const refreshSession = refreshStatus
+
   useEffect(() => {
-    const offExpired = onEvent<{ error?: string }>('server:login-expired', (ev) => {
-      window.dispatchEvent(new CustomEvent('wails-tools:login-expired', { detail: ev?.error ?? '' }))
-    })
-    return () => offExpired()
+    const offLogin = onEvent('server:login', () => void refreshStatus())
+    const offLogout = onEvent('server:logout', () => void refreshStatus())
+    return () => {
+      offLogin()
+      offLogout()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -97,10 +103,36 @@ function Shell() {
   }, [loadSettings, refreshStatus])
 
   useEffect(() => {
+    const offLogin = onEvent('server:login', () => void refreshSession())
+    const offExpired = onEvent('server:login-expired', () => void refreshSession())
+    void refreshSession()
+    const timer = window.setInterval(() => void refreshSession(), 5000)
+    return () => {
+      offLogin()
+      offExpired()
+      window.clearInterval(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     const offExpired = onEvent<{ error?: string }>('server:login-expired', (ev) => {
       window.dispatchEvent(new CustomEvent('wails-tools:login-expired', { detail: ev?.error ?? '' }))
     })
     return () => offExpired()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const offLogin = onEvent('server:login', () => void refreshSession())
+    const offExpired = onEvent('server:login-expired', () => void refreshSession())
+    void refreshSession()
+    const timer = window.setInterval(() => void refreshSession(), 5000)
+    return () => {
+      offLogin()
+      offExpired()
+      window.clearInterval(timer)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -114,10 +146,36 @@ function Shell() {
   }, [toast])
 
   useEffect(() => {
+    const offLogin = onEvent('server:login', () => void refreshSession())
+    const offExpired = onEvent('server:login-expired', () => void refreshSession())
+    void refreshSession()
+    const timer = window.setInterval(() => void refreshSession(), 5000)
+    return () => {
+      offLogin()
+      offExpired()
+      window.clearInterval(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     const offExpired = onEvent<{ error?: string }>('server:login-expired', (ev) => {
       window.dispatchEvent(new CustomEvent('wails-tools:login-expired', { detail: ev?.error ?? '' }))
     })
     return () => offExpired()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const offLogin = onEvent('server:login', () => void refreshSession())
+    const offExpired = onEvent('server:login-expired', () => void refreshSession())
+    void refreshSession()
+    const timer = window.setInterval(() => void refreshSession(), 5000)
+    return () => {
+      offLogin()
+      offExpired()
+      window.clearInterval(timer)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -258,6 +316,8 @@ export default function App() {
     </ToastProvider>
   )
 }
+
+
 
 
 

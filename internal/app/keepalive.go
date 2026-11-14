@@ -51,6 +51,8 @@ func (a *App) startKeepalive() {
 			if !loggedIn && a.link.Token() != "" {
 				if u, err := a.link.Me(ctx); err == nil {
 					loggedIn = true
+					a.sess.loggedIn = true
+					a.sess.user = u.Username
 					a.emit("server:login", map[string]any{"username": u.Username, "auto": true})
 				}
 			}

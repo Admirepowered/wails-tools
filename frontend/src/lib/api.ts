@@ -800,6 +800,7 @@ const rawApi = {
   RegisterServer: (username: string, password: string, email: string, displayName: string) =>
     call<ServerStatus>('RegisterServer', username, password, email, displayName),
   LoginServer: (username: string, password: string) => call<ServerStatus>('LoginServer', username, password),
+  ServerSession: () => call<{ loggedIn: boolean; username: string; connected: boolean }>('ServerSession'),
   LogoutServer: () => call<void>('LogoutServer'),
   ChangeServerPassword: (oldPassword: string, newPassword: string) =>
     call<Record<string, unknown>>('ChangeServerPassword', oldPassword, newPassword),
@@ -1059,6 +1060,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

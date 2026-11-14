@@ -56,6 +56,7 @@ type App struct {
 	customNodes *proxysvc.NodeStore
 	transfers   *transfermgr.Manager
 	geo         *geodata.DB
+	sess        sessionState
 	onLogin     func()
 	onLogout    func()
 	chainCfg    settings.ProxyChainSettings
@@ -246,6 +247,9 @@ func (a *App) Startup(ctx context.Context) {
 				}
 			}
 		}()
+	}
+	a.onLogin = func() {
+		a.sess.loggedIn = true
 	}
 	if a.log != nil {
 		cfg := a.settings.Get()
