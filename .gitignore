@@ -14,8 +14,12 @@ frontend/node_modules/
 tmpdebug/
 *.log
 
+# stray binaries built into the repo root
+/*.exe
+
 # editors
 .vs/
 .vscode/
 .idea/
 *.user
+
