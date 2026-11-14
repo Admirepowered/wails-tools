@@ -131,6 +131,17 @@ func (a *App) startEngine(node miproxy.Node) (proxysvc.Status, error) {
 		opts.Port = rt.Port
 	}
 	opts.Chain, opts.Relay = a.buildChain()
+	relayText := "none"
+	if opts.Relay != nil {
+		relayText = "server"
+	}
+	if a.log != nil {
+		hops := make([]string, 0, len(opts.Chain))
+		for _, h := range opts.Chain {
+			hops = append(hops, h.Name+"("+h.Addr()+")")
+		}
+		a.log.Printf("engine start node=%s(%s) chain=%v relay=%s", node.Name, node.Addr(), hops, relayText)
+	}
 	return a.proxySvc.Start(node, opts)
 }
 
@@ -161,6 +172,9 @@ func (a *App) SaveProxyChain(cfg settings.ProxyChainSettings) (settings.ProxyCha
 	})
 	if err != nil {
 		return settings.ProxyChainSettings{}, err
+	}
+	if a.log != nil {
+		a.log.Printf("chain saved mode=%s nodeIds=%v -> stored=%s/%v", cfg.Mode, cfg.NodeIDs, saved.ProxyChain.Mode, saved.ProxyChain.NodeIDs)
 	}
 	_, _ = a.RestartEngine()
 	return saved.ProxyChain, nil
