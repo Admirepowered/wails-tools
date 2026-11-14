@@ -80,6 +80,14 @@ function Shell() {
   }, [])
 
   useEffect(() => {
+    const offExpired = onEvent<{ error?: string }>('server:login-expired', (ev) => {
+      window.dispatchEvent(new CustomEvent('wails-tools:login-expired', { detail: ev?.error ?? '' }))
+    })
+    return () => offExpired()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     void loadSettings()
     void refreshStatus()
     api
@@ -89,6 +97,14 @@ function Shell() {
   }, [loadSettings, refreshStatus])
 
   useEffect(() => {
+    const offExpired = onEvent<{ error?: string }>('server:login-expired', (ev) => {
+      window.dispatchEvent(new CustomEvent('wails-tools:login-expired', { detail: ev?.error ?? '' }))
+    })
+    return () => offExpired()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
     const off = onEvent<ServerStatus>('server:status', (st) => setStatus(st))
     const offErr = onEvent<string>('server:error', (msg) => toast.push(msg, 'warn'))
     return () => {
@@ -96,6 +112,14 @@ function Shell() {
       offErr()
     }
   }, [toast])
+
+  useEffect(() => {
+    const offExpired = onEvent<{ error?: string }>('server:login-expired', (ev) => {
+      window.dispatchEvent(new CustomEvent('wails-tools:login-expired', { detail: ev?.error ?? '' }))
+    })
+    return () => offExpired()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -234,6 +258,7 @@ export default function App() {
     </ToastProvider>
   )
 }
+
 
 
 

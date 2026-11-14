@@ -92,6 +92,15 @@ export default function ServerPage(props: PageProps) {
   }, [])
 
   useEffect(() => {
+    const onExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<string>).detail
+      toast.push(detail ? `登录已失效，请重新登录（${detail}）` : '登录已失效，请重新登录', 'warn')
+    }
+    window.addEventListener('wails-tools:login-expired', onExpired)
+    return () => window.removeEventListener('wails-tools:login-expired', onExpired)
+  }, [toast])
+
+  useEffect(() => {
     if (synced.current || !props.settings?.server) return
     synced.current = true
     applyServerSettings(props.settings.server)
@@ -141,9 +150,27 @@ export default function ServerPage(props: PageProps) {
   )
 
   useEffect(() => {
+    const onExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<string>).detail
+      toast.push(detail ? `登录已失效，请重新登录（${detail}）` : '登录已失效，请重新登录', 'warn')
+    }
+    window.addEventListener('wails-tools:login-expired', onExpired)
+    return () => window.removeEventListener('wails-tools:login-expired', onExpired)
+  }, [toast])
+
+  useEffect(() => {
     void loadStatus()
     void loadRelay()
   }, [loadStatus, loadRelay])
+
+  useEffect(() => {
+    const onExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<string>).detail
+      toast.push(detail ? `登录已失效，请重新登录（${detail}）` : '登录已失效，请重新登录', 'warn')
+    }
+    window.addEventListener('wails-tools:login-expired', onExpired)
+    return () => window.removeEventListener('wails-tools:login-expired', onExpired)
+  }, [toast])
 
   useEffect(() => {
     const off = onEvent<ServerStatus>('server:status', (st) => {
@@ -151,6 +178,15 @@ export default function ServerPage(props: PageProps) {
     })
     return () => off()
   }, [])
+
+  useEffect(() => {
+    const onExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<string>).detail
+      toast.push(detail ? `登录已失效，请重新登录（${detail}）` : '登录已失效，请重新登录', 'warn')
+    }
+    window.addEventListener('wails-tools:login-expired', onExpired)
+    return () => window.removeEventListener('wails-tools:login-expired', onExpired)
+  }, [toast])
 
   useEffect(() => {
     // Cloud storage needs a logged-in account, not just a live transport.
@@ -170,8 +206,26 @@ export default function ServerPage(props: PageProps) {
 
   const refreshCloudRef = useRef<() => void>(() => {})
   useEffect(() => {
+    const onExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<string>).detail
+      toast.push(detail ? `登录已失效，请重新登录（${detail}）` : '登录已失效，请重新登录', 'warn')
+    }
+    window.addEventListener('wails-tools:login-expired', onExpired)
+    return () => window.removeEventListener('wails-tools:login-expired', onExpired)
+  }, [toast])
+
+  useEffect(() => {
     refreshCloudRef.current = refreshCloud
   }, [refreshCloud])
+
+  useEffect(() => {
+    const onExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<string>).detail
+      toast.push(detail ? `登录已失效，请重新登录（${detail}）` : '登录已失效，请重新登录', 'warn')
+    }
+    window.addEventListener('wails-tools:login-expired', onExpired)
+    return () => window.removeEventListener('wails-tools:login-expired', onExpired)
+  }, [toast])
 
   useEffect(() => {
     const offProgress = onEvent<{ key?: string; kind?: string; done?: number; total?: number }>(
@@ -898,4 +952,5 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 

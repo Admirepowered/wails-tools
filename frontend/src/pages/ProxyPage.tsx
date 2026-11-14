@@ -657,7 +657,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
       <div className="row">
         <h3 className="card-title" style={{ margin: 0 }}>
           直连规则
-          {geo?.ready ? <Tag kind="ok">geoip 已就绪</Tag> : <Tag kind="warn">未下载</Tag>}
+          {(diag?.ready ?? geo?.ready) ? <Tag kind="ok">geoip 已就绪</Tag> : <Tag kind="warn">未下载</Tag>}
         </h3>
         <div className="spacer" />
         <button className="btn btn-sm" disabled={busy} onClick={download}>
@@ -665,8 +665,8 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
         </button>
       </div>
       <p className="card-desc">命中的目标直接连接，不走代理。</p>
-      {geo?.ready ? (
-        <div className="small faint">大小 {(Number(geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {String(geo.updatedAt ?? '—')}</div>
+      {(diag?.ready ?? geo?.ready) ? (
+        <div className="small faint">大小 {(Number(diag?.fileSize ?? geo?.size ?? 0) / 1048576).toFixed(1)} MB</div>
       ) : null}
       {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{String(geo.error)}</div> : null}
       {diag ? (
@@ -674,8 +674,8 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
           exists={String(diag.fileExists ?? '' )} size={String(diag.fileSize ?? '' )} rootDir={String(diag.rootDir ?? '' )} err={String(diag.error ?? '-')}
         </div>
       ) : null}
-      {geo?.ready ? (
-        <div className="small faint">大小 {(Number(geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {String(geo.updatedAt ?? '—')}</div>
+      {(diag?.ready ?? geo?.ready) ? (
+        <div className="small faint">大小 {(Number(diag?.fileSize ?? geo?.size ?? 0) / 1048576).toFixed(1)} MB</div>
       ) : null}
       {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{String(geo.error)}</div> : null}
       {diag ? (
@@ -716,6 +716,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 

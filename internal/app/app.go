@@ -240,10 +240,32 @@ func (a *App) Startup(ctx context.Context) {
 			}
 			// Restore the saved session so the account is logged in automatically.
 			if a.link.Token() != "" {
-				if u, err := a.link.Me(c); err == nil {
-					a.emit("server:login", map[string]any{"username": u.Username})
-				} else {
-					a.emit("server:error", "自动登录失败: "+err.Error())
+				// 更新后重启时配置/令牌可能尚未落盘完成，重试几次再判定失效。
+				var lastErr error
+				logged := false
+				for attempt := 0; attempt < 3; attempt++ {
+					if attempt > 0 {
+						time.Sleep(2 * time.Second)
+					}
+					if u, err := a.link.Me(c); err == nil {
+						a.emit("server:login", map[string]any{"username": u.Username, "auto": true})
+						logged = true
+						break
+					} else {
+						lastErr = err
+					}
+				}
+				if !logged {
+					msg := ""
+					if lastErr != nil {
+						msg = lastErr.Error()
+					}
+					if strings.Contains(msg, "unauthorized") || strings.Contains(msg, "expired") || strings.Contains(msg, "exists") {
+						_ = a.link.Logout(c)
+						a.emit("server:login-expired", map[string]any{"error": msg})
+					} else {
+						a.emit("server:error", "自动登录失败: "+msg)
+					}
 				}
 			}
 			if a.subs != nil {
