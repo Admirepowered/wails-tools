@@ -588,3 +588,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
   word-break: break-word;
   color: var(--text);
 }
+
+/* ---------- context menu ---------- */
+.ctx-backdrop { position: fixed; inset: 0; z-index: 300; }
+.ctx-menu {
+  position: fixed;
+  min-width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.ctx-item {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ctx-item:hover { background: var(--surface-2); }
+.ctx-item.danger { color: var(--danger); }

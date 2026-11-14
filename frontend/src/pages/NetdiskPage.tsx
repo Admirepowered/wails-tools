@@ -207,6 +207,7 @@ export default function NetdiskPage(_props: PageProps) {
   const [searchInput, setSearchInput] = useState('')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string[]>([])
+  const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; danger?: boolean; action: () => void }[] } | null>(null)
   const [uploads, setUploads] = useState<UploadProgress[]>([])
 
   // shares
@@ -846,6 +847,20 @@ export default function NetdiskPage(_props: PageProps) {
                 上传
               </button>
               <button className="btn btn-sm" onClick={() => void downloadSelected()} disabled={!singleFile}>
+              <button
+                className="btn btn-sm"
+                title="递归下载当前目录全部文件"
+                onClick={async () => {
+                  try {
+                    const res = await api.NetdiskEnqueueFolder(activeId, path)
+                    toast.push(`已加入 ${res.queued ?? 0} 个文件到下载队列`)
+                  } catch (err) {
+                    toast.error(err)
+                  }
+                }}
+              >
+                下载全部
+              </button>
                 下载
               </button>
               <button className="btn btn-sm" onClick={() => setShareOpen(true)} disabled={selectedFiles.length === 0}>
@@ -934,6 +949,17 @@ export default function NetdiskPage(_props: PageProps) {
                       if (file.is_dir) navigate(file.path)
                     }}
                     title={file.is_dir ? '双击进入文件夹' : file.path}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        items: [
+                          ...(file.is_dir ? [] : [{ label: '下载', action: () => void api.NetdiskEnqueueDownload({ account_id: activeId, file_id: file.id, name: file.name, path: file.path, size: file.size }).then(() => toast.push('已加入下载队列')).catch((err) => toast.error(err)) }]),
+                          { label: '删除', danger: true, action: () => void api.NetdiskDelete({ account_id: activeId, file_ids: [file.id] }).then(() => { toast.push('已删除'); refreshFiles() }).catch((err) => toast.error(err)) },
+                        ],
+                      })
+                    }}
                   >
                     <span className="file-icon">{file.is_dir ? '📁' : '📄'}</span>
                     <span className="file-name">{file.name}</span>
@@ -1367,10 +1393,20 @@ export default function NetdiskPage(_props: PageProps) {
           onConfirm={() => void purgeRecycle()}
         />
       ) : null}
+      {menu && (
+        <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }}>
+          <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+            {menu.items.map((item, i) => (
+              <button key={i} className={`ctx-item ${item.danger ? 'danger' : ''}`} onClick={() => { setMenu(null); item.action() }}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
-
 /* ---------------- account card ---------------- */
 
 function AccountCard({
@@ -1457,3 +1493,5 @@ function AccountCard({
     </div>
   )
 }
+
+

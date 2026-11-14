@@ -229,6 +229,7 @@ func (a *App) Startup(ctx context.Context) {
 			}
 		}()
 	}
+	go a.restoreActiveNode()
 	if a.settings.Get().Server.AutoConnect {
 		go func() {
 			c, cancel := context.WithTimeout(context.Background(), 20*time.Second)

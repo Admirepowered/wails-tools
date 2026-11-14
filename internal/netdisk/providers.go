@@ -3,6 +3,8 @@ package netdisk
 import (
 	"bytes"
 	"context"
+	"crypto/rc4"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -322,8 +325,136 @@ func mapBaiduFiles(account Account, items []baiduFileItem) []File {
 	return files
 }
 
-func (*BaiduClient) ResolveDownload(context.Context, Account, string, ResolveDownloadRequest) (DownloadLink, error) {
-	return DownloadLink{}, errors.New("baidu downloads must be resolved through line 3")
+// ResolveDownload implements Baidu's "line 3" resolution using the account
+// cookie: gettemplatevariable (sign1/sign3/timestamp) -> RC4+base64 sign ->
+// /api/download?type=dlink -> dlink URL.
+func (c *BaiduClient) ResolveDownload(ctx context.Context, account Account, cookie string, req ResolveDownloadRequest) (DownloadLink, error) {
+	fileID := strings.TrimSpace(req.FileID)
+	if fileID == "" {
+		return DownloadLink{}, errors.New("baidu: 缺少文件 ID")
+	}
+	tpl, err := c.fetchAccountTpl(ctx, cookie)
+	if err != nil {
+		return DownloadLink{}, err
+	}
+	sign, err := baiduAccountSign(tpl)
+	if err != nil {
+		return DownloadLink{}, err
+	}
+	dlink, err := c.fetchAccountDLink(ctx, cookie, fileID, tpl, sign)
+	if err != nil {
+		return DownloadLink{}, err
+	}
+	filename := path.Base(req.Path)
+	return DownloadLink{
+		URL:       dlink,
+		Filename:  filename,
+		Size:      req.Size,
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+		Cookie:    cookie,
+		Referer:   "https://pan.baidu.com/",
+		Policy:    "line3",
+	}, nil
+}
+
+type baiduAccountTpl struct {
+	Sign1     string
+	Sign3     string
+	Timestamp string
+}
+
+func (c *BaiduClient) fetchAccountTpl(ctx context.Context, cookie string) (baiduAccountTpl, error) {
+	values := url.Values{}
+	values.Set("clienttype", "8")
+	values.Set("app_id", "250528")
+	values.Set("web", "1")
+	values.Set("fields", `["sign1","sign2","sign3","timestamp"]`)
+	endpoint := "https://pan.baidu.com/api/gettemplatevariable?" + values.Encode()
+	var payload struct {
+		Errno   int    `json:"errno"`
+		ErrMsg  string `json:"errmsg"`
+		ShowMsg string `json:"show_msg"`
+		Result  struct {
+			Sign1     string      `json:"sign1"`
+			Sign3     string      `json:"sign3"`
+			Timestamp interface{} `json:"timestamp"`
+		} `json:"result"`
+	}
+	if err := c.getJSON(ctx, endpoint, cookie, &payload); err != nil {
+		return baiduAccountTpl{}, err
+	}
+	if payload.Errno != 0 {
+		return baiduAccountTpl{}, baiduAPIError("gettemplatevariable", payload.Errno, payload.ShowMsg, payload.ErrMsg)
+	}
+	tpl := baiduAccountTpl{
+		Sign1:     strings.TrimSpace(payload.Result.Sign1),
+		Sign3:     strings.TrimSpace(payload.Result.Sign3),
+		Timestamp: strings.TrimSpace(fmt.Sprint(payload.Result.Timestamp)),
+	}
+	if tpl.Sign1 == "" || tpl.Sign3 == "" || tpl.Timestamp == "" || tpl.Timestamp == "<nil>" {
+		return baiduAccountTpl{}, errors.New("baidu gettemplatevariable 未返回 sign 数据")
+	}
+	return tpl, nil
+}
+
+func baiduAccountSign(tpl baiduAccountTpl) (string, error) {
+	cipher, err := rc4.NewCipher([]byte(tpl.Sign3))
+	if err != nil {
+		return "", err
+	}
+	out := make([]byte, len(tpl.Sign1))
+	cipher.XORKeyStream(out, []byte(tpl.Sign1))
+	return base64.StdEncoding.EncodeToString(out), nil
+}
+
+func (c *BaiduClient) fetchAccountDLink(ctx context.Context, cookie, fileID string, tpl baiduAccountTpl, sign string) (string, error) {
+	values := url.Values{}
+	values.Set("clienttype", "8")
+	values.Set("app_id", "250528")
+	values.Set("web", "1")
+	values.Set("type", "dlink")
+	values.Set("sign", sign)
+	values.Set("timestamp", tpl.Timestamp)
+	values.Set("fidlist", baiduSingleFIDList(fileID))
+	endpoint := "https://pan.baidu.com/api/download?" + values.Encode()
+	var payload struct {
+		Errno   int    `json:"errno"`
+		ErrMsg  string `json:"errmsg"`
+		ShowMsg string `json:"show_msg"`
+		DLink   []struct {
+			FSID  interface{} `json:"fs_id"`
+			DLink string      `json:"dlink"`
+		} `json:"dlink"`
+	}
+	if err := c.getJSON(ctx, endpoint, cookie, &payload); err != nil {
+		return "", err
+	}
+	if payload.Errno != 0 {
+		return "", baiduAPIError("download", payload.Errno, payload.ShowMsg, payload.ErrMsg)
+	}
+	for _, item := range payload.DLink {
+		if strings.TrimSpace(fmt.Sprint(item.FSID)) == fileID && strings.TrimSpace(item.DLink) != "" {
+			return strings.TrimSpace(item.DLink), nil
+		}
+	}
+	for _, item := range payload.DLink {
+		if strings.TrimSpace(item.DLink) != "" {
+			return strings.TrimSpace(item.DLink), nil
+		}
+	}
+	return "", errors.New("baidu download 未返回 dlink")
+}
+
+func baiduSingleFIDList(fileID string) string {
+	fileID = strings.TrimSpace(fileID)
+	if _, err := strconv.ParseInt(fileID, 10, 64); err == nil {
+		return "[" + fileID + "]"
+	}
+	data, err := json.Marshal([]string{fileID})
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
 }
 
 func (c *BaiduClient) ResolveVideoPreview(ctx context.Context, account Account, cookie string, req VideoPreviewRequest) (VideoPreviewResult, error) {

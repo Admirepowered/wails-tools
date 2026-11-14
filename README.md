@@ -1,6 +1,6 @@
 # WailsTools
 
-> 当前版本：**v1.3.1**（每次发布构建补丁号 +1）
+> 当前版本：**v1.3.2**（每次发布构建补丁号 +1）
 
 一套 Go + Wails v2 的桌面客户端，以及配套的 Go 同步服务端。覆盖：云同步笔记、文件管理、SSH（含跳板与服务器中转）、FTP/FTPS、HTTP 下载工具、网盘管理（夸克 / UC / 百度）、按连接类型独立配置的代理。
 
@@ -49,8 +49,8 @@
 | SSH 管理 | 主机/分组/搜索、密码 / 密钥 / keyboard-interactive / agent 认证、RSA·Ed25519·ECDSA 密钥生成与导入、公钥复制、私钥导出、主机指纹 TOFU 固定、直连 / 跳板机链 / 服务端中转三种路由、SFTP 浏览与传输、交互式终端（PTY）、单条命令执行 |
 | FTP 管理 | FTP / 隐式 FTPS / 显式 FTPS（AUTH TLS）、被动模式、目录浏览、上传/下载、新建/重命名/删除、多会话 |
 | 下载工具 | HTTP(S)、多连接分段下载、断点续传、自动重试、限速、进度/速度事件、任务队列与并发控制、按任务选择走代理或直连、文件名识别（Content-Disposition） |
-| 网盘管理 | 夸克网盘、UC 网盘、百度网盘：Cookie 账号、文件列表/搜索、上传、下载（解析直链后交给下载引擎）、分享、回收站、视频预览 |
-| 代理 | HTTP CONNECT 与 SOCKS5、账号密码、**每个工具单独选择是否使用内部代理**、代理链路（服务器跳转 / 节点中转，最多 2 跳）、直连规则（域名/IP/CIDR + geoip 国家直连）、系统代理、连通性测试 |
+| 网盘管理 | 夸克网盘、UC 网盘、百度网盘：Cookie 账号、文件列表/搜索、上传、**右键下载/删除**、**一键下载整个目录**、分享、回收站、视频预览；百度下载走本地「线路 3」解析（gettemplatevariable → RC4 sign → dlink） |
+| 代理 | 每个工具独立选择 **不走代理 / HTTP 代理 / SOCKS5 代理 / 内部代理**、代理链路（服务器跳转 / 节点中转，最多 2 跳）、直连规则（域名/IP/CIDR + geoip 国家直连）、系统代理、**记住上次选择的节点并在启动时自动恢复** |
 | 代理订阅 | 订阅链接自动拉取节点（明文/Base64/Clash YAML），定时后台刷新，流量与到期信息；支持 VMess / VLESS / Trojan / Shadowsocks / HTTP / SOCKS5，节点一键切换、整表批量测速（http://www.gstatic.com/generate_204）并显示延迟 |
 | 代理引擎 | 由 C 版 miproxy/Pulse 内核重写为 Go：VMess（AEAD/legacy 头 + WS/TLS）、VLESS、Trojan、Shadowsocks(AEAD)、本地 SOCKS5+HTTP 混合入站（多线程并发）；支持外部共享（0.0.0.0 + 认证）与系统代理开关 |
 | 代理链路 | 可选「从服务器跳转」或「用已有节点中转」，最多 2 跳；直连规则支持自定义域名/IP/CIDR 与 **geoip.metadb 按国家直连**（MetaCubeX 数据，内置下载） |
@@ -240,6 +240,8 @@ server/cmd/wt-server     服务端可执行
 server/internal/{api,store,auth,server}
 frontend/                React + TypeScript 界面
 ```
+
+
 
 
 

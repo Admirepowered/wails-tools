@@ -79,6 +79,7 @@ export default function FilesPage({ serverStatus }: PageProps) {
   /* ---- 传输记录 ---- */
   const [managed, setManaged] = useState<TransferTask[]>([])
   const [preview, setPreview] = useState<MediaTarget | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; danger?: boolean; action: () => void }[] } | null>(null)
   const [managedBusy, setManagedBusy] = useState(false)
   const [transfers, setTransfers] = useState<TransferItem[]>([])
 
@@ -491,6 +492,24 @@ export default function FilesPage({ serverStatus }: PageProps) {
                     className={`file-row ${isSelected ? 'selected' : ''}`}
                     onClick={() => toggleSelect(entry.path)}
                     onDoubleClick={() => entry.isDir && void loadLocal(entry.path)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      const name = entry.name
+                      const kind = kindOf(name)
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        items: [
+                          ...(kind
+                            ? [{ label: '预览', action: () => setPreview({ path: entry.path, name, kind, source: 'local' as const }) }]
+                            : []),
+                          ...(entry.isDir
+                            ? []
+                            : [{ label: '上传到云端', action: () => void api.UploadToServer([entry.path], cloudPath).then(() => toast.push('已加入上传队列')).catch((err) => toast.error(err)) }]),
+                          { label: '在资源管理器中显示', action: () => void api.RevealInExplorer(entry.path).catch((err) => toast.error(err)) },
+                        ],
+                      })
+                    }}
                     title={entry.path}
                   >
                     <span
@@ -632,6 +651,22 @@ export default function FilesPage({ serverStatus }: PageProps) {
                       className={`file-row ${cloudSelected === entry.path ? 'selected' : ''}`}
                       onClick={() => setCloudSelected(entry.path)}
                       onDoubleClick={() => entry.isDir && void loadCloud(entry.path)}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        const name = entry.name
+                        const kind = kindOf(name)
+                        setMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          items: [
+                            { label: '下载到本地', action: () => { setCloudSelected(entry.path); void api.DownloadFromServer(entry.path, local?.path ?? '' ).then(() => toast.push('已开始下载')).catch((err) => toast.error(err)) } },
+                            ...(kind ? [{ label: '预览', action: () => setPreview({ path: entry.path, name, kind, source: 'cloud' as const }) }] : []),
+                            ...(isArchive(name) ? [{ label: '在线解压', action: () => void api.ExtractCloudFile(entry.path).then(() => loadCloud(cloudPath)).catch((err) => toast.error(err)) }] : []),
+                            { label: '重命名', action: () => { setCloudSelected(entry.path); setRenameName(name); setRenameOpen(true) } },
+                            { label: '删除', danger: true, action: () => { setCloudSelected(entry.path); setRemoving(entry) } },
+                          ],
+                        })
+                      }}
                       title={entry.path}
                     >
                       <span className="file-icon">{entry.isDir ? '▣' : '▤'}</span>

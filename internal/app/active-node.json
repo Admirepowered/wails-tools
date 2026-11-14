@@ -1,0 +1,9 @@
+{
+  "id": "",
+  "name": "socks-up",
+  "protocol": "socks5",
+  "server": "10.0.0.5",
+  "port": 1080,
+  "password": "p",
+  "username": "u"
+}

@@ -368,57 +368,59 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
                   <div className="scope-title">{meta.title}</div>
                   <div className="scope-desc">{meta.desc}</div>
                 </div>
-                {st.override ? <Tag kind="info">已覆盖</Tag> : <Tag>跟随默认</Tag>}
-                <Switch
-                  checked={enabled}
-                  title={enabled ? '走代理' : '不走代理'}
-                  onChange={(v) =>
-                    updateRule(scope, {
-                      mode: v ? (st.rule.mode === 'off' || !st.rule.mode ? 'http' : st.rule.mode) : 'off',
-                    })
-                  }
-                />
-                <label className="row" style={{ gap: 6 }} title={active?.running ? '该工具是否走当前节点' : '请先在订阅页启用节点'}>
-                  <Switch
-                    checked={!!internal[scope]}
-                    onChange={async (v) => {
+                <select
+                  className="select"
+                  style={{ width: 150 }}
+                  value={internal[scope] ? 'internal' : st.rule.mode === 'off' || !st.rule.mode ? 'off' : st.rule.mode}
+                  onChange={async (e) => {
+                    const next = e.target.value
+                    if (next === 'internal') {
                       if (!active?.running) {
                         toast.push('请先在订阅页启用一个节点', 'warn')
                         return
                       }
                       try {
-                        await api.SetScopeInternalProxy(scope, v)
+                        await api.SetScopeInternalProxy(scope, true)
                         await reloadSettings()
                         await load()
                       } catch (err) {
                         toast.error(err)
                       }
-                    }}
-                  />
-                  <span className="small">内部代理</span>
-                </label>
-              </div>
-
-              <div className="row" style={{ gap: 8 }}>
-                <select
-                  className="select"
-                  style={{ width: 130 }}
-                  value={st.rule.mode === 'off' ? 'off' : st.rule.mode}
-                  onChange={(e) => updateRule(scope, { mode: e.target.value })}
+                      return
+                    }
+                    if (internal[scope]) {
+                      try {
+                        await api.SetScopeInternalProxy(scope, false)
+                      } catch (err) {
+                        toast.error(err)
+                        return
+                      }
+                    }
+                    updateRule(scope, { mode: next })
+                  }}
                 >
                   <option value="off">不走代理</option>
                   <option value="http">HTTP 代理</option>
-                  <option value="socks5">SOCKS5</option>
+                  <option value="socks5">SOCKS5 代理</option>
+                  <option value="internal">内部代理</option>
                 </select>
-                <input
-                  className="input mono"
-                  style={{ flex: 1 }}
-                  placeholder="host:port"
-                  disabled={st.rule.mode === 'off'}
-                  value={st.rule.url}
-                  onChange={(e) => updateRule(scope, { url: e.target.value })}
-                />
               </div>
+
+              {!internal[scope] && st.rule.mode !== 'off' && (
+                <div className="row" style={{ gap: 8 }}>
+                  <input
+                    className="input mono"
+                    style={{ flex: 1 }}
+                    placeholder="host:port"
+                    value={st.rule.url}
+                    onChange={(e) => updateRule(scope, { url: e.target.value })}
+                  />
+                </div>
+              )}
+
+              {internal[scope] && (
+                <div className="small faint mono">使用当前节点 {active?.addr ?? ''}</div>
+              )}
 
               {st.rule.mode !== 'off' && (
                 <>

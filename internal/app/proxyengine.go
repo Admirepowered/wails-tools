@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +86,7 @@ func (a *App) ActivateProxyNode(node miproxy.Node) (map[string]any, error) {
 
 	// Switching nodes only changes the engine; per-tool proxy scopes are left
 	// untouched so each tool decides whether to use the internal proxy.
+	_ = a.saveActiveNode(node)
 	st := a.proxySvc.Status()
 	a.emit("proxy:status", st)
 	return map[string]any{"mode": mode, "status": st, "rule": rule, "node": node}, nil
@@ -136,6 +140,7 @@ func (a *App) SetProxyMode(mode string) (settings.Settings, error) {
 func (a *App) DeactivateProxy() (settings.Settings, error) {
 	_ = a.proxySvc.Stop()
 	_ = a.disableSystemProxy()
+	a.clearActiveNode()
 	cfg, err := a.settings.Update(func(s *settings.Settings) error {
 		s.Proxy.Mode = ProxyModeOff
 		off := settings.ProxyRule{Mode: "off"}
@@ -328,4 +333,46 @@ func portOfAddr(addr string) int {
 	var port int
 	fmt.Sscanf(addr[idx+1:], "%d", &port)
 	return port
+}
+
+// activeNodePath is where the last selected node is persisted.
+func (a *App) activeNodePath() string {
+	return filepath.Join(a.rootDir, "active-node.json")
+}
+
+func (a *App) saveActiveNode(node miproxy.Node) error {
+	data, err := json.MarshalIndent(node, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(a.activeNodePath(), data, 0o600)
+}
+
+func (a *App) loadActiveNode() (miproxy.Node, bool) {
+	data, err := os.ReadFile(a.activeNodePath())
+	if err != nil {
+		return miproxy.Node{}, false
+	}
+	var node miproxy.Node
+	if err := json.Unmarshal(data, &node); err != nil || node.Protocol == "" || node.Server == "" {
+		return miproxy.Node{}, false
+	}
+	return node, true
+}
+
+func (a *App) clearActiveNode() {
+	_ = os.Remove(a.activeNodePath())
+}
+
+// restoreActiveNode re-starts the engine for the last selected node.
+func (a *App) restoreActiveNode() {
+	node, ok := a.loadActiveNode()
+	if !ok {
+		return
+	}
+	if _, err := a.startEngine(node); err != nil {
+		a.emit("proxy:error", "恢复上次节点失败: "+err.Error())
+		return
+	}
+	a.emit("proxy:status", a.proxySvc.Status())
 }

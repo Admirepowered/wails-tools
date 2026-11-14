@@ -855,6 +855,8 @@ const rawApi = {
     'NetdiskResolveLink',
     req,
   ),
+  NetdiskEnqueueFolder: (accountId: string, folder: string) =>
+    call<{ queued: number; folder: string }>('NetdiskEnqueueFolder', accountId, folder),
   NetdiskEnqueueDownload: (req: {
     account_id: string
     file_id: string
@@ -1056,6 +1058,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 
