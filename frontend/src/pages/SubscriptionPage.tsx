@@ -862,6 +862,9 @@ function NodeEditor({
         <Field label="TLS">
           <Switch checked={!!draft.tls} onChange={(v) => patch({ tls: v })} />
         </Field>
+        <Field label="跳过证书验证">
+          <Switch checked={!!draft.skipVerify} onChange={(v) => patch({ skipVerify: v })} />
+        </Field>
         <Field label="SNI（可选）">
           <input className="input mono" value={draft.sni ?? ''} onChange={(e) => patch({ sni: e.target.value })} />
         </Field>
