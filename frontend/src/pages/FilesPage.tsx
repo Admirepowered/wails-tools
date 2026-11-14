@@ -893,6 +893,18 @@ export default function FilesPage({ serverStatus }: PageProps) {
           onConfirm={submitRemove}
         />
       ) : null}
+      {menu && (
+        <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }}>
+          <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+            {menu.items.map((item, i) => (
+              <button key={i} className={`ctx-item ${item.danger ? 'danger' : ''}`} onClick={() => { setMenu(null); item.action() }}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {preview && <MediaViewer target={preview} onClose={() => setPreview(null)} />}
     </div>
   )
 }
