@@ -56,11 +56,18 @@ func (a *App) LoginServer(username, password string) (serverlink.Status, error) 
 			return serverlink.Status{}, err
 		}
 	}
-	return a.link.Login(ctx, strings.TrimSpace(username), password)
+	st, err := a.link.Login(ctx, strings.TrimSpace(username), password)
+	if err == nil && a.onLogin != nil {
+		a.onLogin()
+	}
+	return st, err
 }
 
 // LogoutServer clears the session.
 func (a *App) LogoutServer() error {
+	if a.onLogout != nil {
+		a.onLogout()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return a.link.Logout(ctx)

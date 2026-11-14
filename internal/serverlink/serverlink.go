@@ -950,3 +950,8 @@ func (c *Client) UploadFrom(ctx context.Context, localPath, remotePath string, o
 	}
 	return done, nil
 }
+
+// Ping verifies the session is alive (used by the keepalive loop).
+func (c *Client) Ping(ctx context.Context) error {
+	return c.Call(ctx, "server.info", nil, nil)
+}

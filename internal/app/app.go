@@ -56,6 +56,8 @@ type App struct {
 	customNodes *proxysvc.NodeStore
 	transfers   *transfermgr.Manager
 	geo         *geodata.DB
+	onLogin     func()
+	onLogout    func()
 	chainCfg    settings.ProxyChainSettings
 	rulesCfg    settings.DirectRuleSettings
 	media       *mediaRegistry
@@ -251,6 +253,7 @@ func (a *App) Startup(ctx context.Context) {
 			cfg.ProxyChain.Mode, cfg.ProxyChain.NodeIDs, cfg.DirectRules.UseGeoIP, cfg.DirectRules.Countries, cfg.Server.AutoConnect, a.settings.Path())
 	}
 	go a.restoreActiveNode()
+	a.startKeepalive()
 	if a.settings.Get().Server.AutoConnect {
 		go func() {
 			c, cancel := context.WithTimeout(context.Background(), 20*time.Second)

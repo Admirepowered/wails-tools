@@ -565,30 +565,6 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
       <h3 className="card-title">代理链路</h3>
       <p className="card-desc">可让出口先经过同步服务器或已有节点中转，最多 2 跳。</p>
       <div className="row" style={{ gap: 8 }}>
-        <div className="small faint mono">
-          当前状态：mode={cfg.mode} nodeIds={(cfg.nodeIds ?? []).join(',') || '（空）'} loaded={String(loaded)} raw={raw}
-        </div>
-        <button
-          className="btn btn-sm"
-          onClick={async () => {
-            try {
-              const chain = (await api.GetProxyChain()) as Record<string, unknown>
-              setRaw(JSON.stringify(chain))
-              chainCache = {
-                mode: String(chain.mode ?? 'off') || 'off',
-                nodeIds: Array.isArray(chain.nodeIds) ? (chain.nodeIds as string[]) : [],
-              }
-              setCfg(chainCache)
-              setLoaded(true)
-            } catch (err) {
-              toast.error(err)
-            }
-          }}
-        >
-          重新读取
-        </button>
-      </div>
-      <div className="row" style={{ gap: 8 }}>
         <select
           className="select"
           style={{ width: 200 }}
@@ -762,6 +738,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
