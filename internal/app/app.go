@@ -39,32 +39,34 @@ import (
 type App struct {
 	ctx context.Context
 
-	settings    *settings.Store
-	ssh         *sshmgr.Manager
-	ftp         *ftpHub
-	engine      *dlengine.Engine
-	notes       *notes.Store
-	link        *serverlink.Client
-	netdisk     *netdisk.Manager
-	vault       *secretstore.Vault
-	updater     *updater.Manager
-	subs        *subscription.Manager
-	shots       *shot.Manager
-	tray        *tray.Tray
-	quitting    bool
-	proxySvc    *proxysvc.Service
-	customNodes *proxysvc.NodeStore
-	transfers   *transfermgr.Manager
-	geo         *geodata.DB
-	sess        sessionState
-	vaultState  vaultState
-	onLogin     func()
-	onLogout    func()
-	chainCfg    settings.ProxyChainSettings
-	rulesCfg    settings.DirectRuleSettings
-	media       *mediaRegistry
-	hotkey      *hotkey.Hotkey
-	log         *fileLogger
+	settings       *settings.Store
+	ssh            *sshmgr.Manager
+	ftp            *ftpHub
+	engine         *dlengine.Engine
+	notes          *notes.Store
+	link           *serverlink.Client
+	netdisk        *netdisk.Manager
+	vault          *secretstore.Vault
+	updater        *updater.Manager
+	subs           *subscription.Manager
+	shots          *shot.Manager
+	tray           *tray.Tray
+	quitting       bool
+	proxySvc       *proxysvc.Service
+	customNodes    *proxysvc.NodeStore
+	transfers      *transfermgr.Manager
+	geo            *geodata.DB
+	sess           sessionState
+	vaultState     vaultState
+	onLogin        func()
+	onLogout       func()
+	chainCfg       settings.ProxyChainSettings
+	rulesCfg       settings.DirectRuleSettings
+	media          *mediaRegistry
+	hotkey         *hotkey.Hotkey
+	log            *fileLogger
+	notesSyncMu    sync.Mutex
+	notesSyncTimer *time.Timer
 
 	mu      sync.Mutex
 	terms   map[string]*sshmgr.Terminal
@@ -307,9 +309,9 @@ func (a *App) Startup(ctx context.Context) {
 						a.sess.loggedIn = true
 						a.setSessionUser(u)
 						a.refreshDeviceCount()
-						if a.restoreVaultKey() {
-							a.scheduleSecretSync()
-						}
+						// Auto-login on a fresh device must restore everything.
+						a.restoreVaultKey()
+						a.scheduleFullSync()
 						a.emit("server:login", map[string]any{"username": u.Username, "role": u.Role, "auto": true})
 						logged = true
 						break

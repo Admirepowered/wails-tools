@@ -529,6 +529,28 @@ export default function ServerPage(props: PageProps) {
     }
   }
 
+  const syncEverything = async () => {
+    setSecretBusy(true)
+    try {
+      const res = await api.SyncAllNow()
+      const errs = Array.isArray(res?.errors) ? res.errors : []
+      if (errs.length > 0) {
+        toast.push(`同步完成（${errs.join('；')}）`, 'warn')
+      } else {
+        const notes = res?.notes ?? {}
+        const pulled = typeof notes.pulled === 'number' ? notes.pulled : 0
+        const shots = res?.screenshots ?? {}
+        const pulledShots = typeof shots.pulled === 'number' ? shots.pulled : 0
+        toast.push(`全部同步完成：笔记拉取 ${pulled} 条，截图 ${pulledShots} 张`)
+      }
+      await loadSecretSync()
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setSecretBusy(false)
+    }
+  }
+
   /* ---------------- cloud actions ---------------- */
 
   const crumbs = useMemo(() => {
@@ -1177,12 +1199,12 @@ export default function ServerPage(props: PageProps) {
           <div className="row">
             <div style={{ flex: 1 }}>
               <h3 className="card-title">
-                密钥与凭据同步
+                账号数据同步
                 {secretSync?.keyReady ? <Tag kind="ok">密钥就绪</Tag> : <Tag kind="warn">等待密码</Tag>}
                 {secretSync && !secretSync.enabled ? <Tag>已关闭</Tag> : null}
               </h3>
               <p className="card-desc" style={{ margin: 0 }}>
-                SSH 主机、SSH 私钥（RSA）、FTP 账号与已授信指纹在本机用<b>账号原始密码</b>加密后上传，服务器只保存密文和密码哈希。换机登录同一账号即可解密，无需重新导入。
+                笔记、订阅与自定义节点、截图、SSH 主机/私钥、FTP 账号、网盘账号都会在登录后自动同步；密码/私钥/Cookie 这类敏感内容用<b>账号原始密码</b>在本机加密后上传，服务器只保存密文与密码哈希。换机登录同一账号即可还原，无需重新导入。
               </p>
             </div>
             <label className="row" style={{ gap: 8 }}>
@@ -1195,6 +1217,7 @@ export default function ServerPage(props: PageProps) {
             <span className="small faint">SSH 主机 {secretSync?.hosts ?? 0}</span>
             <span className="small faint">SSH 密钥 {secretSync?.keys ?? 0}</span>
             <span className="small faint">FTP 账号 {secretSync?.ftp ?? 0}</span>
+            <span className="small faint">网盘账号 {secretSync?.netdisk ?? 0}</span>
             <span className="small faint">最近同步 {secretSync?.lastSync ? formatTime(secretSync.lastSync) : '—'}</span>
             {secretSync?.hasPassword ? <span className="small faint">密码已存本机</span> : <span className="small faint">本机未保存密码</span>}
           </div>
@@ -1225,6 +1248,9 @@ export default function ServerPage(props: PageProps) {
           <div className="row" style={{ marginTop: 12, gap: 8 }}>
             <button className="btn btn-sm" disabled={secretBusy || !secretSync?.keyReady} onClick={() => void syncSecrets()}>
               {secretBusy ? '同步中…' : '立即同步'}
+            </button>
+            <button className="btn btn-ghost btn-sm" disabled={secretBusy} onClick={() => void syncEverything()}>
+              全部同步（笔记/订阅/网盘/截图）
             </button>
             <button
               className="btn btn-ghost btn-sm"
@@ -1422,6 +1448,7 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
 

@@ -422,6 +422,7 @@ export interface SecretSyncStatus {
   hosts: number
   keys: number
   ftp: number
+  netdisk: number
 }
 
 export interface SecretSyncResult {
@@ -430,6 +431,15 @@ export interface SecretSyncResult {
   updatedAt: string
   applied: Record<string, number>
   counts: Record<string, number>
+}
+
+export interface FullSyncResult {
+  notes?: Record<string, number>
+  subs?: Record<string, unknown>
+  secrets?: Record<string, unknown>
+  screenshots?: Record<string, number>
+  errors?: string[]
+  message: string
 }
 
 /* ---------------- netdisk ---------------- */
@@ -885,6 +895,7 @@ const rawApi = {
   // encrypted secret sync (SSH hosts/keys, FTP profiles)
   SecretSyncStatus: () => call<SecretSyncStatus>('SecretSyncStatus'),
   SyncSecretsNow: () => call<SecretSyncResult>('SyncSecretsNow'),
+  SyncAllNow: () => call<FullSyncResult>('SyncAllNow'),
   UnlockSecretSync: (password: string) => call<SecretSyncResult>('UnlockSecretSync', password),
   SetSecretSyncEnabled: (enabled: boolean) => call<SecretSyncStatus>('SetSecretSyncEnabled', enabled),
   ForgetSavedPassword: () => call<SecretSyncStatus>('ForgetSavedPassword'),

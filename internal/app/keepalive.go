@@ -54,9 +54,8 @@ func (a *App) startKeepalive() {
 					a.sess.loggedIn = true
 					a.setSessionUser(u)
 					a.refreshDeviceCount()
-					if a.restoreVaultKey() {
-						a.scheduleSecretSync()
-					}
+					a.restoreVaultKey()
+					a.scheduleFullSync()
 					a.emit("server:login", map[string]any{"username": u.Username, "role": u.Role, "auto": true})
 				}
 			} else if loggedIn && a.sess.role == "" && a.link.Token() != "" {

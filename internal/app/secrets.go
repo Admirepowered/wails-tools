@@ -112,6 +112,12 @@ func (a *App) localSecretBundle() vaultsync.Bundle {
 	if a.ftp != nil && a.ftp.store != nil {
 		b.FTP = a.ftp.store.Export()
 	}
+	if a.netdisk != nil {
+		if accounts, cookies, err := a.netdisk.ExportAll(); err == nil {
+			b.Netdisk = accounts
+			b.NetdiskCookies = cookies
+		}
+	}
 	return b
 }
 
@@ -139,6 +145,11 @@ func (a *App) applySecretBundle(b vaultsync.Bundle) map[string]int {
 			out["ftp"] = n
 		}
 	}
+	if a.netdisk != nil && (len(b.Netdisk) > 0 || len(b.NetdiskCookies) > 0) {
+		if n, err := a.netdisk.ImportAll(b.Netdisk, b.NetdiskCookies); err == nil {
+			out["netdisk"] = n
+		}
+	}
 	return out
 }
 
@@ -148,13 +159,16 @@ func (a *App) applySecretBundle(b vaultsync.Bundle) map[string]int {
 func (a *App) SecretSyncStatus() map[string]any {
 	cfg := a.settings.Get()
 	key, user := a.vaultState.get()
-	hosts, keys, ftp := 0, 0, 0
+	hosts, keys, ftp, netdiskCount := 0, 0, 0, 0
 	if a.ssh != nil && a.ssh.Store != nil {
 		hosts = len(a.ssh.Store.ListHosts())
 		keys = len(a.ssh.Store.ListKeys())
 	}
 	if a.ftp != nil && a.ftp.store != nil {
 		ftp = len(a.ftp.store.List())
+	}
+	if a.netdisk != nil {
+		netdiskCount = len(a.netdisk.ListAccounts())
 	}
 	return map[string]any{
 		"enabled":     cfg.SecretSync.Enabled,
@@ -168,6 +182,7 @@ func (a *App) SecretSyncStatus() map[string]any {
 		"hosts":       hosts,
 		"keys":        keys,
 		"ftp":         ftp,
+		"netdisk":     netdiskCount,
 	}
 }
 

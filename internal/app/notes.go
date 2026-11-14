@@ -29,11 +29,42 @@ func (a *App) GetNote(id string) (notes.Note, error) {
 
 // SaveNote creates or updates a note.
 func (a *App) SaveNote(n notes.Note) (notes.Note, error) {
-	return a.notes.Save(n)
+	saved, err := a.notes.Save(n)
+	if err == nil {
+		a.scheduleNotesSync()
+	}
+	return saved, err
 }
 
 // DeleteNote removes a note locally (and remotely on the next sync).
-func (a *App) DeleteNote(id string) error { return a.notes.Delete(id) }
+func (a *App) DeleteNote(id string) error {
+	if err := a.notes.Delete(id); err != nil {
+		return err
+	}
+	a.scheduleNotesSync()
+	return nil
+}
+
+// scheduleNotesSync pushes local note edits in the background so other devices
+// see them without pressing 同步.
+func (a *App) scheduleNotesSync() {
+	if a.link == nil || !a.link.Available() || a.link.Token() == "" {
+		return
+	}
+	a.notesSyncMu.Lock()
+	defer a.notesSyncMu.Unlock()
+	if a.notesSyncTimer != nil {
+		a.notesSyncTimer.Stop()
+	}
+	a.notesSyncTimer = time.AfterFunc(4*time.Second, func() {
+		if len(a.notes.Dirty()) == 0 {
+			return
+		}
+		if _, err := a.SyncNotes(); err != nil && a.log != nil {
+			a.log.Printf("notes auto-sync: %v", err)
+		}
+	})
+}
 
 // NoteFolders lists the folders currently in use.
 func (a *App) NoteFolders() []string {

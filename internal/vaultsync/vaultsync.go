@@ -24,6 +24,7 @@ import (
 	"golang.org/x/crypto/argon2"
 
 	"wailstools/internal/ftpx"
+	"wailstools/internal/netdisk"
 	"wailstools/internal/sshmgr"
 )
 
@@ -63,16 +64,23 @@ type Bundle struct {
 	Keys       []sshmgr.Key      `json:"sshKeys,omitempty"`
 	FTP        []ftpx.Profile    `json:"ftpProfiles,omitempty"`
 	KnownHosts map[string]string `json:"knownHosts,omitempty"`
+	// Netdisk accounts carry cookies, so they belong in the encrypted bundle.
+	Netdisk        []netdisk.Account `json:"netdiskAccounts,omitempty"`
+	NetdiskCookies map[string]string `json:"netdiskCookies,omitempty"`
 }
 
 // Empty reports whether the bundle carries nothing worth syncing.
 func (b Bundle) Empty() bool {
-	return len(b.Hosts) == 0 && len(b.Keys) == 0 && len(b.FTP) == 0 && len(b.KnownHosts) == 0
+	return len(b.Hosts) == 0 && len(b.Keys) == 0 && len(b.FTP) == 0 &&
+		len(b.KnownHosts) == 0 && len(b.Netdisk) == 0 && len(b.NetdiskCookies) == 0
 }
 
 // Counts summarises the bundle for the UI.
 func (b Bundle) Counts() map[string]int {
-	return map[string]int{"hosts": len(b.Hosts), "keys": len(b.Keys), "ftp": len(b.FTP), "knownHosts": len(b.KnownHosts)}
+	return map[string]int{
+		"hosts": len(b.Hosts), "keys": len(b.Keys), "ftp": len(b.FTP),
+		"knownHosts": len(b.KnownHosts), "netdisk": len(b.Netdisk),
+	}
 }
 
 // Seal encrypts the bundle and returns a transportable blob.
@@ -194,6 +202,30 @@ func Merge(local, remote Bundle) Bundle {
 			}
 		}
 	}
+
+	netdisk := map[string]netdisk.Account{}
+	for _, a := range local.Netdisk {
+		netdisk[a.ID] = a
+	}
+	for _, a := range remote.Netdisk {
+		cur, ok := netdisk[a.ID]
+		if !ok || a.UpdatedAt.After(cur.UpdatedAt) {
+			netdisk[a.ID] = a
+		}
+	}
+	out.Netdisk = sortedAccounts(netdisk)
+
+	if len(local.NetdiskCookies) > 0 || len(remote.NetdiskCookies) > 0 {
+		out.NetdiskCookies = map[string]string{}
+		for k, v := range local.NetdiskCookies {
+			out.NetdiskCookies[k] = v
+		}
+		for k, v := range remote.NetdiskCookies {
+			if out.NetdiskCookies[k] == "" && v != "" {
+				out.NetdiskCookies[k] = v
+			}
+		}
+	}
 	return out
 }
 
@@ -264,6 +296,18 @@ func sortedProfiles(m map[string]ftpx.Profile) []ftpx.Profile {
 		return nil
 	}
 	out := make([]ftpx.Profile, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func sortedAccounts(m map[string]netdisk.Account) []netdisk.Account {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]netdisk.Account, 0, len(m))
 	for _, v := range m {
 		out = append(out, v)
 	}

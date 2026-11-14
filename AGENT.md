@@ -196,3 +196,37 @@ wails build
 - Win32 的消息投递有线程归属：`RegisterHotKey` / `CreateWindow` / `GetMessage` 必须在同一个 OS 线程；Go 侧必须 `LockOSThread`。
 - 客户端和服务端都可能"算错配额"：先把数据落到统一的元数据里，配额自然正确，不要为功能单独开计数。
 - 加密密钥只能来自**原始密码**：服务端只有哈希，客户端必须自己记密码（本机加密保存），这是设计前提而不是漏洞。
+
+---
+
+## 八、2026-11-15 第三批（v1.3.46）：登录即全量同步
+
+### 8.1 为什么"新设备登录什么都拉不到"
+- 旧逻辑只有 `SyncSubscriptions()` 在启动时跑；**笔记从来没有自动同步**（只有页面上点「同步」）；自定义节点、网盘账号根本不在同步范围内；截图只上传不下载。新设备登录=空库。
+- 现在 `FullSync()` 一次做完：**笔记 → 订阅+自定义节点 → 加密包（SSH/FTP/网盘）→ 云端截图**，登录、注册、token 自动登录、解锁密钥后都会自动触发（2 秒防抖），侧边栏「同步服务」卡片也有「全部同步」按钮。
+
+### 8.2 冲突规则：时间戳新者胜（全项目统一）
+- 笔记 `notes.Merge`：比较 `UpdatedAt`，本地更新则保留并**标记 dirty 排队推送**（旧代码在本地干净时会被更旧的远端覆盖）。
+- 订阅 `mergeSubscriptions`：按 `UpdatedAt` 新者胜；自定义节点按 ID 取并集，本地已有的不覆盖。
+- SSH 主机/FTP 账号/网盘账号：按 `UpdatedAt` 新者胜；密钥只补缺失，不覆盖本地私钥（本地可能是唯一副本）。
+- 笔记编辑/删除后 4 秒防抖自动推送，不用手动点。
+
+### 8.3 订阅文档 v2（含自定义节点）
+- 服务端 `subs.put` 存的是原始 JSON，不校验形状，所以直接升级负载：
+  `{"version":2,"sources":[...],"nodes":[...]}`；读取时兼容旧的纯数组（当作 sources）。
+- 客户端 `parseSyncPayload()` 负责两种形状，`syncDocument` 是 v2 结构。
+
+### 8.4 网盘账号进加密包
+- `netdisk.Account` 里有 `UK`、`CookieHash` 等，Cookie 本体在 `cookies.json`（本地 `localvault` 加密）。同步时把 **accounts + 明文 cookie** 放进 `vaultsync.Bundle.Netdisk/NetdiskCookies`，随密码密钥包一起加密上传；`ImportAll` 按 `UpdatedAt` 合并并 `Manager.ReloadFromStore()` 让 UI 立即看到。
+
+### 8.5 截图跨设备
+- 截图本来就上传到云端 `/screenshots/`（计入 10GiB）；新设备登录时 `pullCloudScreenshots()` 把服务端有、本地没有的下载回截图目录（单文件 ≤32MB、单次 ≤200 张），画廊直接可见。
+
+### 8.6 教训（第三批）
+- "登录成功" ≠ "数据同步"：连接/认证只是通道，必须显式触发一次全量拉取，否则新设备永远是空库。
+- 合并策略要写进每个 Merge：只比 `Dirty` 不看时间戳会把更旧的数据写回本地。
+- 同步负载要么自带版本号、要么能兼容旧形状——服务端存的是原始 JSON，格式演进由客户端负责。
+
+### 8.7 验证
+- `TestNewDeviceRestoresEverything`：设备 A 注册并写入笔记、订阅+节点文档、加密包 → 设备 B 全新安装登录 → 三样都能拉到并解密。
+- `TestParseSyncPayload{LegacyArray,Document}`、`TestMergeSubscriptions{NewestWins,RemoteNewer}`、`TestMergeKeepsNewerLocalAndQueuesPush`、`TestImportAllMergesNewerAccountsAndCookies`。

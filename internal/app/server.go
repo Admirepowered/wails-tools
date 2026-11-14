@@ -71,7 +71,7 @@ func (a *App) RegisterServer(username, password, email, displayName string) (ser
 		}
 		a.refreshDeviceCount()
 		a.rememberPassword(username, password)
-		a.scheduleSecretSync()
+		a.scheduleFullSync()
 		if a.onLogin != nil {
 			a.onLogin()
 		}
@@ -100,7 +100,7 @@ func (a *App) LoginServer(username, password string) (serverlink.Status, error) 
 		// The secret bundle key is derived from the raw password; remember it
 		// locally (sealed) and sync the encrypted bundle.
 		a.rememberPassword(username, password)
-		a.scheduleSecretSync()
+		a.scheduleFullSync()
 		if a.onLogin != nil {
 			a.onLogin()
 		}

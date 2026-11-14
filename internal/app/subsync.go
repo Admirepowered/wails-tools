@@ -6,23 +6,36 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"wailstools/internal/miproxy"
 	"wailstools/internal/settings"
 	"wailstools/internal/subscription"
 )
 
 // SubSyncResult summarises a subscription synchronisation pass.
 type SubSyncResult struct {
-	Local   int    `json:"local"`
-	Remote  int    `json:"remote"`
-	Merged  int    `json:"merged"`
-	Pushed  bool   `json:"pushed"`
-	Message string `json:"message"`
+	Local       int    `json:"local"`
+	Remote      int    `json:"remote"`
+	Merged      int    `json:"merged"`
+	NodesLocal  int    `json:"nodesLocal"`
+	NodesRemote int    `json:"nodesRemote"`
+	NodesMerged int    `json:"nodesMerged"`
+	Pushed      bool   `json:"pushed"`
+	Message     string `json:"message"`
 }
 
-// SyncSubscriptions merges the local subscriptions with the server copy
-// (per-source last-write-wins) and pushes the merged list back.
+// syncDocument is the server-side document. It keeps subscriptions and custom
+// nodes together so one round trip restores the whole proxy setup.
+type syncDocument struct {
+	Version int                   `json:"version"`
+	Sources []subscription.Source `json:"sources"`
+	Nodes   []miproxy.Node        `json:"nodes,omitempty"`
+}
+
+// SyncSubscriptions merges the local subscriptions + custom nodes with the
+// server copy (per-item last-write-wins) and pushes the merged document back.
 func (a *App) SyncSubscriptions() (SubSyncResult, error) {
 	if !a.link.Available() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -35,14 +48,21 @@ func (a *App) SyncSubscriptions() (SubSyncResult, error) {
 	defer cancel()
 
 	local := a.subs.Snapshot()
+	var localNodes []miproxy.Node
+	if a.customNodes != nil {
+		localNodes = a.customNodes.List()
+	}
+
 	raw, _, found, err := a.link.GetSubscriptions(ctx)
 	if err != nil {
 		return SubSyncResult{}, err
 	}
 	var remote []subscription.Source
+	var remoteNodes []miproxy.Node
 	if found && len(raw) > 0 && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &remote); err != nil {
-			return SubSyncResult{}, fmt.Errorf("服务器订阅数据无效: %w", err)
+		remote, remoteNodes, err = parseSyncPayload(raw)
+		if err != nil {
+			return SubSyncResult{}, err
 		}
 	}
 
@@ -50,7 +70,17 @@ func (a *App) SyncSubscriptions() (SubSyncResult, error) {
 	if err := a.subs.Replace(merged); err != nil {
 		return SubSyncResult{}, err
 	}
-	payload, err := json.Marshal(merged)
+	if a.customNodes != nil && len(remoteNodes) > 0 {
+		if _, err := a.customNodes.MergeRemote(remoteNodes); err != nil {
+			return SubSyncResult{}, err
+		}
+	}
+	mergedNodes := localNodes
+	if a.customNodes != nil {
+		mergedNodes = a.customNodes.List()
+	}
+
+	payload, err := json.Marshal(syncDocument{Version: 2, Sources: merged, Nodes: mergedNodes})
 	if err != nil {
 		return SubSyncResult{}, err
 	}
@@ -58,14 +88,35 @@ func (a *App) SyncSubscriptions() (SubSyncResult, error) {
 		return SubSyncResult{}, err
 	}
 	res := SubSyncResult{
-		Local:   len(local),
-		Remote:  len(remote),
-		Merged:  len(merged),
-		Pushed:  true,
-		Message: fmt.Sprintf("订阅已同步（本地 %d / 远端 %d → %d）", len(local), len(remote), len(merged)),
+		Local:       len(local),
+		Remote:      len(remote),
+		Merged:      len(merged),
+		NodesLocal:  len(localNodes),
+		NodesRemote: len(remoteNodes),
+		NodesMerged: len(mergedNodes),
+		Pushed:      true,
+		Message:     fmt.Sprintf("订阅已同步（%d 个订阅 / %d 个自定义节点）", len(merged), len(mergedNodes)),
 	}
 	a.emit("subscription:synced", res)
 	return res, nil
+}
+
+// parseSyncPayload accepts both the legacy array payload and the current
+// {version, sources, nodes} document.
+func parseSyncPayload(raw []byte) ([]subscription.Source, []miproxy.Node, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if strings.HasPrefix(trimmed, "[") {
+		var legacy []subscription.Source
+		if err := json.Unmarshal(raw, &legacy); err != nil {
+			return nil, nil, fmt.Errorf("服务器订阅数据无效: %w", err)
+		}
+		return legacy, nil, nil
+	}
+	var doc syncDocument
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, nil, fmt.Errorf("服务器同步数据无效: %w", err)
+	}
+	return doc.Sources, doc.Nodes, nil
 }
 
 // mergeSubscriptions combines two lists by ID, keeping the newer updatedAt.

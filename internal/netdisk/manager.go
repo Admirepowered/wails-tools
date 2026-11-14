@@ -169,6 +169,33 @@ func (m *Manager) ListAccounts() []Account {
 	return accounts
 }
 
+// ReloadFromStore rebuilds the in-memory account map from disk (used after a
+// sync import rewrote the store underneath the manager).
+func (m *Manager) ReloadFromStore() error {
+	store, ok := m.store.(*Store)
+	if !ok || store == nil {
+		return errManagerStore
+	}
+	accounts, err := store.LoadAccounts()
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.accounts = make(map[string]Account, len(accounts))
+	for _, account := range accounts {
+		if account.ID == "" {
+			continue
+		}
+		if cookie, err := store.LoadCookie(account.ID); err == nil && cookie != "" {
+			account.CookieHash = hashProviderCookie(account.Provider, cookie)
+			account.CookieHint = cookieHintForProvider(account.Provider, cookie)
+		}
+		m.accounts[account.ID] = account
+	}
+	return nil
+}
+
 func (m *Manager) FirstCookie(provider Provider) (string, bool) {
 	_, cookie, ok := m.FirstAccountWithCookie(provider)
 	return cookie, ok

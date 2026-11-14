@@ -209,6 +209,7 @@ func (s *Store) MarkSynced(ids []string, serverTime int64) error {
 func (s *Store) Merge(remote []Note) (updated int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	dirtyChanged := false
 	index := map[string]int{}
 	for i, n := range s.doc.Notes {
 		index[n.ID] = i
@@ -230,26 +231,34 @@ func (s *Store) Merge(remote []Note) (updated int, err error) {
 			continue
 		}
 		cur := &s.doc.Notes[i]
-		if cur.Dirty && cur.UpdatedAt > r.UpdatedAt {
-			continue // local edit is newer; it will be pushed next round
-		}
-		if r.UpdatedAt >= cur.UpdatedAt {
-			cur.Title = r.Title
-			cur.Content = r.Content
-			cur.Folder = r.Folder
-			cur.Tags = r.Tags
-			cur.Pinned = r.Pinned
-			cur.Deleted = r.Deleted
-			cur.UpdatedAt = r.UpdatedAt
-			cur.Revision = r.Revision
-			if r.Deleted {
-				cur.Content = ""
+		if cur.UpdatedAt > r.UpdatedAt {
+			// Local copy is newer: keep it and queue it for the next push so the
+			// latest revision eventually replaces the remote one.
+			if !cur.Dirty {
+				cur.Dirty = true
+				dirtyChanged = true
 			}
-			cur.Dirty = false
-			updated++
+			continue
 		}
+		if cur.UpdatedAt == r.UpdatedAt && cur.Dirty {
+			// Same timestamp: an unsent local edit wins.
+			continue
+		}
+		cur.Title = r.Title
+		cur.Content = r.Content
+		cur.Folder = r.Folder
+		cur.Tags = r.Tags
+		cur.Pinned = r.Pinned
+		cur.Deleted = r.Deleted
+		cur.UpdatedAt = r.UpdatedAt
+		cur.Revision = r.Revision
+		if r.Deleted {
+			cur.Content = ""
+		}
+		cur.Dirty = false
+		updated++
 	}
-	if updated > 0 {
+	if updated > 0 || dirtyChanged {
 		err = s.persistLocked()
 	}
 	return updated, err

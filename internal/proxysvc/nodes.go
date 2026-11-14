@@ -147,6 +147,42 @@ func (s *NodeStore) Delete(id string) error {
 	return s.persist()
 }
 
+// MergeRemote adds nodes that do not exist locally yet (used by the account
+// sync so a fresh device gets the same custom node list). Nodes already present
+// locally are never overwritten.
+func (s *NodeStore) MergeRemote(items []miproxy.Node) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing := make(map[string]bool, len(s.items))
+	for _, n := range s.items {
+		existing[n.ID] = true
+	}
+	added := 0
+	for _, n := range items {
+		if n.ID == "" || existing[n.ID] {
+			continue
+		}
+		if strings.TrimSpace(n.Server) == "" || n.Port <= 0 || n.Protocol == "" {
+			continue
+		}
+		if n.Name == "" {
+			n.Name = string(n.Protocol) + " " + n.Server
+		}
+		if n.Network == "" {
+			n.Network = miproxy.NetTCP
+		}
+		s.items = append(s.items, n)
+		existing[n.ID] = true
+		added++
+	}
+	if added > 0 {
+		if err := s.persist(); err != nil {
+			return added, err
+		}
+	}
+	return added, nil
+}
+
 // ImportLinks adds nodes parsed from a pasted share link (one per line).
 func (s *NodeStore) ImportLinks(text string) ([]miproxy.Node, error) {
 	parsed := miproxy.ParseSubscription(text)
