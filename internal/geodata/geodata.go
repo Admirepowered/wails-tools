@@ -38,6 +38,7 @@ type Status struct {
 type DB struct {
 	mu        sync.RWMutex
 	path      string
+	active    string
 	reader    *maxminddb.Reader
 	status    Status
 	fallbacks []*http.Client
@@ -63,7 +64,7 @@ func Open(dir string) *DB {
 			break
 		}
 	}
-	db := &DB{path: path, status: Status{Path: path}}
+	db := &DB{path: path, active: path + ".active", status: Status{Path: path}}
 	db.load()
 	return db
 }
@@ -80,7 +81,20 @@ func (d *DB) load() {
 		d.status.Ready = false
 		return
 	}
-	reader, err := maxminddb.Open(d.path)
+	// 打开副本而不是源文件：这样用户随时可以替换/删除 geoip.metadb，
+	// Windows 也不会因为本进程持有句柄而报「文件正在使用」。
+	if d.active != "" && d.active != d.path {
+		if err := copyFile(d.path, d.active); err != nil {
+			d.status.Ready = false
+			d.status.Error = err.Error()
+			return
+		}
+	}
+	openPath := d.path
+	if d.active != "" && d.active != d.path {
+		openPath = d.active
+	}
+	reader, err := maxminddb.Open(openPath)
 	if err != nil {
 		d.status.Ready = false
 		d.status.Error = err.Error()
@@ -179,7 +193,7 @@ func (d *DB) Download(ctx context.Context, onProgress func(done, total int64)) e
 		d.mu.Unlock()
 		return fmt.Errorf("下载 geoip.metadb 失败: %s", strings.Join(errs, " | "))
 	}
-	// Windows 不允许替换正在被占用的文件：先释放当前 reader 再改名。
+	// 本进程只打开副本，替换源文件前仍显式释放句柄，避免任何残留占用。
 	d.mu.Lock()
 	if d.reader != nil {
 		_ = d.reader.Close()
@@ -187,6 +201,9 @@ func (d *DB) Download(ctx context.Context, onProgress func(done, total int64)) e
 	}
 	d.status.Ready = false
 	d.mu.Unlock()
+	if d.active != "" {
+		_ = os.Remove(d.active)
+	}
 	if err := os.Rename(tmp, d.path); err != nil {
 		_ = os.Remove(d.path)
 		if err2 := os.Rename(tmp, d.path); err2 != nil {
@@ -361,4 +378,22 @@ func (d *DB) Countries() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// copyFile copies src to dst, replacing dst.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
