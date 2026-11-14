@@ -439,6 +439,7 @@ export interface FullSyncResult {
   secrets?: Record<string, unknown>
   screenshots?: Record<string, number>
   errors?: string[]
+  needsUnlock?: boolean
   message: string
 }
 

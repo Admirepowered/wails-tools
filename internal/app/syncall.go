@@ -17,6 +17,7 @@ type FullSyncResult struct {
 	Secrets     map[string]any `json:"secrets"`
 	Screenshots map[string]any `json:"screenshots"`
 	Errors      []string       `json:"errors,omitempty"`
+	NeedsUnlock bool           `json:"needsUnlock,omitempty"`
 	Message     string         `json:"message"`
 }
 
@@ -66,7 +67,7 @@ func (a *App) FullSync() (FullSyncResult, error) {
 			res.Errors = append(res.Errors, "密钥/网盘: "+err.Error())
 		}
 	} else {
-		res.Errors = append(res.Errors, "密钥/网盘: 需要输入账号密码以启用加密同步")
+		res.NeedsUnlock = true
 	}
 
 	if shots, err := a.pullCloudScreenshots(); err == nil {
@@ -77,6 +78,9 @@ func (a *App) FullSync() (FullSyncResult, error) {
 
 	if len(res.Errors) == 0 {
 		res.Message = "全部同步完成"
+		if res.NeedsUnlock {
+			res.Message = "笔记/订阅/截图已同步；输入账号密码后可同步 SSH/FTP/网盘等加密数据"
+		}
 	} else {
 		res.Message = "部分同步失败：" + strings.Join(res.Errors, "；")
 	}

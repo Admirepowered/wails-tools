@@ -536,6 +536,8 @@ export default function ServerPage(props: PageProps) {
       const errs = Array.isArray(res?.errors) ? res.errors : []
       if (errs.length > 0) {
         toast.push(`同步完成（${errs.join('；')}）`, 'warn')
+      } else if (res?.needsUnlock) {
+        toast.push('笔记/订阅/截图已同步；输入账号密码后可同步 SSH/FTP/网盘', 'warn')
       } else {
         const notes = res?.notes ?? {}
         const pulled = typeof notes.pulled === 'number' ? notes.pulled : 0
