@@ -504,6 +504,7 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
   const toast = useToast()
   const [cfg, setCfg] = useState<ProxyChainSettings>(chainCache ?? { mode: 'off', nodeIds: [] })
   const [loaded, setLoaded] = useState(!!chainCache)
+  const [raw, setRaw] = useState('')
   const [nodes, setNodes] = useState<MiproxyNode[]>([])
   const [busy, setBusy] = useState(false)
 
@@ -559,13 +560,14 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
       <p className="card-desc">可让出口先经过同步服务器或已有节点中转，最多 2 跳。</p>
       <div className="row" style={{ gap: 8 }}>
         <div className="small faint mono">
-          当前状态：mode={cfg.mode} nodeIds={(cfg.nodeIds ?? []).join(',') || '（空）'} loaded={String(loaded)}
+          当前状态：mode={cfg.mode} nodeIds={(cfg.nodeIds ?? []).join(',') || '（空）'} loaded={String(loaded)} raw={raw}
         </div>
         <button
           className="btn btn-sm"
           onClick={async () => {
             try {
               const chain = await api.GetProxyChain()
+              setRaw(JSON.stringify(chain))
               chainCache = { mode: chain.mode || 'off', nodeIds: chain.nodeIds ?? [] }
               setCfg(chainCache)
               setLoaded(true)
@@ -746,6 +748,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
