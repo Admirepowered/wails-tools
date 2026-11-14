@@ -553,7 +553,16 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
           className="select"
           style={{ width: 200 }}
           value={cfg.mode}
-          onChange={(e) => void save({ ...cfg, mode: e.target.value })}
+          onChange={(e) => {
+            const mode = e.target.value
+            setBusy(true)
+            void api
+              .SetProxyChainMode(mode)
+              .then((saved) => setCfg({ mode: saved.mode, nodeIds: saved.nodeIds ?? cfg.nodeIds ?? [] }))
+              .then(onChanged)
+              .catch((err) => toast.error(err))
+              .finally(() => setBusy(false))
+          }}
         >
           <option value="off">直连（不中转）</option>
           <option value="server">从服务器跳转</option>
@@ -705,6 +714,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 

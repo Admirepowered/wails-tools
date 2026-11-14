@@ -894,6 +894,7 @@ const rawApi = {
   // proxy chain, rules, geoip, latency, media, hotkey
   GetProxyChain: () => call<ProxyChainSettings>('GetProxyChain'),
   SaveProxyChain: (cfg: ProxyChainSettings) => call<ProxyChainSettings>('SaveProxyChain', cfg),
+  SetProxyChainMode: (mode: string) => call<ProxyChainSettings>('SetProxyChainMode', mode),
   GetDirectRules: () => call<DirectRuleSettings>('GetDirectRules'),
   SaveDirectRules: (cfg: DirectRuleSettings) => call<DirectRuleSettings>('SaveDirectRules', cfg),
   GeoIPStatus: () => call<Record<string, unknown>>('GeoIPStatus'),
@@ -1064,6 +1065,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 
