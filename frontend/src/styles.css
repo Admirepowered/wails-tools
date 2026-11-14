@@ -584,14 +584,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
   width: 100%;
   height: calc(88vh - 110px);
   margin: 0;
-  padding: 14px;
+  padding: 16px 18px;
   overflow: auto;
   font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text);
+  background: #f7f9fb;
+  color: #10151c;
+  border-radius: var(--radius-sm);
 }
 
 /* ---------- context menu ---------- */
@@ -619,4 +621,5 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .ctx-item:hover { background: var(--surface-2); }
 .ctx-item.danger { color: var(--danger); }
+
 
