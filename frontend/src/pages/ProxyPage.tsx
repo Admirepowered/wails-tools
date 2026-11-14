@@ -548,6 +548,7 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
     <div className="card">
       <h3 className="card-title">代理链路</h3>
       <p className="card-desc">可让出口先经过同步服务器或已有节点中转，最多 2 跳。</p>
+      <div className="small faint mono">当前状态：mode={cfg.mode} nodeIds={(cfg.nodeIds ?? []).join(',') || '（空）'}</div>
       <div className="row" style={{ gap: 8 }}>
         <select
           className="select"
@@ -714,6 +715,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
