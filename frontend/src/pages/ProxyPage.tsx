@@ -665,23 +665,12 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
         </button>
       </div>
       <p className="card-desc">命中的目标直接连接，不走代理。</p>
+      <div className="small faint">数据库：{String(diag?.path ?? geo?.path ?? '（未定位到文件）')}</div>
       {(diag?.ready ?? geo?.ready) ? (
         <div className="small faint">大小 {(Number(diag?.fileSize ?? geo?.size ?? 0) / 1048576).toFixed(1)} MB</div>
       ) : null}
-      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{String(geo.error)}</div> : null}
-      {diag ? (
-        <div className="small faint mono" style={{ fontSize: 11 }}>
-          exists={String(diag.fileExists ?? '' )} size={String(diag.fileSize ?? '' )} rootDir={String(diag.rootDir ?? '' )} err={String(diag.error ?? '-')}
-        </div>
-      ) : null}
-      {(diag?.ready ?? geo?.ready) ? (
-        <div className="small faint">大小 {(Number(diag?.fileSize ?? geo?.size ?? 0) / 1048576).toFixed(1)} MB</div>
-      ) : null}
-      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{String(geo.error)}</div> : null}
-      {diag ? (
-        <div className="small faint mono" style={{ fontSize: 11 }}>
-          exists={String(diag.fileExists ?? '' )} size={String(diag.fileSize ?? '' )} rootDir={String(diag.rootDir ?? '' )} err={String(diag.error ?? '-')}
-        </div>
+      {(diag?.error ?? geo?.error) ? (
+        <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{String(diag?.error ?? geo?.error)}</div>
       ) : null}
       <label className="row" style={{ gap: 8 }}>
         <Switch checked={cfg.useGeoIP} onChange={(v) => void save({ ...cfg, useGeoIP: v })} />
