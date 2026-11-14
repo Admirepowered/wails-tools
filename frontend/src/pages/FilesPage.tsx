@@ -260,8 +260,18 @@ export default function FilesPage({ serverStatus }: PageProps) {
     const target = selected[0]
     if (!target) return
     try {
-      if (reveal) await api.RevealInExplorer(target)
-      else await api.OpenPath(target)
+      if (reveal) {
+        await api.RevealInExplorer(target)
+        return
+      }
+      const name = target.split(/[\\/]/).pop() ?? target
+      const kind = kindOf(name)
+      if (kind) {
+        // Images/videos/text open in the built-in viewer, never externally.
+        setPreview({ path: target, name, kind, source: 'local' })
+        return
+      }
+      await api.OpenPath(target)
     } catch (err) {
       toast.error(err)
     }

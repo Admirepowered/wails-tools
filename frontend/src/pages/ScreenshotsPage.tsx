@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, onEvent, type ScreenshotItem, type ScreenshotSettings } from '../lib/api'
+import MediaViewer, { type MediaTarget } from '../components/MediaViewer'
 import { Empty, Field, Spinner, Switch, Tag, useToast } from '../components/ui'
 import { formatBytes, formatTime } from '../lib/format'
 import type { PageProps } from '../App'
@@ -13,6 +14,7 @@ export default function ScreenshotsPage(_props: PageProps) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [watching, setWatching] = useState(false)
+  const [preview, setPreview] = useState<MediaTarget | null>(null)
   const [hotkey, setHotkey] = useState('')
   const [autoUpload, setAutoUpload] = useState(false)
 
@@ -276,13 +278,7 @@ export default function ScreenshotsPage(_props: PageProps) {
                   placeItems: 'center',
                   cursor: 'pointer',
                 }}
-                onClick={async () => {
-                  try {
-                    await api.OpenPath(item.path)
-                  } catch (err) {
-                    toast.error(err)
-                  }
-                }}
+                onClick={() => setPreview({ path: item.path, name: item.name, kind: 'image', source: 'local' })}
               >
                 {thumbs[item.path] ? (
                   <img src={thumbs[item.path]} alt={item.name} style={{ maxWidth: '100%', maxHeight: '100%' }} />
@@ -329,6 +325,7 @@ export default function ScreenshotsPage(_props: PageProps) {
           ))}
         </div>
       )}
+      {preview && <MediaViewer target={preview} onClose={() => setPreview(null)} />}
     </div>
   )
 }

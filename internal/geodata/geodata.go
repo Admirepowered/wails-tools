@@ -74,11 +74,34 @@ func (d *DB) load() {
 	d.status.Error = ""
 }
 
-// Status reports the database state.
+// Status reports the database state, re-checking the file on disk first so a
+// manually placed or replaced database is picked up immediately.
 func (d *DB) Status() Status {
+	d.refresh()
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.status
+}
+
+// refresh reopens the database when the file appeared, changed or vanished.
+func (d *DB) refresh() {
+	info, err := os.Stat(d.path)
+	d.mu.RLock()
+	ready := d.status.Ready
+	size := d.status.Size
+	updated := d.status.UpdatedAt
+	d.mu.RUnlock()
+
+	if err != nil {
+		if ready {
+			d.load()
+		}
+		return
+	}
+	now := info.ModTime().Format(time.RFC3339)
+	if !ready || info.Size() != size || now != updated {
+		d.load()
+	}
 }
 
 // Path returns the database file path.
@@ -116,6 +139,9 @@ func (d *DB) Download(ctx context.Context, onProgress func(done, total int64)) e
 	}
 	d.load()
 	if st := d.Status(); !st.Ready {
+		if st.Error != "" {
+			return fmt.Errorf("geoip.metadb 无法解析: %s", st.Error)
+		}
 		return errors.New("geoip.metadb 无法解析")
 	}
 	return nil
@@ -217,6 +243,7 @@ func (d *DB) Lookup(ip net.IP) string {
 
 // Countries lists the ISO codes present in the database (best effort).
 func (d *DB) Countries() []string {
+	d.refresh()
 	d.mu.RLock()
 	reader := d.reader
 	d.mu.RUnlock()

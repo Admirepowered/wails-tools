@@ -271,16 +271,12 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
       <div className="card">
         <div className="row">
           <div>
-            <h3 className="card-title">代理模式</h3>
+            <h3 className="card-title">本地代理</h3>
             <p className="card-desc" style={{ margin: 0 }}>
-              选择「内部代理」后，下载 / 网盘 / SSH / FTP 等连接会自动走当前订阅节点，无需逐个作用域配置。
+              这里只控制本地监听与系统代理；每个工具是否走内部代理，请在各工具卡片里单独开启。
             </p>
           </div>
           <div className="spacer" />
-          <select className="select" style={{ width: 180 }} value={mode} onChange={(e) => switchMode(e.target.value as 'off' | 'internal')}>
-            <option value="off">关闭（直连）</option>
-            <option value="internal">内部代理</option>
-          </select>
         </div>
 
         <div className="row row-wrap" style={{ marginTop: 10, gap: 10 }}>
@@ -382,26 +378,25 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
                     })
                   }
                 />
-                <button
-                  className="btn btn-sm"
-                  disabled={!active?.running}
-                  title={active?.running ? '使用内部代理（当前节点）' : '请先启用节点'}
-                  onClick={async () => {
-                    if (!active?.running) {
-                      toast.push('请先在订阅页启用一个节点', 'warn')
-                      return
-                    }
-                    try {
-                      await api.SetScopeInternalProxy(scope, !internal[scope])
-                      await reloadSettings()
-                      await load()
-                    } catch (err) {
-                      toast.error(err)
-                    }
-                  }}
-                >
-                  {internal[scope] ? '已用内部代理' : '内部代理'}
-                </button>
+                <label className="row" style={{ gap: 6 }} title={active?.running ? '该工具是否走当前节点' : '请先在订阅页启用节点'}>
+                  <Switch
+                    checked={!!internal[scope]}
+                    onChange={async (v) => {
+                      if (!active?.running) {
+                        toast.push('请先在订阅页启用一个节点', 'warn')
+                        return
+                      }
+                      try {
+                        await api.SetScopeInternalProxy(scope, v)
+                        await reloadSettings()
+                        await load()
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  />
+                  <span className="small">内部代理</span>
+                </label>
               </div>
 
               <div className="row" style={{ gap: 8 }}>
@@ -687,4 +682,5 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
