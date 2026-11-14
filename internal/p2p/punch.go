@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"time"
@@ -237,7 +238,7 @@ func authenticateStream(ctx context.Context, conn *quic.Conn, role, secret strin
 		}
 		got := make([]byte, len(ack))
 		_ = stream.SetReadDeadline(time.Now().Add(10 * time.Second))
-		if _, err := stream.Read(got); err != nil {
+		if _, err := io.ReadFull(stream, got); err != nil {
 			return errors.New("对端未完成认证（会话密钥不匹配）")
 		}
 		if !hmac.Equal(got, ack) {
@@ -252,7 +253,7 @@ func authenticateStream(ctx context.Context, conn *quic.Conn, role, secret strin
 	}
 	got := make([]byte, len(want))
 	_ = stream.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if _, err := stream.Read(got); err != nil {
+	if _, err := io.ReadFull(stream, got); err != nil {
 		return errors.New("对端未完成认证")
 	}
 	if !hmac.Equal(got, want) {

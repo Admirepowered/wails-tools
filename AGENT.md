@@ -255,3 +255,11 @@ wails build
 - 打洞必须在"被服务器观测到的那个 socket"上继续跑数据，否则 NAT 映射换了端口，对端打不通。
 - 打洞失败一定要能区分「对端不在线」和「NAT 不允许」，否则用户只会看到"连不上"。
 - CLI 工具登录服务器时不能带机器指纹，否则会顶掉真实设备记录。
+- QUIC 流上的固定长度握手必须用 `io.ReadFull`，`stream.Read` 可能只返回一部分——这是"认证失败"的真凶。
+
+### 9.4 验证
+- `TestDeviceDedupeByMachine`：同 machineId、不同 deviceId 的两次登录只保留一台设备；换机器才新增。
+- `TestP2PHolePunchAndRelay`：起一个本地服务端 + 两个客户端（dev-a/dev-b）→ `p2p.offer` / `p2p.pending` → 双端并发打洞 → QUIC 认证 → `p2p.tcp` 经对端中转到本地 echo 服务并原样收到 `hello-p2p`。
+- `TestSessionLifecycle` / `TestHandleAnnounceExchange`：会话归属、替换、丢弃与 endpoint 交换。
+- 线上验证：UDP 8643 从本机可收发（`{"ok":false,"err":"unknown_or_expired_session"}` 回包），说明云安全组放行了打洞端口。
+
