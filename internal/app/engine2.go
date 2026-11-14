@@ -158,7 +158,11 @@ func (a *App) RestartEngine() (proxysvc.Status, error) {
 
 // GetProxyChain returns the configured chain.
 func (a *App) GetProxyChain() settings.ProxyChainSettings {
-	return a.chainOrDefault()
+	cfg := a.chainOrDefault()
+	if a.log != nil {
+		a.log.Printf("GetProxyChain -> mode=%s nodeIds=%v", cfg.Mode, cfg.NodeIDs)
+	}
+	return cfg
 }
 
 // SaveProxyChain stores the chain and restarts the engine when it is running.
