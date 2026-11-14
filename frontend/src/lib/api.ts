@@ -190,6 +190,8 @@ export interface SSHHost {
   route: string
   jumpIds?: string[]
   relayTarget?: string
+  /** Punched device used as the jump host when route === "p2p". */
+  p2pDevice?: string
   group?: string
   color?: string
   notes?: string
@@ -431,6 +433,13 @@ export interface SecretSyncResult {
   updatedAt: string
   applied: Record<string, number>
   counts: Record<string, number>
+}
+
+export interface P2PStatus {
+  localDevice: string
+  connected: string[]
+  errors: Record<string, string>
+  loggedIn: boolean
 }
 
 export interface FullSyncResult {
@@ -700,6 +709,8 @@ export interface ActiveProxyInfo {
 
 export interface ProxyChainSettings {
   mode: string
+  /** Device id used in "device" mode: that device's client dials for us. */
+  deviceId?: string
   nodeIds?: string[]
 }
 
@@ -897,6 +908,12 @@ const rawApi = {
   SecretSyncStatus: () => call<SecretSyncStatus>('SecretSyncStatus'),
   SyncSecretsNow: () => call<SecretSyncResult>('SyncSecretsNow'),
   SyncAllNow: () => call<FullSyncResult>('SyncAllNow'),
+
+  // NAT hole punching (device-to-device direct link)
+  P2PStatus: () => call<P2PStatus>('P2PStatus'),
+  P2PProbe: () => call<{ ok: boolean; rendezvous?: string; error?: string; reply?: string }>('P2PProbe'),
+  P2PConnect: (deviceId: string) => call<P2PStatus>('P2PConnect', deviceId),
+  P2PDisconnect: (deviceId: string) => call<P2PStatus>('P2PDisconnect', deviceId),
   UnlockSecretSync: (password: string) => call<SecretSyncResult>('UnlockSecretSync', password),
   SetSecretSyncEnabled: (enabled: boolean) => call<SecretSyncStatus>('SetSecretSyncEnabled', enabled),
   ForgetSavedPassword: () => call<SecretSyncStatus>('ForgetSavedPassword'),
@@ -1144,6 +1161,9 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
+
 
 
 

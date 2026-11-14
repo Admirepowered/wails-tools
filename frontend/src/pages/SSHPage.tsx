@@ -25,11 +25,12 @@ const AUTH_LABEL: Record<string, string> = {
   none: '无认证',
 }
 
-const ROUTE_LABEL: Record<string, string> = { direct: '直连', jump: '跳板', relay: '中转' }
+const ROUTE_LABEL: Record<string, string> = { direct: '直连', jump: '跳板', relay: '中转', p2p: '打洞直连' }
 const ROUTE_KIND: Record<string, 'default' | 'ok' | 'warn' | 'info'> = {
   direct: 'default',
   jump: 'info',
   relay: 'warn',
+  p2p: 'ok',
 }
 
 function routeLabel(route?: string): string {
@@ -606,6 +607,7 @@ function HostEditorModal({
     route: initial?.route ?? 'direct',
     jumpIds: initial?.jumpIds ?? [],
     relayTarget: initial?.relayTarget ?? '',
+    p2pDevice: initial?.p2pDevice ?? '',
     group: initial?.group ?? '',
     notes: initial?.notes ?? '',
     tags: (initial?.tags ?? []).join(', '),
@@ -613,6 +615,21 @@ function HostEditorModal({
   }))
 
   const patch = (next: Partial<typeof draft>) => setDraft((cur) => ({ ...cur, ...next }))
+
+  const [p2pDevices, setP2pDevices] = useState<Array<{ id: string; name: string }>>([])
+  useEffect(() => {
+    void (async () => {
+      try {
+        const st = await api.P2PStatus()
+        const mine = await api.MyDevices()
+        const names: Record<string, string> = {}
+        for (const d of mine.devices) names[d.id] = d.name || d.id.slice(0, 8)
+        setP2pDevices(st.connected.map((id) => ({ id, name: names[id] ?? id.slice(0, 8) })))
+      } catch {
+        setP2pDevices([])
+      }
+    })()
+  }, [])
 
   const jumpCandidates = hosts.filter((h) => !!h.id && h.id !== initial?.id)
 
@@ -647,6 +664,7 @@ function HostEditorModal({
         route: draft.route,
         jumpIds: draft.route === 'jump' && draft.jumpIds.length > 0 ? draft.jumpIds : undefined,
         relayTarget: draft.route === 'relay' ? draft.relayTarget.trim() || undefined : undefined,
+        p2pDevice: draft.route === 'p2p' ? draft.p2pDevice : undefined,
         group: draft.group.trim() || undefined,
         notes: draft.notes.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
@@ -750,6 +768,7 @@ function HostEditorModal({
             <option value="direct">直连</option>
             <option value="relay">服务器中转</option>
             <option value="jump">跳板机链</option>
+            <option value="p2p">设备直连（打洞）</option>
           </select>
         </Field>
         {draft.route === 'relay' ? (
@@ -760,6 +779,21 @@ function HostEditorModal({
               onChange={(e) => patch({ relayTarget: e.target.value })}
               placeholder="10.0.0.5:22"
             />
+          </Field>
+        ) : draft.route === 'p2p' ? (
+          <Field label="打洞设备" hint="必须先在「同步服务 → 我的设备」右键连接该设备">
+            <select
+              className="select"
+              value={draft.p2pDevice}
+              onChange={(e) => patch({ p2pDevice: e.target.value })}
+            >
+              <option value="">选择已打洞设备</option>
+              {(p2pDevices.length > 0 ? p2pDevices : []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
           </Field>
         ) : draft.route === 'jump' ? (
           <Field label="跳板机" hint="按顺序经过这些主机，可多选">
@@ -1723,4 +1757,6 @@ function CommandPane({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
+
 

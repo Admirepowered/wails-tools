@@ -67,6 +67,8 @@ type App struct {
 	log            *fileLogger
 	notesSyncMu    sync.Mutex
 	notesSyncTimer *time.Timer
+	p2p            *p2pHub
+	lastRelayKind  string
 
 	mu      sync.Mutex
 	terms   map[string]*sshmgr.Terminal
@@ -109,6 +111,7 @@ func New() (*App, error) {
 	a.ssh = sshmgr.NewManager(sshStore, func(scope string) settings.ProxyRule {
 		return store.ProxyFor(scope)
 	}, link, sshDir)
+	a.ssh.P2P = &p2pDevice{app: a}
 
 	a.ftp = newFTPHub(store, vault)
 	eng, err := dlengine.NewEngine(store, "", func(ev dlengine.Event) {
@@ -183,6 +186,7 @@ func New() (*App, error) {
 		a.geo = geodata.Open(root)
 	}
 	a.media = newMediaRegistry()
+	a.p2p = newP2PHub()
 	a.chainCfg, _ = a.loadChainFile()
 	a.rulesCfg, _ = a.loadRulesFile()
 	a.initTransfers()
@@ -264,6 +268,7 @@ func (a *App) Startup(ctx context.Context) {
 	}
 	go a.restoreActiveNode()
 	a.startKeepalive()
+	a.startP2PWatcher()
 	if a.settings.Get().Server.AutoConnect {
 		go func() {
 			c, cancel := context.WithTimeout(context.Background(), 20*time.Second)

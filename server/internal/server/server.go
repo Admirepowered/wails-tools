@@ -10,12 +10,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
 	"wailstools/internal/netx"
 	"wailstools/internal/wire"
 	"wailstools/server/internal/api"
+	"wailstools/server/internal/p2p"
 	"wailstools/server/internal/store"
 )
 
@@ -32,7 +34,10 @@ type Config struct {
 	DefaultQuotaBytes int64
 	TokenTTL          time.Duration
 	LocalAdmin        bool
-	Logger            *log.Logger
+	// P2PAddr is the UDP rendezvous address for NAT hole punching. Empty
+	// disables the feature.
+	P2PAddr string
+	Logger  *log.Logger
 }
 
 // Server is a running instance.
@@ -41,6 +46,7 @@ type Server struct {
 	store   *store.DB
 	api     *api.API
 	lis     *netx.Listener
+	p2p     *p2p.Hub
 	logger  *log.Logger
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -78,7 +84,9 @@ func New(cfg Config) (*Server, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	hub := p2p.NewHub(cfg.Logger.Printf)
 	a := api.New(db, secret, api.Options{
+		P2P:               hub,
 		AllowRegistration: cfg.AllowRegistration,
 		DefaultQuota:      cfg.DefaultQuotaBytes,
 		TokenTTL:          cfg.TokenTTL,
@@ -87,7 +95,7 @@ func New(cfg Config) (*Server, error) {
 		LocalAdmin:        cfg.LocalAdmin,
 		Logf:              cfg.Logger.Printf,
 	})
-	return &Server{cfg: cfg, store: db, api: a, logger: cfg.Logger}, nil
+	return &Server{cfg: cfg, store: db, api: a, p2p: hub, logger: cfg.Logger}, nil
 }
 
 func loadSecret(path string) ([]byte, error) {
@@ -134,6 +142,20 @@ func (s *Server) Start(ctx context.Context) error {
 	s.logger.Printf("data dir: %s", s.cfg.DataDir)
 	if fp := netx.Fingerprint(cert.Leaf); fp != "" {
 		s.logger.Printf("certificate fingerprint: %s", fp)
+	}
+
+	if s.cfg.P2PAddr != "" {
+		addr, err := s.p2p.Listen(s.cfg.P2PAddr)
+		if err != nil {
+			s.logger.Printf("p2p rendezvous disabled: %v", err)
+		} else {
+			if _, port, perr := net.SplitHostPort(addr); perr == nil {
+				if n, aerr := strconv.Atoi(port); aerr == nil {
+					s.api.Opts.P2PPort = n
+				}
+			}
+			s.logger.Printf("listening p2p rendezvous on %s", addr)
+		}
 	}
 
 	s.wg.Add(1)

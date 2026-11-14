@@ -62,6 +62,11 @@ func (d *Dialer) hops() []Node {
 func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 	hops := d.hops()
 	if len(hops) == 0 {
+		// No proxy node: the relay (sync server or a punched device) can still
+		// open the connection on our behalf.
+		if d.Relay != nil {
+			return d.Relay(ctx, target)
+		}
 		return (&net.Dialer{Timeout: d.Timeout}).DialContext(ctx, "tcp", target)
 	}
 	if d.Direct != nil && len(d.Chain) == 0 {
@@ -71,6 +76,9 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 		}
 	}
 	if hops[0].Protocol == ProtoDirect {
+		if d.Relay != nil {
+			return d.Relay(ctx, target)
+		}
 		return (&net.Dialer{Timeout: d.Timeout}).DialContext(ctx, "tcp", target)
 	}
 

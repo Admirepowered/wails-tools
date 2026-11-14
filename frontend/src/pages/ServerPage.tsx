@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type SecretSyncStatus, type ServerStatus, type Settings } from '../lib/api'
+import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type P2PStatus, type SecretSyncStatus, type ServerStatus, type Settings } from '../lib/api'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Switch, Tabs, Tag, useToast } from '../components/ui'
 import { formatBytes, formatTime, percent, relativeTime } from '../lib/format'
 import type { PageProps } from '../App'
@@ -92,6 +92,11 @@ export default function ServerPage(props: PageProps) {
   const [secretSync, setSecretSync] = useState<SecretSyncStatus | null>(null)
   const [secretBusy, setSecretBusy] = useState(false)
   const [unlockPass, setUnlockPass] = useState('')
+
+  // NAT hole punching
+  const [p2p, setP2p] = useState<P2PStatus | null>(null)
+  const [p2pBusy, setP2pBusy] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; danger?: boolean; action: () => void }[] } | null>(null)
   const [pwdConfirm, setPwdConfirm] = useState(false)
 
   const synced = useRef(false)
@@ -149,6 +154,14 @@ export default function ServerPage(props: PageProps) {
       setMyDevices(await api.MyDevices())
     } catch {
       setMyDevices(null)
+    }
+  }, [])
+
+  const loadP2P = useCallback(async () => {
+    try {
+      setP2p(await api.P2PStatus())
+    } catch {
+      setP2p(null)
     }
   }, [])
 
@@ -256,7 +269,22 @@ export default function ServerPage(props: PageProps) {
     void loadMyDevices()
     void loadAdmin()
     void loadSecretSync()
-  }, [connected, authed, isAdmin, loadMyDevices, loadAdmin, loadSecretSync])
+    void loadP2P()
+  }, [connected, authed, isAdmin, loadMyDevices, loadAdmin, loadSecretSync, loadP2P])
+
+  useEffect(() => {
+    const offConnected = onEvent('p2p:connected', () => void loadP2P())
+    const offDisconnected = onEvent('p2p:disconnected', () => void loadP2P())
+    const offError = onEvent<{ error?: string }>('p2p:error', (ev) => {
+      if (ev?.error) toast.push(`打洞失败：${ev.error}`, 'warn')
+      void loadP2P()
+    })
+    return () => {
+      offConnected()
+      offDisconnected()
+      offError()
+    }
+  }, [loadP2P, toast])
 
   const refreshCloud = useCallback(() => {
     void loadCloud(cloudPath)
@@ -474,6 +502,37 @@ export default function ServerPage(props: PageProps) {
   }
 
   /* ---------------- encrypted secret sync ---------------- */
+
+  const connectDevice = async (deviceId: string) => {
+    setP2pBusy(deviceId)
+    try {
+      setP2p(await api.P2PConnect(deviceId))
+      toast.push('打洞成功：该设备现在可作为 SSH/代理跳板')
+    } catch (err) {
+      toast.error(err)
+      await loadP2P()
+    } finally {
+      setP2pBusy(null)
+    }
+  }
+
+  const disconnectDevice = async (deviceId: string) => {
+    try {
+      setP2p(await api.P2PDisconnect(deviceId))
+      toast.push('已断开直连')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const copyDeviceId = async (deviceId: string) => {
+    try {
+      await navigator.clipboard.writeText(deviceId)
+      toast.push('已复制设备 ID')
+    } catch {
+      toast.push(deviceId)
+    }
+  }
 
   const syncSecrets = async () => {
     setSecretBusy(true)
@@ -1173,20 +1232,79 @@ export default function ServerPage(props: PageProps) {
               <p className="card-desc" style={{ margin: 0 }}>
                 同一账号最多可登录 {myDevices?.maxDevices ?? maxDevices} 台设备。设备满额时先在这里移除旧设备，再用新机器登录。
               </p>
+              <p className="card-desc" style={{ margin: '4px 0 0' }}>
+                右键任意设备可「连接到此设备」：打洞成功后该设备即可作为 SSH 跳板与代理出口（必须双方都在线且 NAT 允许直连）。
+              </p>
             </div>
+            <button
+              className="btn btn-sm"
+              title="检查服务器的 UDP 打洞端口是否可达"
+              onClick={async () => {
+                try {
+                  const res = await api.P2PProbe()
+                  if (res.ok) toast.push(`打洞服务可达：${res.rendezvous ?? ''}`)
+                  else toast.push(res.error || '打洞服务不可达', 'warn')
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            >
+              检测打洞服务
+            </button>
           </div>
           {myDevices && myDevices.devices.length > 0 ? (
             <div className="list" style={{ marginTop: 10 }}>
-              {myDevices.devices.map((d) => (
-                <div key={d.id} className="file-row">
-                  <span className="file-icon">🖥</span>
-                  <span className="file-name">{d.name || d.id.slice(0, 8)}</span>
-                  <span className="file-size">{d.lastSeen ? relativeTime(d.lastSeen) : '—'}</span>
-                  <button className="btn btn-ghost btn-sm" title="移除该设备" onClick={() => void removeMyDevice(d.id)}>
-                    ✕
-                  </button>
-                </div>
-              ))}
+              {myDevices.devices.map((d) => {
+                const online = !!p2p?.connected?.includes(d.id)
+                const p2pError = p2p?.errors?.[d.id]
+                const isSelf = d.id === p2p?.localDevice
+                return (
+                  <div
+                    key={d.id}
+                    className="file-row"
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      if (isSelf) {
+                        toast.push('这是本机，不能连接自己', 'warn')
+                        return
+                      }
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        items: [
+                          online
+                            ? { label: '断开直连', action: () => void disconnectDevice(d.id) }
+                            : { label: '连接到此设备（打洞）', action: () => void connectDevice(d.id) },
+                          { label: '复制设备 ID', action: () => void copyDeviceId(d.id) },
+                        ],
+                      })
+                    }}
+                    title={p2pError ? `上次打洞失败：${p2pError}` : '右键连接到此设备'}
+                  >
+                    <span className="file-icon">🖥</span>
+                    <span className="file-name">
+                      {d.name || d.id.slice(0, 8)}
+                      {isSelf ? '（本机）' : ''}
+                    </span>
+                    {online ? <Tag kind="ok">直连中</Tag> : null}
+                    <span className="file-size">{d.lastSeen ? relativeTime(d.lastSeen) : '—'}</span>
+                    {p2pError && !online ? <Tag kind="warn">打洞失败</Tag> : null}
+                    {!isSelf ? (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        title={online ? '断开直连' : '连接到此设备'}
+                        disabled={p2pBusy === d.id}
+                        onClick={() => (online ? void disconnectDevice(d.id) : void connectDevice(d.id))}
+                      >
+                        {p2pBusy === d.id ? '…' : online ? '断开' : '连接'}
+                      </button>
+                    ) : null}
+                    <button className="btn btn-ghost btn-sm" title="移除该设备" onClick={() => void removeMyDevice(d.id)}>
+                      ✕
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           ) : (
             <div className="small faint" style={{ marginTop: 10 }}>
@@ -1411,6 +1529,25 @@ export default function ServerPage(props: PageProps) {
         />
       ) : null}
 
+      {menu ? (
+        <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }}>
+          <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+            {menu.items.map((item, i) => (
+              <button
+                key={i}
+                className={`ctx-item ${item.danger ? 'danger' : ''}`}
+                onClick={() => {
+                  setMenu(null)
+                  item.action()
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {mkdirOpen ? (
         <Modal
           title="新建文件夹"
@@ -1450,6 +1587,8 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
+
 
 
 

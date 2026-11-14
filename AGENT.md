@@ -230,3 +230,28 @@ wails build
 ### 8.7 验证
 - `TestNewDeviceRestoresEverything`：设备 A 注册并写入笔记、订阅+节点文档、加密包 → 设备 B 全新安装登录 → 三样都能拉到并解密。
 - `TestParseSyncPayload{LegacyArray,Document}`、`TestMergeSubscriptions{NewestWins,RemoteNewer}`、`TestMergeKeepsNewerLocalAndQueuesPush`、`TestImportAllMergesNewerAccountsAndCookies`。
+
+---
+
+## 九、2026-11-15 第四批：设备机器码 + NAT 打洞直连
+
+### 9.1 设备身份：一台机器 = 一个名额
+- `internal/machineid`：Windows 读 `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid`，其它平台读 `/etc/machine-id`，兜底 `hostname + 首块网卡 MAC`，再 SHA-256 取前 16 字节。
+- `settings.DeviceID()` 首次生成时改成 `m-<machineid>`；已有安装保留旧 id，但登录时**额外上报 `machineId`**。
+- 服务端 `registerDevice(userID, deviceID, name, machineID)`：先按 id 命中→只更新 lastSeen；否则删除**同 machineId** 的旧记录，再删"同名且无 machineId"的历史脏数据，最后才做 5 台上限判断。
+- CLI（`wt-admin`/`wt-publish`）用 `link.SetMachineID("")` 关闭指纹，避免工具登录把真实设备挤掉。
+
+### 9.2 NAT 打洞（参照 natmap）
+- **信令**：服务端新增独立 UDP 端口（默认同步端口 +1，`-p2p-udp` / `-no-p2p` 可配），客户端从**打洞用的同一个 UDP socket** 向它发 `{"s":session,"r":"a|b"}`，服务端据此记录各自的公网 `ip:port` 并互相告知（`server/internal/p2p`）。
+- **会话**：`p2p.offer`（发起方）→ 服务端生成 sessionId + 32 字节 secret → 目标设备每 3 秒 `p2p.pending` 拉取 → 两边打洞。
+- **打洞**：双方互发带 HMAC 的探针包，收到对方探针即视为直连打通（对称型 NAT 会失败，报 `打洞失败：双方网络不允许直连`）。
+- **传输**：打通的 socket 直接交给 quic-go（`quic.Dial` / `quic.Listen` 复用同一个 PacketConn），TLS 用临时自签证书，真正的认证是 QUIC 首流上的 HMAC(secret)——所以没有 CA 依赖也不会被中间人冒充。
+- **流复用**：每个操作开一条 QUIC 流，跑现有 `wire` 协议。`p2p.tcp` 请求由对端 `net.Dial` 后双向拷贝；`p2p.ping`/`p2p.capabilities` 用于健康检查，文件管理方法预留在 capabilities 里（`files:false`）。
+- **使用前置**：必须先在「同步服务 → 我的设备」右键「连接到此设备」打洞成功；SSH 主机路由选「设备直连（打洞）」、代理链路选「用设备打洞直连」，未打通时直接报错而不是静默回退。
+- **端口**：服务器要放行 UDP 同步端口+1（本项目 8643）。客户端「我的设备」卡片有「检测打洞服务」，用一次探针判断端口是否被防火墙拦住。
+
+### 9.3 教训（第四批）
+- 设备身份只要有一个随机源（安装 id）就会产生重复行；**机器码 + 服务端按机器码合并**缺一不可。
+- 打洞必须在"被服务器观测到的那个 socket"上继续跑数据，否则 NAT 映射换了端口，对端打不通。
+- 打洞失败一定要能区分「对端不在线」和「NAT 不允许」，否则用户只会看到"连不上"。
+- CLI 工具登录服务器时不能带机器指纹，否则会顶掉真实设备记录。

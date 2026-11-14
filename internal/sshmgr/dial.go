@@ -56,6 +56,8 @@ type Manager struct {
 	Store    *Store
 	ProxyFor ProxyResolver
 	Relay    Relayer
+	// P2P dials through a hole-punched device when a host uses the p2p route.
+	P2P P2PDialer
 
 	mu      sync.Mutex
 	clients map[string]*Client
@@ -182,9 +184,29 @@ func (m *Manager) connect(ctx context.Context, host Host, opts DialOptions) (*Cl
 }
 
 // dialEndpoint opens the raw socket for the first hop.
+// P2PDialer opens a TCP path through another device's punched channel.
+type P2PDialer interface {
+	Ready(deviceID string) bool
+	DialTCP(ctx context.Context, deviceID, target string) (net.Conn, error)
+}
+
 func (m *Manager) dialEndpoint(ctx context.Context, h Host, opts DialOptions) (net.Conn, string, error) {
 	useRelay := h.Route == RouteRelay
 	target := h.Addr()
+	if h.Route == RouteP2P || strings.TrimSpace(h.P2PDevice) != "" {
+		device := strings.TrimSpace(h.P2PDevice)
+		if device == "" {
+			return nil, "", errors.New("p2p route requires selecting a device")
+		}
+		if m.P2P == nil || !m.P2P.Ready(device) {
+			return nil, "", errors.New("该设备尚未打通直连：请在「同步服务 → 我的设备」右键「连接到此设备」后再使用")
+		}
+		conn, err := m.P2P.DialTCP(ctx, device, target)
+		if err != nil {
+			return nil, "", fmt.Errorf("p2p via %s: %w", device, err)
+		}
+		return conn, "p2p:" + device, nil
+	}
 	if useRelay {
 		if strings.TrimSpace(h.RelayTarget) != "" {
 			target = h.RelayTarget

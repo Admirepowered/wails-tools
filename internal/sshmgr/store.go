@@ -21,6 +21,7 @@ const (
 	RouteDirect = "direct" // dial the host directly
 	RouteJump   = "jump"   // chain through one or more SSH hosts
 	RouteRelay  = "relay"  // tunnel through the WailsTools sync server
+	RouteP2P    = "p2p"    // hole-punched direct link to another device
 )
 
 // Auth modes.
@@ -44,6 +45,8 @@ type Host struct {
 	Password string   `json:"password,omitempty"` // sealed
 	Route    string   `json:"route"`
 	JumpIDs  []string `json:"jumpIds,omitempty"`
+	// P2PDevice is the sync-server device id used as a punched jump host.
+	P2PDevice string `json:"p2pDevice,omitempty"`
 	// RelayTarget optionally overrides the address dialled on the server side.
 	RelayTarget string   `json:"relayTarget,omitempty"`
 	Group       string   `json:"group,omitempty"`
@@ -247,6 +250,9 @@ func (s *Store) SaveHost(h Host) (Host, error) {
 	}
 	if h.Route == RouteJump && len(h.JumpIDs) == 0 {
 		return Host{}, errors.New("jump route requires at least one jump host")
+	}
+	if h.Route == RouteP2P && strings.TrimSpace(h.P2PDevice) == "" {
+		return Host{}, errors.New("p2p route requires a device")
 	}
 	// An empty password from the UI means "keep the stored secret", so editing
 	// other fields never silently wipes credentials.

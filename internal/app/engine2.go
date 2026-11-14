@@ -105,6 +105,7 @@ func (a *App) buildChain() ([]miproxy.Node, miproxy.RelayFunc) {
 		}
 	}
 	var relay miproxy.RelayFunc
+	relayKind := "none"
 	if cfg.Mode == "server" && a.link != nil {
 		relay = func(ctx context.Context, target string) (net.Conn, error) {
 			if !a.link.Available() {
@@ -114,7 +115,19 @@ func (a *App) buildChain() ([]miproxy.Node, miproxy.RelayFunc) {
 			}
 			return a.link.DialTCP(ctx, target)
 		}
+		relayKind = "server"
 	}
+	if cfg.Mode == "device" {
+		device := strings.TrimSpace(cfg.DeviceID)
+		relay = func(ctx context.Context, target string) (net.Conn, error) {
+			if device == "" {
+				return nil, errors.New("未选择打洞设备")
+			}
+			return a.p2pDialTCP(ctx, device, target)
+		}
+		relayKind = "device:" + device
+	}
+	a.lastRelayKind = relayKind
 	return hops, relay
 }
 
@@ -133,7 +146,10 @@ func (a *App) startEngine(node miproxy.Node) (proxysvc.Status, error) {
 	opts.Chain, opts.Relay = a.buildChain()
 	relayText := "none"
 	if opts.Relay != nil {
-		relayText = "server"
+		relayText = a.lastRelayKind
+		if relayText == "" || relayText == "none" {
+			relayText = "server"
+		}
 	}
 	if a.log != nil {
 		hops := make([]string, 0, len(opts.Chain))
@@ -166,7 +182,7 @@ func (a *App) GetProxyChain() map[string]any {
 	if ids == nil {
 		ids = []string{}
 	}
-	return map[string]any{"mode": cfg.Mode, "nodeIds": ids}
+	return map[string]any{"mode": cfg.Mode, "nodeIds": ids, "deviceId": cfg.DeviceID}
 }
 
 // SaveProxyChain stores the chain and restarts the engine when it is running.
@@ -185,10 +201,10 @@ func (a *App) SaveProxyChain(cfg settings.ProxyChainSettings) (map[string]any, e
 		return nil, err
 	}
 	if a.log != nil {
-		a.log.Printf("chain saved mode=%s nodeIds=%v", cfg.Mode, cfg.NodeIDs)
+		a.log.Printf("chain saved mode=%s nodeIds=%v device=%s", cfg.Mode, cfg.NodeIDs, cfg.DeviceID)
 	}
 	_, _ = a.RestartEngine()
-	return map[string]any{"mode": cfg.Mode, "nodeIds": cfg.NodeIDs}, nil
+	return map[string]any{"mode": cfg.Mode, "nodeIds": cfg.NodeIDs, "deviceId": cfg.DeviceID}, nil
 }
 
 // SetProxyChainMode switches the chain mode without touching node selection,
@@ -210,7 +226,7 @@ func (a *App) SetProxyChainMode(mode string) (map[string]any, error) {
 		a.log.Printf("chain mode -> %s (nodeIds kept %v)", cfg.Mode, cfg.NodeIDs)
 	}
 	_, _ = a.RestartEngine()
-	return map[string]any{"mode": cfg.Mode, "nodeIds": cfg.NodeIDs}, nil
+	return map[string]any{"mode": cfg.Mode, "nodeIds": cfg.NodeIDs, "deviceId": cfg.DeviceID}, nil
 }
 
 // GetDirectRules returns the direct-rule configuration.

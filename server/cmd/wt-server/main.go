@@ -9,8 +9,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +40,8 @@ func main() {
 		listDev    = flag.String("list-devices", "", "list devices bound to a user and exit: username")
 		rmDevice   = flag.String("remove-device", "", "remove a device binding and exit: username:deviceID")
 		localAdmin = flag.Bool("local-admin", true, "allow loopback connections to act as admin without a token")
+		p2pAddr    = flag.String("p2p-udp", "", "UDP rendezvous address for NAT hole punching (default: tcp port + 1, 'off' disables)")
+		noP2P      = flag.Bool("no-p2p", false, "disable NAT hole punching")
 	)
 	flag.Parse()
 
@@ -56,6 +60,7 @@ func main() {
 		DefaultQuotaBytes: *quota * (1 << 30),
 		TokenTTL:          *tokenTTL,
 		LocalAdmin:        *localAdmin,
+		P2PAddr:           p2pAddress(*p2pAddr, *tcpAddr, *noP2P),
 	}
 
 	if *listUsers || *createUsr != "" || *deleteUsr != "" || *setPass != "" || *setRole != "" || *listDev != "" || *rmDevice != "" {
@@ -225,4 +230,24 @@ func adminCommand(dataDir, create string, list bool, del, pass, role, listDev, r
 	}
 	log.Printf("created user %s (%s)", created.Username, created.ID)
 	return nil
+}
+
+// p2pAddress picks the rendezvous UDP address: explicit flag wins, "off" or
+// -no-p2p disables it, otherwise the TCP port + 1 on the same host.
+func p2pAddress(flagValue, tcpAddr string, disabled bool) string {
+	if disabled || strings.EqualFold(flagValue, "off") {
+		return ""
+	}
+	if flagValue != "" {
+		return flagValue
+	}
+	host, port, err := net.SplitHostPort(tcpAddr)
+	if err != nil {
+		return ":8643"
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n <= 0 || n >= 65535 {
+		return ":8643"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(n+1))
 }

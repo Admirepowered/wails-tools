@@ -18,6 +18,7 @@ import (
 
 	"wailstools/internal/wire"
 	"wailstools/server/internal/auth"
+	"wailstools/server/internal/p2p"
 	"wailstools/server/internal/store"
 )
 
@@ -35,7 +36,11 @@ type Options struct {
 	// LocalAdmin lets loopback connections act as the first admin without a
 	// token (reserved local maintenance access).
 	LocalAdmin bool
-	Logf       func(format string, args ...any)
+	// P2P is the NAT hole punching rendezvous hub (nil disables the feature).
+	P2P *p2p.Hub
+	// P2PPort is advertised to clients so they know where to announce.
+	P2PPort int
+	Logf    func(format string, args ...any)
 }
 
 // API is the wire.Handler implementation.
@@ -44,6 +49,9 @@ type API struct {
 	Secret  []byte
 	Opts    Options
 	started time.Time
+
+	// P2P signals hole-punch attempts between two devices of the same user.
+	P2P *p2p.Hub
 
 	mu     sync.RWMutex
 	online map[string]int
@@ -60,7 +68,7 @@ func New(db *store.DB, secret []byte, opts Options) *API {
 	if opts.Logf == nil {
 		opts.Logf = func(string, ...any) {}
 	}
-	return &API{DB: db, Secret: secret, Opts: opts, started: time.Now(), online: map[string]int{}}
+	return &API{DB: db, Secret: secret, Opts: opts, P2P: opts.P2P, started: time.Now(), online: map[string]int{}}
 }
 
 // Authenticate validates the hello frame. A stream without a token is treated
@@ -210,6 +218,13 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.filesExtract(body)
 	case "relay.check":
 		return map[string]any{"enabled": a.Opts.RelayEnabled}, nil
+	// ---- NAT hole punching signalling --------------------------------------
+	case "p2p.offer":
+		return ctx.p2pOffer(body)
+	case "p2p.pending":
+		return ctx.p2pPending(body)
+	case "p2p.drop":
+		return ctx.p2pDrop(body)
 	// ---- client update distribution (public reads, admin writes) ----------
 	case "update.list":
 		return ctx.updateList(body)
@@ -255,6 +270,7 @@ func (a *API) serverInfo() (any, error) {
 		"relay":           a.Opts.RelayEnabled,
 		"serverTime":      time.Now().UnixMilli(),
 		"protocolVersion": wire.Version,
+		"p2pPort":         a.Opts.P2PPort,
 	}, nil
 }
 

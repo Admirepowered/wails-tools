@@ -506,6 +506,8 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
   const [loaded, setLoaded] = useState(!!chainCache)
   const [raw, setRaw] = useState('')
   const [nodes, setNodes] = useState<MiproxyNode[]>([])
+  const [p2p, setP2p] = useState<{ localDevice: string; connected: string[] } | null>(null)
+  const [p2pNames, setP2pNames] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -522,6 +524,15 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
       }
       try {
         setNodes(await api.ListCustomNodes())
+        try {
+          setP2p(await api.P2PStatus())
+          const mine = await api.MyDevices()
+          const names: Record<string, string> = {}
+          for (const d of mine.devices) names[d.id] = d.name || d.id.slice(0, 8)
+          setP2pNames(names)
+        } catch {
+          setP2p(null)
+        }
       } catch {
         /* 节点列表失败时保留已加载的链路 */
       }
@@ -591,9 +602,30 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
           <option value="off">直连（不中转）</option>
           <option value="server">从服务器跳转</option>
           <option value="nodes">用节点中转</option>
+          <option value="device">用设备打洞直连</option>
         </select>
         {busy ? <Spinner label="" /> : null}
       </div>
+      {cfg.mode === 'device' ? (
+        <div className="row row-wrap" style={{ marginTop: 10, gap: 8 }}>
+          <select
+            className="select"
+            style={{ width: 260 }}
+            value={cfg.deviceId ?? ''}
+            onChange={(e) => void save({ ...cfg, deviceId: e.target.value })}
+          >
+            <option value="">选择已打洞的设备</option>
+            {(p2p?.connected ?? []).map((id) => (
+              <option key={id} value={id}>
+                {p2pNames[id] ?? id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+          <span className="small faint">
+            只有打洞成功的设备能当出口；列表为空时，先到「同步服务 → 我的设备」右键「连接到此设备」。
+          </span>
+        </div>
+      ) : null}
       {cfg.mode === 'nodes' ? (
         <div className="col" style={{ marginTop: 10, gap: 6, maxHeight: 180, overflow: 'auto' }}>
           {nodes.length === 0 ? (
@@ -738,6 +770,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 

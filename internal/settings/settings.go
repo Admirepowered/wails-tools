@@ -85,8 +85,11 @@ func (p ProxySettings) Resolve(scope string) ProxyRule {
 // ProxyChainSettings routes the engine's upstream through the sync server or
 // through one or two existing nodes (max two hops).
 type ProxyChainSettings struct {
-	// Mode is "off", "server" or "nodes".
+	// Mode is "off", "server", "nodes" or "device".
 	Mode string `json:"mode"`
+	// DeviceID is the punched device used in "device" mode: its client opens
+	// every upstream TCP connection on our behalf.
+	DeviceID string `json:"deviceId,omitempty"`
 	// NodeIDs lists custom node IDs used as hops (max 2).
 	NodeIDs []string `json:"nodeIds,omitempty"`
 }
