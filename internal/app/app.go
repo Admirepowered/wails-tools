@@ -245,6 +245,10 @@ func (a *App) Startup(ctx context.Context) {
 				return
 			}
 			// Restore the saved session so the account is logged in automatically.
+			// 更新重启后令牌可能还没落盘，先等几次再判定是否已登录。
+			for i := 0; i < 3 && a.link.Token() == ""; i++ {
+				time.Sleep(2 * time.Second)
+			}
 			if a.link.Token() != "" {
 				// 更新后重启时配置/令牌可能尚未落盘完成，重试几次再判定失效。
 				var lastErr error

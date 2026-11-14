@@ -83,6 +83,8 @@ func (s *NodeStore) Save(n miproxy.Node) (miproxy.Node, error) {
 		if n.Password == "" {
 			return miproxy.Node{}, errors.New("Trojan 需要密码")
 		}
+		// Trojan 协议本身基于 TLS，避免用户漏勾。
+		n.TLS = true
 	case miproxy.ProtoSS:
 		if n.Method == "" || n.Password == "" {
 			return miproxy.Node{}, errors.New("Shadowsocks 需要加密方式与密码")

@@ -789,7 +789,14 @@ function NodeEditor({
           <input className="input" value={draft.name} onChange={(e) => patch({ name: e.target.value })} />
         </Field>
         <Field label="协议">
-          <select className="select" value={draft.protocol} onChange={(e) => patch({ protocol: e.target.value })}>
+          <select
+            className="select"
+            value={draft.protocol}
+            onChange={(e) => {
+              const protocol = e.target.value
+              patch(protocol === 'trojan' ? { protocol, tls: true } : { protocol })
+            }}
+          >
             <option value="vmess">VMess</option>
             <option value="vless">VLESS</option>
             <option value="trojan">Trojan</option>
@@ -865,6 +872,7 @@ function NodeEditor({
     </Modal>
   )
 }
+
 
 
 
