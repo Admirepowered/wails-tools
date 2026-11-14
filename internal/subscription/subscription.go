@@ -300,7 +300,7 @@ func (m *Manager) RefreshAll(ctx context.Context) []UpdateResult {
 
 func (m *Manager) httpClient() (*http.Client, error) {
 	rule := settings.ProxyRule{Mode: "off"}
-	if m.settings != nil {
+	if m.settings != nil && m.settings.Get().Subscriptions.UseProxy {
 		rule = m.settings.ProxyFor(settings.ScopeHTTP)
 	}
 	return proxyx.HTTPClient(rule, 60*time.Second)

@@ -56,6 +56,17 @@ try {
   $exe = Join-Path $root 'build\bin\WailsTools.exe'
   if (-not (Test-Path $exe)) { throw "missing build output: $exe" }
 
+  # 用 UPX 打压缩壳（未安装时跳过）
+  $upx = Get-Command upx -ErrorAction SilentlyContinue
+  if ($upx) {
+    Write-Host '==> upx --best' -ForegroundColor Cyan
+    & $upx.Source --best --force $exe | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host 'UPX 压缩失败，继续使用原始文件' -ForegroundColor Yellow }
+    else { Write-Host ("    压缩后大小: {0:N0} 字节" -f (Get-Item $exe).Length) -ForegroundColor DarkGray }
+  } else {
+    Write-Host '未检测到 upx，跳过压缩（可 winget install upx 后重试）' -ForegroundColor Yellow
+  }
+
   if (-not $User -or -not $Pass) {
     Write-Host '未设置 WT_USER / WT_PASS，跳过自动发布。' -ForegroundColor Yellow
     Write-Host '  示例：$env:WT_USER="wtadmin"; $env:WT_PASS="***"; ./scripts/build-and-publish.ps1' -ForegroundColor DarkGray
@@ -84,5 +95,6 @@ try {
 } finally {
   Pop-Location
 }
+
 
 

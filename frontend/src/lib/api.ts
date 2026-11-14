@@ -142,6 +142,7 @@ export interface StartupSettings {
 }
 
 export interface Settings {
+  subscriptions?: { useProxy?: boolean }
   proxy: { mode?: string; default: ProxyRule; scopes?: Record<string, ProxyRule>; followSystem: boolean }
   downloads: DownloadSettings
   server: ServerSettings
@@ -1058,6 +1059,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

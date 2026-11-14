@@ -137,6 +137,12 @@ type ServerSettings struct {
 }
 
 // UISettings captures presentation preferences.
+// SubscriptionSettings controls how subscriptions are fetched.
+type SubscriptionSettings struct {
+	// UseProxy fetches subscription URLs through the active proxy.
+	UseProxy bool `json:"useProxy"`
+}
+
 type UISettings struct {
 	Theme    string `json:"theme"`
 	Language string `json:"language"`
@@ -185,16 +191,17 @@ type StartupSettings struct {
 
 // Settings is the root document.
 type Settings struct {
-	Proxy        ProxySettings        `json:"proxy"`
-	Downloads    DownloadSettings     `json:"downloads"`
-	Server       ServerSettings       `json:"server"`
-	UI           UISettings           `json:"ui"`
-	ProxyRuntime ProxyRuntimeSettings `json:"proxyRuntime"`
-	ProxyChain   ProxyChainSettings   `json:"proxyChain"`
-	DirectRules  DirectRuleSettings   `json:"directRules"`
-	Update       UpdateSettings       `json:"update"`
-	Screenshots  ScreenshotSettings   `json:"screenshots"`
-	Startup      StartupSettings      `json:"startup"`
+	Proxy         ProxySettings        `json:"proxy"`
+	Downloads     DownloadSettings     `json:"downloads"`
+	Server        ServerSettings       `json:"server"`
+	UI            UISettings           `json:"ui"`
+	Subscriptions SubscriptionSettings `json:"subscriptions"`
+	ProxyRuntime  ProxyRuntimeSettings `json:"proxyRuntime"`
+	ProxyChain    ProxyChainSettings   `json:"proxyChain"`
+	DirectRules   DirectRuleSettings   `json:"directRules"`
+	Update        UpdateSettings       `json:"update"`
+	Screenshots   ScreenshotSettings   `json:"screenshots"`
+	Startup       StartupSettings      `json:"startup"`
 }
 
 // Default returns the built-in configuration.

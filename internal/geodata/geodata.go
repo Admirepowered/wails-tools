@@ -41,9 +41,18 @@ type DB struct {
 	status Status
 }
 
-// Open creates a manager rooted at dir (the database may be missing).
+// Open creates a manager rooted at dir (the database may be missing). Common
+// alternative file names are accepted so a manually placed database is found.
 func Open(dir string) *DB {
-	path := filepath.Join(dir, "geoip.metadb")
+	candidates := []string{"geoip.metadb", "geoip.mmdb", "Country.mmdb", "country.mmdb"}
+	path := filepath.Join(dir, candidates[0])
+	for _, name := range candidates {
+		cand := filepath.Join(dir, name)
+		if info, err := os.Stat(cand); err == nil && info.Size() > 0 {
+			path = cand
+			break
+		}
+	}
 	db := &DB{path: path, status: Status{Path: path}}
 	db.load()
 	return db

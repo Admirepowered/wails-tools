@@ -50,7 +50,14 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
 
+  const [useProxy, setUseProxy] = useState(false)
   const [tests, setTests] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string } | null>>({})
+  useEffect(() => {
+    void api
+      .GetSettings()
+      .then((s) => setUseProxy(!!s.subscriptions?.useProxy))
+      .catch(() => {})
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -275,6 +282,21 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
           >
             同步订阅
           </button>
+          <label className="row" style={{ gap: 6 }} title="通过当前节点拉取订阅">
+            <Switch
+              checked={useProxy}
+              onChange={async (v) => {
+                setUseProxy(v)
+                try {
+                  const cur = await api.GetSettings()
+                  await api.SaveSettings({ ...cur, subscriptions: { ...(cur.subscriptions ?? {}), useProxy: v } })
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            />
+            <span className="small">订阅走代理</span>
+          </label>
           <button className="btn" onClick={refreshAll} disabled={busy !== '' || list.length === 0}>
             全部刷新
           </button>

@@ -129,11 +129,11 @@ func (m *Manager) Check(ctx context.Context) (CheckResult, error) {
 	selfHash, _ := SelfHash()
 	res := CheckResult{Current: cur, CheckedAt: time.Now().Format(time.RFC3339), Source: cfg.Source, CurrentHash: selfHash}
 
-	tryServer := cfg.Source == "auto" || cfg.Source == "server"
-	tryGitHub := cfg.Source == "auto" || cfg.Source == "github"
-
-	var serverErr, githubErr error
-	if tryServer {
+	// Updates are always pulled from the sync server; the GitHub path was
+	// removed and the update check never uses a proxy.
+	res.Source = "server"
+	var serverErr error
+	{
 		rel, err := m.checkServer(ctx, cfg.Channel)
 		if err == nil && rel != nil {
 			res.Release = rel
@@ -156,36 +156,10 @@ func (m *Manager) Check(ctx context.Context) (CheckResult, error) {
 		}
 	}
 
-	if tryGitHub {
-		rel, ghRes, err := m.checkGitHub(ctx, cfg)
-		res.GitHub = ghRes
-		if err == nil && rel != nil {
-			res.Release = rel
-			res.Latest = rel.Version
-			res.Source = "github"
-			res.Available, res.SameBuild = CheckHashComparison(selfHash, *rel)
-			res.CurrentHash = selfHash
-			res.ReleaseHash = rel.SHA256
-			if !res.Available {
-				res.Message = "已是最新构建（GitHub）"
-			} else {
-				res.Message = "发现新构建（GitHub）"
-			}
-			m.recordCheck()
-			return res, nil
-		}
-		githubErr = err
-	}
-
 	res.Latest = cur
-	res.Message = "未发现可用的更新源"
-	switch {
-	case serverErr != nil && githubErr != nil:
-		res.Error = serverErr.Error() + " / " + githubErr.Error()
-	case serverErr != nil:
+	res.Message = "无法从同步服务器获取更新"
+	if serverErr != nil {
 		res.Error = serverErr.Error()
-	case githubErr != nil:
-		res.Error = githubErr.Error()
 	}
 	m.recordCheck()
 	if res.Error == "" {
