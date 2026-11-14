@@ -26,7 +26,7 @@ import (
 
 // buildDirectFunc combines custom rules with country based geoip bypass.
 func (a *App) buildDirectFunc() func(host string) bool {
-	cfg := a.rulesOrDefault()
+	cfg := a.rulesCfg
 	if !cfg.UseGeoIP && len(cfg.Rules) == 0 {
 		return nil
 	}
@@ -89,7 +89,7 @@ func equalFold(a, b string) bool {
 
 // buildChain resolves the configured proxy chain.
 func (a *App) buildChain() ([]miproxy.Node, miproxy.RelayFunc) {
-	cfg := a.chainOrDefault()
+	cfg := a.chainCfg
 	var hops []miproxy.Node
 	if cfg.Mode == "nodes" && a.customNodes != nil {
 		for _, id := range cfg.NodeIDs {
@@ -158,7 +158,7 @@ func (a *App) RestartEngine() (proxysvc.Status, error) {
 
 // GetProxyChain returns the configured chain.
 func (a *App) GetProxyChain() settings.ProxyChainSettings {
-	cfg := a.chainOrDefault()
+	cfg := a.chainCfg
 	if a.log != nil {
 		a.log.Printf("GetProxyChain -> mode=%s nodeIds=%v", cfg.Mode, cfg.NodeIDs)
 	}
@@ -170,52 +170,53 @@ func (a *App) SaveProxyChain(cfg settings.ProxyChainSettings) (settings.ProxyCha
 	if len(cfg.NodeIDs) > 2 {
 		cfg.NodeIDs = cfg.NodeIDs[:2]
 	}
+	a.chainCfg = cfg
 	if err := a.saveChainFile(cfg); err != nil {
 		return settings.ProxyChainSettings{}, err
 	}
-	saved, err := a.settings.Update(func(s *settings.Settings) error {
+	if _, err := a.settings.Update(func(s *settings.Settings) error {
 		s.ProxyChain = cfg
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return settings.ProxyChainSettings{}, err
 	}
 	if a.log != nil {
-		a.log.Printf("chain saved mode=%s nodeIds=%v -> stored=%s/%v", cfg.Mode, cfg.NodeIDs, saved.ProxyChain.Mode, saved.ProxyChain.NodeIDs)
+		a.log.Printf("chain saved mode=%s nodeIds=%v", cfg.Mode, cfg.NodeIDs)
 	}
 	_, _ = a.RestartEngine()
-	return saved.ProxyChain, nil
+	return cfg, nil
 }
 
 // SetProxyChainMode switches the chain mode without touching node selection,
 // so a late UI save cannot wipe the saved hops.
 func (a *App) SetProxyChainMode(mode string) (settings.ProxyChainSettings, error) {
-	cfg := a.chainOrDefault()
+	cfg := a.chainCfg
 	cfg.Mode = mode
+	a.chainCfg = cfg
 	if err := a.saveChainFile(cfg); err != nil {
 		return settings.ProxyChainSettings{}, err
 	}
-	saved, err := a.settings.Update(func(s *settings.Settings) error {
+	if _, err := a.settings.Update(func(s *settings.Settings) error {
 		s.ProxyChain = cfg
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return settings.ProxyChainSettings{}, err
 	}
 	if a.log != nil {
-		a.log.Printf("chain mode -> %s (nodeIds kept %v)", saved.ProxyChain.Mode, saved.ProxyChain.NodeIDs)
+		a.log.Printf("chain mode -> %s (nodeIds kept %v)", cfg.Mode, cfg.NodeIDs)
 	}
 	_, _ = a.RestartEngine()
-	return saved.ProxyChain, nil
+	return cfg, nil
 }
 
 // GetDirectRules returns the direct-rule configuration.
 func (a *App) GetDirectRules() settings.DirectRuleSettings {
-	return a.rulesOrDefault()
+	return a.rulesCfg
 }
 
 // SaveDirectRules stores the rules and restarts the engine when running.
 func (a *App) SaveDirectRules(cfg settings.DirectRuleSettings) (settings.DirectRuleSettings, error) {
+	a.rulesCfg = cfg
 	if err := a.saveRulesFile(cfg); err != nil {
 		return settings.DirectRuleSettings{}, err
 	}

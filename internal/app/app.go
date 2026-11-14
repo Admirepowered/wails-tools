@@ -56,6 +56,8 @@ type App struct {
 	customNodes *proxysvc.NodeStore
 	transfers   *transfermgr.Manager
 	geo         *geodata.DB
+	chainCfg    settings.ProxyChainSettings
+	rulesCfg    settings.DirectRuleSettings
 	media       *mediaRegistry
 	hotkey      *hotkey.Hotkey
 	log         *fileLogger
@@ -175,6 +177,8 @@ func New() (*App, error) {
 		a.geo = geodata.Open(root)
 	}
 	a.media = newMediaRegistry()
+	a.chainCfg, _ = a.loadChainFile()
+	a.rulesCfg, _ = a.loadRulesFile()
 	a.initTransfers()
 	a.shots = shot.NewManager(store, nil)
 	a.shots.SetSavedHandler(func(item shot.Item) {
