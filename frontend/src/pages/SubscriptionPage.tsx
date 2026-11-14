@@ -51,6 +51,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const [importText, setImportText] = useState('')
 
   const [useProxy, setUseProxy] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; danger?: boolean; action: () => void }[] } | null>(null)
   const [tests, setTests] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string } | null>>({})
   useEffect(() => {
     void api
@@ -334,7 +335,24 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             const used = src.info.download + src.info.upload
             const pct = src.info.total > 0 ? Math.min(100, (used / src.info.total) * 100) : 0
             return (
-              <div key={src.id} className="scope-card">
+              <div
+                key={src.id}
+                className="scope-card"
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    items: [
+                      { label: '刷新', action: () => void refreshOne(src) },
+                      { label: '编辑', action: () => setEditing(src) },
+                      { label: '查看节点', action: () => setSelected(src.id) },
+                      { label: src.useProxy ? '改为直连' : '改为走代理', action: () => void api.SaveSubscription({ ...src, useProxy: !src.useProxy }).then(() => load()).catch((err) => toast.error(err)) },
+                      { label: '删除', danger: true, action: () => setDeleting(src) },
+                    ],
+                  })
+                }}
+              >
                 <div className="scope-head">
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="scope-title truncate">{src.name || '未命名订阅'}</div>
@@ -627,6 +645,18 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
         </Modal>
       )}
 
+      {menu && (
+        <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }}>
+          <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+            {menu.items.map((item, i) => (
+              <button key={i} className={`ctx-item ${item.danger ? 'danger' : ''}`} onClick={() => { setMenu(null); item.action() }}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {deleting && (
         <Confirm
           title="删除订阅"
@@ -835,6 +865,7 @@ function NodeEditor({
     </Modal>
   )
 }
+
 
 
 

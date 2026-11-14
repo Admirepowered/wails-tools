@@ -282,60 +282,23 @@ export default function UpdatePage({ settings, reloadSettings }: PageProps) {
 
       {cfg && (
         <div className="card">
-          <h3 className="card-title">更新源</h3>
-          <p className="card-desc">优先从同步服务器拉取（各客户端上传的构建），失败或未配置时回退到 GitHub Release。</p>
-          <div className="grid-2">
-            <Field label="更新源">
-              <select
-                className="select"
-                value={cfg.source}
-                onChange={(e) => saveCfg({ ...cfg, source: e.target.value })}
-              >
-                <option value="auto">自动（服务器 → GitHub）</option>
-                <option value="server">仅同步服务器</option>
-                <option value="github">仅 GitHub</option>
-              </select>
-            </Field>
-            <Field label="更新通道">
-              <select
-                className="select"
-                value={cfg.channel}
-                onChange={(e) => saveCfg({ ...cfg, channel: e.target.value })}
-              >
-                <option value="stable">stable</option>
-                <option value="beta">beta</option>
-              </select>
-            </Field>
-          </div>
-          <div className="grid-2" style={{ marginTop: 10 }}>
-            <Field label="GitHub 仓库">
-              <input
-                className="input mono"
-                value={cfg.githubRepo}
-                onChange={(e) => setCfg({ ...cfg, githubRepo: e.target.value })}
-                onBlur={() => saveCfg(cfg)}
-              />
-            </Field>
-            <div className="col" style={{ gap: 8 }}>
-              <label className="row" style={{ gap: 8 }}>
-                <Switch
-                  checked={cfg.githubBypass}
-                  onChange={(v) => saveCfg({ ...cfg, githubBypass: v })}
-                />
-                <span className="small">绕过 SNI 检测（固定 IP + Host 复用）</span>
-              </label>
-              <label className="row" style={{ gap: 8 }}>
-                <Switch
-                  checked={cfg.githubFragment}
-                  onChange={(v) => saveCfg({ ...cfg, githubFragment: v })}
-                />
-                <span className="small">TLS ClientHello 分片（对抗 SNI DPI）</span>
-              </label>
-              <label className="row" style={{ gap: 8 }}>
-                <Switch checked={cfg.autoCheck} onChange={(v) => saveCfg({ ...cfg, autoCheck: v })} />
-                <span className="small">启动时自动检查</span>
-              </label>
-            </div>
+          <h3 className="card-title">更新方式</h3>
+          <p className="card-desc">只从同步服务器按哈希获取更新，更新过程不走代理；不再使用 GitHub。</p>
+          <div className="row row-wrap" style={{ gap: 18 }}>
+            <div className="small faint">更新通道</div>
+            <select
+              className="select"
+              style={{ width: 140 }}
+              value={cfg.channel}
+              onChange={(e) => saveCfg({ ...cfg, channel: e.target.value })}
+            >
+              <option value="stable">stable</option>
+              <option value="beta">beta</option>
+            </select>
+            <label className="row" style={{ gap: 8 }}>
+              <Switch checked={cfg.autoCheck} onChange={(v) => saveCfg({ ...cfg, autoCheck: v })} />
+              <span className="small">启动时自动检查</span>
+            </label>
           </div>
         </div>
       )}

@@ -54,10 +54,12 @@ type Info struct {
 
 // Source is a saved subscription.
 type Source struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	URL           string `json:"url"`
-	Enabled       bool   `json:"enabled"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
+	// UseProxy fetches this subscription through the proxy.
+	UseProxy      bool   `json:"useProxy"`
 	IntervalHours int    `json:"intervalHours"`
 	LastFetch     string `json:"lastFetch,omitempty"`
 	LastError     string `json:"lastError,omitempty"`
@@ -298,9 +300,13 @@ func (m *Manager) RefreshAll(ctx context.Context) []UpdateResult {
 	return out
 }
 
-func (m *Manager) httpClient() (*http.Client, error) {
+func (m *Manager) httpClientFor(src Source) (*http.Client, error) {
 	rule := settings.ProxyRule{Mode: "off"}
-	if m.settings != nil && m.settings.Get().Subscriptions.UseProxy {
+	useProxy := src.UseProxy
+	if m.settings != nil && !useProxy && m.settings.Get().Subscriptions.UseProxy {
+		useProxy = true
+	}
+	if m.settings != nil && useProxy {
 		rule = m.settings.ProxyFor(settings.ScopeHTTP)
 	}
 	return proxyx.HTTPClient(rule, 60*time.Second)
@@ -312,7 +318,7 @@ func (m *Manager) fetch(ctx context.Context, src Source) UpdateResult {
 		res.Error = "订阅地址为空"
 		return res
 	}
-	client, err := m.httpClient()
+	client, err := m.httpClientFor(src)
 	if err != nil {
 		res.Error = "代理配置无效: " + err.Error()
 		return res

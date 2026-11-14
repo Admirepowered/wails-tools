@@ -196,12 +196,10 @@ func (a *App) Startup(ctx context.Context) {
 	if a.subs != nil {
 		a.subs.StartAutoRefresh(context.Background())
 	}
-	if cfg := a.settings.Get().Startup; cfg.TrayEnabled {
-		if a.settings.Get().Startup.TrayEnabled {
-			a.startTray()
-		}
-		a.registerScreenshotHotkey()
+	if a.settings.Get().Startup.TrayEnabled {
+		a.startTray()
 	}
+	a.registerScreenshotHotkey()
 	if cfg := a.settings.Get(); cfg.Update.AutoCheck {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)

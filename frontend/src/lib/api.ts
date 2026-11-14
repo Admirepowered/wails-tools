@@ -460,6 +460,7 @@ export interface SubscriptionSource {
   name: string
   url: string
   enabled: boolean
+  useProxy?: boolean
   intervalHours: number
   lastFetch?: string
   lastError?: string
@@ -1059,6 +1060,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 
