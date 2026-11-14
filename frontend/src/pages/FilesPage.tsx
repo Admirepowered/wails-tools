@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, onEvent, type LocalListing, type RemoteEntry, type TransferTask } from '../lib/api'
+import MediaViewer, { isPreviewable, kindOf, type MediaTarget } from '../components/MediaViewer'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Stat, Tabs, Tag, useToast } from '../components/ui'
 import { basename, formatBytes, formatSpeed, formatTime, percent } from '../lib/format'
 import type { PageProps } from '../App'
@@ -77,6 +78,7 @@ export default function FilesPage({ serverStatus }: PageProps) {
 
   /* ---- 传输记录 ---- */
   const [managed, setManaged] = useState<TransferTask[]>([])
+  const [preview, setPreview] = useState<MediaTarget | null>(null)
   const [managedBusy, setManagedBusy] = useState(false)
   const [transfers, setTransfers] = useState<TransferItem[]>([])
 
@@ -168,7 +170,10 @@ export default function FilesPage({ serverStatus }: PageProps) {
         return next
       })
     })
-    return () => off()
+    const canPreviewLocal =
+    selected.length === 1 && isPreviewable((selected[0] ?? '').split(/[\\/]/).pop() ?? '')
+
+  return () => off()
   }, [])
 
   const managedAction = async (fn: () => Promise<void>) => {
@@ -222,7 +227,10 @@ export default function FilesPage({ serverStatus }: PageProps) {
       })
     })
 
-    return () => {
+    const canPreviewLocal =
+    selected.length === 1 && isPreviewable((selected[0] ?? '').split(/[\\/]/).pop() ?? '')
+
+  return () => {
       offProgress()
       offDone()
     }
@@ -370,6 +378,9 @@ export default function FilesPage({ serverStatus }: PageProps) {
   const cloudCrumbs = useMemo(() => buildCloudCrumbs(cloudPath), [cloudPath])
   const usagePct = usage ? percent(usage.usedBytes, usage.quotaBytes) : 0
 
+  const canPreviewLocal =
+    selected.length === 1 && isPreviewable((selected[0] ?? '').split(/[\\/]/).pop() ?? '')
+
   return (
     <div>
       <Tabs tabs={TABS} value={tab} onChange={setTab} />
@@ -415,6 +426,20 @@ export default function FilesPage({ serverStatus }: PageProps) {
                 上传到云端
               </button>
               <button className="btn btn-sm" onClick={() => void openSelected(false)}>
+              <button
+                className="btn btn-sm"
+                disabled={!canPreviewLocal}
+                title="在应用内查看图片 / 视频 / 文本"
+                onClick={() => {
+                  const p = selected[0]
+                  const name = p.split(/[\\/]/).pop() ?? p
+                  const kind = kindOf(name)
+                  if (!p || !kind) return
+                  setPreview({ path: p, name, kind, source: 'local' })
+                }}
+              >
+                预览
+              </button>
                 打开
               </button>
               <button className="btn btn-sm" onClick={() => void openSelected(true)}>
@@ -447,7 +472,10 @@ export default function FilesPage({ serverStatus }: PageProps) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               {localEntries.map((entry) => {
                 const isSelected = selected.includes(entry.path)
-                return (
+                const canPreviewLocal =
+    selected.length === 1 && isPreviewable((selected[0] ?? '').split(/[\\/]/).pop() ?? '')
+
+  return (
                   <div
                     key={entry.path}
                     className={`file-row ${isSelected ? 'selected' : ''}`}
@@ -529,6 +557,18 @@ export default function FilesPage({ serverStatus }: PageProps) {
                 </button>
                 <button className="btn btn-sm" disabled={!cloudEntry || cloudEntry.isDir} onClick={downloadCloud}>
                   下载到本地
+                </button>
+                <button
+                  className="btn btn-sm"
+                  disabled={!cloudEntry || cloudEntry.isDir || !isPreviewable(cloudEntry.name)}
+                  onClick={() => {
+                    if (!cloudEntry) return
+                    const kind = kindOf(cloudEntry.name)
+                    if (!kind) return
+                    setPreview({ path: cloudEntry.path, name: cloudEntry.name, kind, source: 'cloud' })
+                  }}
+                >
+                  预览
                 </button>
                 <button
                   className="btn btn-sm"
@@ -624,7 +664,10 @@ export default function FilesPage({ serverStatus }: PageProps) {
               <tbody>
                 {managed.map((t) => {
                   const pct = t.total > 0 ? Math.min(100, (t.done / t.total) * 100) : 0
-                  return (
+                  const canPreviewLocal =
+    selected.length === 1 && isPreviewable((selected[0] ?? '').split(/[\\/]/).pop() ?? '')
+
+  return (
                     <tr key={t.id}>
                       <td className="small">{t.kind}</td>
                       <td className="truncate" title={t.path}>
@@ -708,7 +751,10 @@ export default function FilesPage({ serverStatus }: PageProps) {
             <div className="list">
               {transfers.map((t) => {
                 const pct = t.total > 0 ? percent(t.done, t.total) : t.finished ? 100 : 0
-                return (
+                const canPreviewLocal =
+    selected.length === 1 && isPreviewable((selected[0] ?? '').split(/[\\/]/).pop() ?? '')
+
+  return (
                   <div
                     key={t.key}
                     className="list-row"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, onEvent, type UpdateRelease, type UpdateSettings, type UpdateStatus } from '../lib/api'
 import { Empty, Field, Progress, Spinner, Switch, Tag, useToast } from '../components/ui'
-import { formatBytes, formatTime } from '../lib/format'
+import { formatBytes, formatTime, relativeTime } from '../lib/format'
 import type { PageProps } from '../App'
 
 export default function UpdatePage({ settings, reloadSettings }: PageProps) {
@@ -10,6 +10,7 @@ export default function UpdatePage({ settings, reloadSettings }: PageProps) {
   const [cfg, setCfg] = useState<UpdateSettings | null>(null)
   const [status, setStatus] = useState<UpdateStatus | null>(null)
   const [releases, setReleases] = useState<UpdateRelease[]>([])
+  const [busy, setBusy] = useState('')
   const [checking, setChecking] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [staged, setStaged] = useState('')
@@ -45,6 +46,18 @@ export default function UpdatePage({ settings, reloadSettings }: PageProps) {
     })
     return () => off()
   }, [])
+
+  const loadReleases = async () => {
+    setBusy('list')
+    try {
+      const list = await api.ListServerReleases('', '')
+      setReleases(list ?? [])
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setBusy('')
+    }
+  }
 
   const check = async () => {
     setChecking(true)
@@ -145,7 +158,83 @@ export default function UpdatePage({ settings, reloadSettings }: PageProps) {
           </div>
         )}
 
-        {status && (
+        <div className="card">
+        <div className="row">
+          <h3 className="card-title" style={{ margin: 0 }}>
+            已发布构建
+          </h3>
+          <div className="spacer" />
+          <button className="btn btn-sm" disabled={busy === 'list'} onClick={() => void loadReleases()}>
+            刷新
+          </button>
+        </div>
+        <p className="card-desc">可以直接选择服务器上的任意一个已发布版本安装。</p>
+        {releases.length === 0 ? (
+          <div className="small faint">暂无发布记录（需要先连接服务器）</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>版本</th>
+                <th>平台</th>
+                <th>大小</th>
+                <th>发布时间</th>
+                <th className="right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {releases.map((rel) => (
+                <tr key={rel.id}>
+                  <td>
+                    {rel.version}
+                    {rel.channel ? <Tag>{rel.channel}</Tag> : null}
+                  </td>
+                  <td className="small">
+                    {rel.platform}/{rel.arch}
+                  </td>
+                  <td className="small">{formatBytes(rel.size)}</td>
+                  <td className="small faint">{relativeTime(rel.createdAt ?? '')}</td>
+                  <td className="right">
+                    <button
+                      className="btn btn-sm"
+                      disabled={busy === rel.id}
+                      onClick={async () => {
+                        setBusy(rel.id)
+                        try {
+                          const path = await api.DownloadUpdate(rel)
+                          toast.push('已下载，正在替换并重启…')
+                          await api.ApplyUpdate(path)
+                        } catch (err) {
+                          toast.error(err)
+                        } finally {
+                          setBusy('')
+                        }
+                      }}
+                    >
+                      {busy === rel.id ? '安装中…' : '安装此版本'}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={async () => {
+                        try {
+                          await api.DeleteServerRelease(rel.id)
+                          await loadReleases()
+                          toast.push('已删除发布')
+                        } catch (err) {
+                          toast.error(err)
+                        }
+                      }}
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {status && (
           <div className="col" style={{ marginTop: 12, gap: 8 }}>
             <div className="row">
               <Tag kind={status.available ? 'warn' : 'ok'}>

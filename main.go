@@ -29,7 +29,8 @@ func main() {
 		MinHeight:   680,
 		StartHidden: startHidden,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:  assets,
+			Handler: a.MediaHandler(),
 		},
 		BackgroundColour: &options.RGBA{R: 18, G: 20, B: 26, A: 1},
 		OnStartup:        a.Startup,

@@ -488,6 +488,8 @@ export interface ScreenshotSettings {
   watchClipboard: boolean
   copyToClipboard: boolean
   openAfterCapture: boolean
+  hotkey?: string
+  autoUpload?: boolean
 }
 
 /* ---------------- updates ---------------- */
@@ -506,6 +508,7 @@ export interface UpdateRelease {
   url?: string
   downloads?: number
   mandatory?: boolean
+  createdAt?: string
 }
 
 export interface UpdateStatus {
@@ -630,6 +633,36 @@ export interface ActiveProxyInfo {
   node?: MiproxyNode
   addr?: string
   external?: boolean
+}
+
+/* ---------------- proxy chain / rules / geoip ---------------- */
+
+export interface ProxyChainSettings {
+  mode: string
+  nodeIds?: string[]
+}
+
+export interface DirectRuleSettings {
+  useGeoIP: boolean
+  countries?: string[]
+  rules?: string[]
+}
+
+export interface GeoIPStatus {
+  ready: boolean
+  path: string
+  size: number
+  updatedAt?: string
+  downloading: boolean
+  error?: string
+}
+
+export interface LatencyEntry {
+  key: string
+  latencyMs: number
+  ok: boolean
+  error?: string
+  at: string
 }
 /* ---------------- events ---------------- */
 
@@ -854,6 +887,24 @@ const rawApi = {
       req,
     ),
 
+  // proxy chain, rules, geoip, latency, media, hotkey
+  GetProxyChain: () => call<ProxyChainSettings>('GetProxyChain'),
+  SaveProxyChain: (cfg: ProxyChainSettings) => call<ProxyChainSettings>('SaveProxyChain', cfg),
+  GetDirectRules: () => call<DirectRuleSettings>('GetDirectRules'),
+  SaveDirectRules: (cfg: DirectRuleSettings) => call<DirectRuleSettings>('SaveDirectRules', cfg),
+  GeoIPStatus: () => call<GeoIPStatus>('GeoIPStatus'),
+  DownloadGeoIP: () => call<GeoIPStatus>('DownloadGeoIP'),
+  GeoIPCountries: () => call<string[]>('GeoIPCountries'),
+  ScopeInternalProxy: (scope: string) => call<boolean>('ScopeInternalProxy', scope),
+  SetScopeInternalProxy: (scope: string, use: boolean) => call<Settings>('SetScopeInternalProxy', scope, use),
+  LoadLatencyResults: () => call<Record<string, LatencyEntry>>('LoadLatencyResults'),
+  SaveLatencyResults: (entries: LatencyEntry[]) => call<void>('SaveLatencyResults', entries),
+  RegisterMedia: (path: string) => call<string>('RegisterMedia', path),
+  PreviewCloudMedia: (path: string) => call<string>('PreviewCloudMedia', path),
+  PreviewSFTPMedia: (sessionId: string, path: string) => call<string>('PreviewSFTPMedia', sessionId, path),
+  SaveScreenshotHotkey: (combo: string) => call<string>('SaveScreenshotHotkey', combo),
+  HotkeySupported: () => call<boolean>('HotkeySupported'),
+
   // transfers
   ListTransfers: () => call<TransferTask[]>('ListTransfers'),
   PauseTransfer: (id: string) => call<void>('PauseTransfer', id),
@@ -958,6 +1009,12 @@ const ARRAY_METHODS = [
   'ListServerFiles',
   'ListSubscriptions',
   'ListTransfers',
+  'GetProxyChain',
+  'GetDirectRules',
+  'GeoIPStatus',
+  'GeoIPCountries',
+  'LoadLatencyResults',
+  'HotkeySupported',
   'SubscriptionNodes',
   'ListCustomNodes',
   'ListScreenshots',
@@ -999,6 +1056,9 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
+
 
 
 

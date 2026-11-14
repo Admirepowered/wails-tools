@@ -3,7 +3,8 @@
 package version
 
 // Version is the semantic version of this build.
-const Version = "1.1.0"
+const Version = "1.2.0"
 
 // String returns the version without a leading "v".
 func String() string { return Version }
+

@@ -78,6 +78,25 @@ func (p ProxySettings) Resolve(scope string) ProxyRule {
 	return p.Default.Clone()
 }
 
+// ProxyChainSettings routes the engine's upstream through the sync server or
+// through one or two existing nodes (max two hops).
+type ProxyChainSettings struct {
+	// Mode is "off", "server" or "nodes".
+	Mode string `json:"mode"`
+	// NodeIDs lists custom node IDs used as hops (max 2).
+	NodeIDs []string `json:"nodeIds,omitempty"`
+}
+
+// DirectRuleSettings decides which destinations bypass the proxy.
+type DirectRuleSettings struct {
+	// UseGeoIP enables country based bypass using geoip.metadb.
+	UseGeoIP bool `json:"useGeoIP"`
+	// Countries lists ISO country codes that go direct (e.g. CN).
+	Countries []string `json:"countries,omitempty"`
+	// Rules lists domain suffixes, keywords or CIDRs that go direct.
+	Rules []string `json:"rules,omitempty"`
+}
+
 // ProxyRuntimeSettings configures the local proxy engine listener.
 type ProxyRuntimeSettings struct {
 	// External exposes the local proxy on 0.0.0.0 for other devices.
@@ -148,6 +167,10 @@ type ScreenshotSettings struct {
 	WatchClipboard   bool   `json:"watchClipboard"`
 	CopyToClipboard  bool   `json:"copyToClipboard"`
 	OpenAfterCapture bool   `json:"openAfterCapture"`
+	// Hotkey triggers a screenshot globally, e.g. "Ctrl+Alt+S".
+	Hotkey string `json:"hotkey"`
+	// AutoUpload mirrors new screenshots into the cloud store.
+	AutoUpload bool `json:"autoUpload"`
 }
 
 // StartupSettings controls launch-at-login and the system tray.
@@ -167,6 +190,8 @@ type Settings struct {
 	Server       ServerSettings       `json:"server"`
 	UI           UISettings           `json:"ui"`
 	ProxyRuntime ProxyRuntimeSettings `json:"proxyRuntime"`
+	ProxyChain   ProxyChainSettings   `json:"proxyChain"`
+	DirectRules  DirectRuleSettings   `json:"directRules"`
 	Update       UpdateSettings       `json:"update"`
 	Screenshots  ScreenshotSettings   `json:"screenshots"`
 	Startup      StartupSettings      `json:"startup"`
@@ -202,11 +227,15 @@ func Default() Settings {
 			GitHubBypass: true,
 		},
 		Screenshots: ScreenshotSettings{
-			Directory: filepath.Join(dir, "screenshots"),
-			Pattern:   "shot-{date}-{time}",
-			Format:    "png",
-			AutoSave:  true,
+			Directory:  filepath.Join(dir, "screenshots"),
+			Pattern:    "shot-{date}-{time}",
+			Format:     "png",
+			AutoSave:   true,
+			Hotkey:     "Ctrl+Alt+S",
+			AutoUpload: true,
 		},
+		ProxyChain:   ProxyChainSettings{Mode: "off"},
+		DirectRules:  DirectRuleSettings{UseGeoIP: false},
 		Startup:      StartupSettings{TrayEnabled: true, CloseToTray: true},
 		ProxyRuntime: ProxyRuntimeSettings{Port: 7890},
 	}

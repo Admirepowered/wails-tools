@@ -535,3 +535,56 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .scope-title { font-weight: 600; }
 .scope-desc { font-size: 11.5px; color: var(--text-faint); }
 
+
+/* ---------- media viewer ---------- */
+.media-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 24px;
+}
+.media-panel {
+  width: min(1100px, 94vw);
+  max-height: 88vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.media-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  overflow: auto;
+  background: #05070a;
+}
+.media-image,
+.media-video {
+  max-width: 100%;
+  max-height: calc(88vh - 90px);
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+.media-text {
+  width: 100%;
+  height: calc(88vh - 110px);
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}

@@ -72,6 +72,18 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
 
   useEffect(() => {
     void load()
+    void (async () => {
+      try {
+        const saved = await api.LoadLatencyResults()
+        const map: Record<string, { ok: boolean; latencyMs: number; error?: string }> = {}
+        for (const [key, entry] of Object.entries(saved ?? {})) {
+          map[key] = { ok: entry.ok, latencyMs: entry.latencyMs, error: entry.error }
+        }
+        setTests((prev) => ({ ...map, ...prev }))
+      } catch {
+        /* 历史测速结果可选 */
+      }
+    })()
   }, [load])
 
   useEffect(() => {
@@ -114,11 +126,16 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   }
 
   const testNode = async (node: MiproxyNode) => {
-    const key = nodeKey(node)
+    const key = latencyKey(node)
     setTests((t) => ({ ...t, [key]: null }))
     try {
       const res = await api.TestProxyNode(node)
       setTests((t) => ({ ...t, [key]: res }))
+      void api
+        .SaveLatencyResults([
+          { key, latencyMs: res.latencyMs ?? 0, ok: res.ok, error: res.error, at: new Date().toISOString() },
+        ])
+        .catch(() => {})
     } catch (err) {
       toast.error(err)
     }
@@ -148,11 +165,25 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
         const next = { ...prev }
         results.forEach((r) => {
           const node = nodes[r.index]
-          if (node) next[nodeKey(node, r.index)] = { ok: r.ok, latencyMs: r.latencyMs, error: r.error }
+          if (node) next[latencyKey(node)] = { ok: r.ok, latencyMs: r.latencyMs, error: r.error }
         })
         return next
       })
       const ok = results.filter((r) => r.ok).length
+      void api
+        .SaveLatencyResults(
+          results.map((r) => {
+            const node = nodes[r.index]
+            return {
+              key: node ? latencyKey(node) : String(r.index),
+              latencyMs: r.latencyMs ?? 0,
+              ok: r.ok,
+              error: r.error,
+              at: new Date().toISOString(),
+            }
+          }),
+        )
+        .catch(() => {})
       toast.push(`测速完成：${ok}/${results.length} 个节点可用`)
     } catch (err) {
       toast.error(err)
@@ -370,7 +401,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
               </thead>
               <tbody>
                 {nodeRows.map((node, index) => {
-                  const key = nodeKey(node, index)
+                  const key = latencyKey(node)
                   const result = tests[key]
                   const active = runtime?.running && runtime.node?.name === node.name && runtime.node?.server === node.server
                   return (
@@ -466,7 +497,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             </thead>
             <tbody>
               {customNodes.map((node, index) => {
-                const key = nodeKey(node, index)
+                const key = latencyKey(node)
                 const result = tests[key]
                 const active = runtime?.running && runtime.node?.id !== '' && runtime.node?.id === node.id
                 return (
@@ -605,6 +636,10 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
       toast.error(err)
     }
   }
+}
+
+function latencyKey(node: MiproxyNode): string {
+  return `${node.protocol}|${node.server}|${node.port}|${node.name}`
 }
 
 function nodeKey(node: MiproxyNode, index = 0): string {
@@ -778,6 +813,8 @@ function NodeEditor({
     </Modal>
   )
 }
+
+
 
 
 

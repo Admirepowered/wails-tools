@@ -1,5 +1,7 @@
 # WailsTools
 
+> 当前版本：**v1.2.0**（每次发布构建自动 +0.1）
+
 一套 Go + Wails v2 的桌面客户端，以及配套的 Go 同步服务端。覆盖：云同步笔记、文件管理、SSH（含跳板与服务器中转）、FTP/FTPS、HTTP 下载工具、网盘管理（夸克 / UC / 百度）、按连接类型独立配置的代理。
 
 界面为深色优先的自绘 UI（非模板、非参考项目界面）。
@@ -47,10 +49,13 @@
 | SSH 管理 | 主机/分组/搜索、密码 / 密钥 / keyboard-interactive / agent 认证、RSA·Ed25519·ECDSA 密钥生成与导入、公钥复制、私钥导出、主机指纹 TOFU 固定、直连 / 跳板机链 / 服务端中转三种路由、SFTP 浏览与传输、交互式终端（PTY）、单条命令执行 |
 | FTP 管理 | FTP / 隐式 FTPS / 显式 FTPS（AUTH TLS）、被动模式、目录浏览、上传/下载、新建/重命名/删除、多会话 |
 | 下载工具 | HTTP(S)、多连接分段下载、断点续传、自动重试、限速、进度/速度事件、任务队列与并发控制、按任务选择走代理或直连、文件名识别（Content-Disposition） |
-| 网盘管理 | 夸克网盘、UC 网盘、百度网盘：Cookie 账号、文件列表/搜索、上传、下载（解析直链后交给下载引擎）、分享、回收站、视频预览 || 代理 | HTTP CONNECT 与 SOCKS5、账号密码、按作用域（HTTP 下载 / 网盘 / SSH / FTP / 同步）分别设置走或不走代理、绕过列表（后缀与 CIDR）、连通性测试、一键全部直连 |
+| 网盘管理 | 夸克网盘、UC 网盘、百度网盘：Cookie 账号、文件列表/搜索、上传、下载（解析直链后交给下载引擎）、分享、回收站、视频预览 |
+| 代理 | HTTP CONNECT 与 SOCKS5、账号密码、**每个工具单独选择是否使用内部代理**、代理链路（服务器跳转 / 节点中转，最多 2 跳）、直连规则（域名/IP/CIDR + geoip 国家直连）、系统代理、连通性测试 |
 | 代理订阅 | 订阅链接自动拉取节点（明文/Base64/Clash YAML），定时后台刷新，流量与到期信息；支持 VMess / VLESS / Trojan / Shadowsocks / HTTP / SOCKS5，节点一键切换、整表批量测速（http://www.gstatic.com/generate_204）并显示延迟 |
-| 代理引擎 | 由 C 版 miproxy/Pulse 内核重写为 Go：VMess（AEAD/legacy 头 + WS/TLS）、VLESS、Trojan、Shadowsocks(AEAD)、本地 SOCKS5+HTTP 混合入站；「内部代理」模式一键让所有连接走当前节点，无需逐项配置；支持外部共享（0.0.0.0 + 认证）与系统代理开关 |
-| 截图自动保存 | 一键截屏（主屏/全部屏幕）自动落盘、剪贴板图片自动保存、命名模板与格式可选、缩略图画廊 |
+| 代理引擎 | 由 C 版 miproxy/Pulse 内核重写为 Go：VMess（AEAD/legacy 头 + WS/TLS）、VLESS、Trojan、Shadowsocks(AEAD)、本地 SOCKS5+HTTP 混合入站（多线程并发）；支持外部共享（0.0.0.0 + 认证）与系统代理开关 |
+| 代理链路 | 可选「从服务器跳转」或「用已有节点中转」，最多 2 跳；直连规则支持自定义域名/IP/CIDR 与 **geoip.metadb 按国家直连**（MetaCubeX 数据，内置下载） |
+| 截图自动保存 | 一键截屏（主屏/全部屏幕）、**全局快捷键（默认 Ctrl+Alt+S）**、自动落盘、剪贴板图片自动保存、**截图自动同步到服务器**、命名模板与格式可选、缩略图画廊 |
+| 媒体查看 | 内置图片 / 视频 / 音频 / 文本查看器，可直接预览本地、云端与 SFTP 上的文件（WebView 内流式播放） |
 | 自动更新 | **默认从同步服务器按哈希检查更新**（比较运行中可执行文件的 SHA-256 与服务器构建哈希，版本号仅作兜底）；服务端分发构建（管理员上传、按平台/通道查询、SHA-256 校验），失败回退 GitHub Release；**绕过 SNI 检测**（固定 IP + Host 复用 + TLS ClientHello 分片） |
 | 系统托盘 | 原生 Win32 托盘图标（无第三方依赖）：双击显示窗口、右键菜单（截图/同步/连接服务器/剪贴板/自启动/退出）、悬停显示连接状态、关闭窗口最小化到托盘 |
 | 开机自启动 | Windows 注册表 Run 项 / Linux autostart 桌面项，一键开关 |
@@ -211,7 +216,7 @@ $env:WT_PASS = 'password'
 ./scripts/build-and-publish.ps1 -Channel stable -Notes "本次更新说明"
 ```
 
-`cmd/wt-publish` 通过 wire 协议（UDP 优先）把 `build/bin/WailsTools.exe` 连同版本、平台、SHA-256 上传到服务器；客户端默认从服务器按哈希检查更新，哈希不同即提示更新。
+`cmd/wt-publish` 通过 wire 协议（UDP 优先）把 `build/bin/WailsTools.exe` 连同版本、平台、SHA-256 上传到服务器；脚本默认每次发布把次版本号 +0.1 并同步更新 README 的版本行。客户端默认从服务器按哈希检查更新，也可以在「更新」页从已发布构建列表中任选一个版本安装。
 
 ## 部署与发布
 
@@ -232,6 +237,9 @@ server/cmd/wt-server     服务端可执行
 server/internal/{api,store,auth,server}
 frontend/                React + TypeScript 界面
 ```
+
+
+
 
 
 

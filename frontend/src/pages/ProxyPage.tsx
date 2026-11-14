@@ -3,13 +3,17 @@ import {
   api,
   onEvent,
   type ActiveProxyInfo,
+  type DirectRuleSettings,
+  type GeoIPStatus,
+  type MiproxyNode,
+  type ProxyChainSettings,
   type ProxyInfo,
   type ProxyRule,
   type ProxyRuntimeSettings,
   type Settings,
   type TestResult,
 } from '../lib/api'
-import { Field, Switch, Tag, useToast } from '../components/ui'
+import { Field, Spinner, Switch, Tag, useToast } from '../components/ui'
 import { useAutoSave } from '../lib/autosave'
 import type { PageProps } from '../App'
 
@@ -34,6 +38,7 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [probeUrl, setProbeUrl] = useState('http://www.gstatic.com/generate_204')
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
+  const [internal, setInternal] = useState<Record<string, boolean>>({})
   const [mode, setMode] = useState<'off' | 'internal'>('off')
   const [active, setActive] = useState<ActiveProxyInfo | null>(null)
   const [runtimeCfg, setRuntimeCfg] = useState<ProxyRuntimeSettings>({ external: false, port: 7890 })
@@ -66,6 +71,10 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
         }),
       )
       setState(Object.fromEntries(entries))
+      const internalEntries = await Promise.all(
+        list.map(async (scope) => [scope, await api.ScopeInternalProxy(scope)] as const),
+      )
+      setInternal(Object.fromEntries(internalEntries))
     } catch (err) {
       toast.error(err)
     }
@@ -346,6 +355,11 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
       </div>
 
       <div className="grid-2" style={{ marginTop: 14 }}>
+        <ChainCard onChanged={() => void loadRuntime()} />
+        <DirectRulesCard onChanged={() => void loadRuntime()} />
+      </div>
+
+      <div className="grid-2" style={{ marginTop: 14 }}>
         {scopes.map((scope) => {
           const st = state[scope] ?? { rule: normalizeRule(undefined), override: false }
           const enabled = st.rule.mode !== 'off' && !!st.rule.url
@@ -368,6 +382,26 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
                     })
                   }
                 />
+                <button
+                  className="btn btn-sm"
+                  disabled={!active?.running}
+                  title={active?.running ? '使用内部代理（当前节点）' : '请先启用节点'}
+                  onClick={async () => {
+                    if (!active?.running) {
+                      toast.push('请先在订阅页启用一个节点', 'warn')
+                      return
+                    }
+                    try {
+                      await api.SetScopeInternalProxy(scope, !internal[scope])
+                      await reloadSettings()
+                      await load()
+                    } catch (err) {
+                      toast.error(err)
+                    }
+                  }}
+                >
+                  {internal[scope] ? '已用内部代理' : '内部代理'}
+                </button>
               </div>
 
               <div className="row" style={{ gap: 8 }}>
@@ -462,4 +496,195 @@ function normalizeRule(rule?: ProxyRule): ProxyRule {
 
 
 
+
+
+/* ---------------- chain ---------------- */
+
+function ChainCard({ onChanged }: { onChanged: () => void }) {
+  const toast = useToast()
+  const [cfg, setCfg] = useState<ProxyChainSettings>({ mode: 'off', nodeIds: [] })
+  const [nodes, setNodes] = useState<MiproxyNode[]>([])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [chain, custom] = await Promise.all([api.GetProxyChain(), api.ListCustomNodes()])
+        setCfg({ mode: chain.mode || 'off', nodeIds: chain.nodeIds ?? [] })
+        setNodes(custom)
+      } catch (err) {
+        toast.error(err)
+      }
+    })()
+  }, [toast])
+
+  const save = async (next: ProxyChainSettings) => {
+    setBusy(true)
+    try {
+      const saved = await api.SaveProxyChain(next)
+      setCfg({ mode: saved.mode, nodeIds: saved.nodeIds ?? [] })
+      onChanged()
+      toast.push('代理链路已更新')
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggleNode = (id: string) => {
+    const cur = cfg.nodeIds ?? []
+    let next: string[]
+    if (cur.includes(id)) {
+      next = cur.filter((x) => x !== id)
+    } else {
+      if (cur.length >= 2) {
+        toast.push('最多选择两个中转节点', 'warn')
+        return
+      }
+      next = [...cur, id]
+    }
+    void save({ ...cfg, nodeIds: next })
+  }
+
+  return (
+    <div className="card">
+      <h3 className="card-title">代理链路</h3>
+      <p className="card-desc">可让出口先经过同步服务器或已有节点中转，最多 2 跳。</p>
+      <div className="row" style={{ gap: 8 }}>
+        <select
+          className="select"
+          style={{ width: 200 }}
+          value={cfg.mode}
+          onChange={(e) => void save({ ...cfg, mode: e.target.value })}
+        >
+          <option value="off">直连（不中转）</option>
+          <option value="server">从服务器跳转</option>
+          <option value="nodes">用节点中转</option>
+        </select>
+        {busy ? <Spinner label="" /> : null}
+      </div>
+      {cfg.mode === 'nodes' ? (
+        <div className="col" style={{ marginTop: 10, gap: 6, maxHeight: 180, overflow: 'auto' }}>
+          {nodes.length === 0 ? (
+            <div className="small faint">还没有自定义节点，可先在「订阅」页导入。</div>
+          ) : (
+            nodes.map((n) => {
+              const order = (cfg.nodeIds ?? []).indexOf(n.id ?? '')
+              return (
+                <label key={n.id} className="row" style={{ gap: 8 }}>
+                  <input type="checkbox" checked={order >= 0} onChange={() => toggleNode(n.id ?? '')} />
+                  <span className="truncate" style={{ flex: 1 }}>
+                    {n.name}
+                  </span>
+                  <span className="small faint mono">
+                    {n.server}:{n.port}
+                  </span>
+                  {order >= 0 ? <Tag kind="info">第 {order + 1} 跳</Tag> : null}
+                </label>
+              )
+            })
+          )}
+        </div>
+      ) : null}
+      {cfg.mode === 'server' ? <div className="small faint" style={{ marginTop: 8 }}>需要连接同步服务器；未连接时会自动退回直连。</div> : null}
+    </div>
+  )
+}
+
+/* ---------------- direct rules ---------------- */
+
+function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
+  const toast = useToast()
+  const [cfg, setCfg] = useState<DirectRuleSettings>({ useGeoIP: false, countries: [], rules: [] })
+  const [geo, setGeo] = useState<GeoIPStatus | null>(null)
+  const [countries, setCountries] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [ruleText, setRuleText] = useState('')
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [rules, status] = await Promise.all([api.GetDirectRules(), api.GeoIPStatus()])
+        setCfg({ useGeoIP: rules.useGeoIP, countries: rules.countries ?? [], rules: rules.rules ?? [] })
+        setRuleText((rules.rules ?? []).join('\n'))
+        setGeo(status)
+        if (status.ready) setCountries(await api.GeoIPCountries())
+      } catch (err) {
+        toast.error(err)
+      }
+    })()
+  }, [toast])
+
+  const save = async (next: DirectRuleSettings) => {
+    try {
+      await api.SaveDirectRules(next)
+      setCfg(next)
+      onChanged()
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
+  const download = async () => {
+    setBusy(true)
+    try {
+      const status = await api.DownloadGeoIP()
+      setGeo(status)
+      setCountries(await api.GeoIPCountries())
+      toast.push('geoip 数据库已更新')
+    } catch (err) {
+      toast.error(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selected = cfg.countries ?? []
+  return (
+    <div className="card">
+      <div className="row">
+        <h3 className="card-title" style={{ margin: 0 }}>
+          直连规则
+          {geo?.ready ? <Tag kind="ok">geoip 已就绪</Tag> : <Tag kind="warn">未下载</Tag>}
+        </h3>
+        <div className="spacer" />
+        <button className="btn btn-sm" disabled={busy} onClick={download}>
+          {busy ? '下载中…' : geo?.ready ? '更新 geoip' : '下载 geoip'}
+        </button>
+      </div>
+      <p className="card-desc">命中的目标直接连接，不走代理。</p>
+      <label className="row" style={{ gap: 8 }}>
+        <Switch checked={cfg.useGeoIP} onChange={(v) => void save({ ...cfg, useGeoIP: v })} />
+        <span className="small">按国家 IP 直连（geoip.metadb）</span>
+      </label>
+      {cfg.useGeoIP ? (
+        <div className="row row-wrap" style={{ gap: 6, marginTop: 8, maxHeight: 120, overflow: 'auto' }}>
+          {(countries.length > 0 ? countries : ['CN', 'HK', 'TW', 'JP', 'US']).slice(0, 60).map((code) => {
+            const on = selected.includes(code)
+            return (
+              <button
+                key={code}
+                className={`btn btn-sm ${on ? 'btn-primary' : ''}`}
+                onClick={() => void save({ ...cfg, countries: on ? selected.filter((c) => c !== code) : [...selected, code] })}
+              >
+                {code}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+      <Field label="自定义直连规则（每行一个域名后缀 / IP / CIDR）" hint="例如 example.com、10.0.0.0/8、192.168.1.1">
+        <textarea
+          className="textarea"
+          style={{ minHeight: 80 }}
+          value={ruleText}
+          onChange={(e) => setRuleText(e.target.value)}
+          onBlur={() => void save({ ...cfg, rules: ruleText.split('\n').map((s) => s.trim()).filter(Boolean) })}
+          placeholder="cn.example.com&#10;10.0.0.0/8"
+        />
+      </Field>
+    </div>
+  )
+}
 

@@ -24,6 +24,12 @@ type StartOptions struct {
 	Password string
 	// Port is the preferred listen port (0 = random).
 	Port int
+	// Chain lists intermediate hops before Node (max two total).
+	Chain []miproxy.Node
+	// Relay reaches the first hop through the sync server when set.
+	Relay miproxy.RelayFunc
+	// Direct decides whether a destination bypasses the proxy.
+	Direct func(host string) bool
 }
 
 // Status describes the running local proxy.
@@ -76,6 +82,9 @@ func (s *Service) Start(node miproxy.Node, opts StartOptions) (Status, error) {
 	}
 	srv, err := miproxy.StartServer(miproxy.ServerConfig{
 		Node:       node,
+		Chain:      opts.Chain,
+		Relay:      opts.Relay,
+		Direct:     opts.Direct,
 		ListenAddr: listen,
 		Username:   opts.Username,
 		Password:   opts.Password,

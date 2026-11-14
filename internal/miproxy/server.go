@@ -18,6 +18,12 @@ import (
 // ServerConfig configures the local mixed inbound.
 type ServerConfig struct {
 	Node Node
+	// Chain lists intermediate hops before Node (max two total).
+	Chain []Node
+	// Relay reaches the first hop through an external relay when set.
+	Relay RelayFunc
+	// Direct decides whether a destination bypasses the proxy.
+	Direct func(host string) bool
 	// ListenAddr is the bind address, e.g. "127.0.0.1:0" (internal only) or
 	// "0.0.0.0:1080" (shareable with other machines).
 	ListenAddr string
@@ -72,7 +78,7 @@ func StartServer(cfg ServerConfig) (*Server, error) {
 	s := &Server{
 		cfg:     cfg,
 		ln:      ln,
-		dialer:  NewDialer(cfg.Node, 15*time.Second),
+		dialer:  NewChainDialer(append(append([]Node{}, cfg.Chain...), cfg.Node), cfg.Relay, cfg.Direct, 15*time.Second),
 		logf:    cfg.Logf,
 		started: time.Now(),
 		conns:   map[net.Conn]struct{}{},

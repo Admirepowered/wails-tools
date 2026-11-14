@@ -9,6 +9,7 @@ param(
   [string]$Notes = '',
   [string]$Version = '',
   [switch]$SkipBuild,
+  [switch]$NoBump,
   [switch]$NoUDP
 )
 
@@ -16,6 +17,29 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
+  if (-not $NoBump) {
+    $versionFile0 = Join-Path $root 'internal\version\version.go'
+    $m0 = Select-String -Path $versionFile0 -Pattern 'Version\s*=\s*"(\d+)\.(\d+)\.(\d+)"'
+    if ($m0) {
+      $major = [int]$m0.Matches[0].Groups[1].Value
+      $minor = [int]$m0.Matches[0].Groups[2].Value + 1
+      $Version = "$major.$minor.0"
+      $raw = Get-Content $versionFile0 -Raw
+      $raw = $raw -replace 'const Version = "[\d\.]+"', "const Version = `"$Version`""
+      Set-Content -Path $versionFile0 -Value $raw -Encoding utf8
+      $readme = Join-Path $root 'README.md'
+      if (Test-Path $readme) {
+        $rm = Get-Content $readme -Raw
+        if ($rm -match '当前版本：\*\*v[\d\.]+\*\*') {
+          $rm = $rm -replace '当前版本：\*\*v[\d\.]+\*\*', "当前版本：**v$Version**"
+        } else {
+          $rm = "# WailsTools`n`n> 当前版本：**v$Version**`n" + $rm
+        }
+        Set-Content -Path $readme -Value $rm -Encoding utf8
+      }
+      Write-Host "==> 版本号提升到 v$Version" -ForegroundColor Cyan
+    }
+  }
   if (-not $Version) {
     $versionFile = Join-Path $root 'internal\version\version.go'
     $match = Select-String -Path $versionFile -Pattern 'Version\s*=\s*"([^"]+)"'
@@ -59,3 +83,4 @@ try {
 } finally {
   Pop-Location
 }
+

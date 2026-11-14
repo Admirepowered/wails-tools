@@ -13,6 +13,8 @@ export default function ScreenshotsPage(_props: PageProps) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [watching, setWatching] = useState(false)
+  const [hotkey, setHotkey] = useState('')
+  const [autoUpload, setAutoUpload] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -24,6 +26,8 @@ export default function ScreenshotsPage(_props: PageProps) {
       ])
       setItems(list)
       setSettings(cfg)
+      setHotkey(cfg.hotkey ?? '')
+      setAutoUpload(!!cfg.autoUpload)
       setDisplays(disp)
       setWatching(watch)
       // Thumbnails are loaded lazily but eagerly enough to feel instant.
@@ -82,6 +86,20 @@ export default function ScreenshotsPage(_props: PageProps) {
   }
 
   const patch = (next: Partial<ScreenshotSettings>) => setSettings((cur) => (cur ? { ...cur, ...next } : cur))
+
+  const saveAutoUpload = async (v: boolean) => {
+    if (!settings) return
+    const next = { ...settings, autoUpload: v }
+    setAutoUpload(v)
+    setSettings(next)
+    try {
+      const saved = await api.SaveScreenshotSettings(next)
+      setSettings(saved)
+      toast.push(v ? '新截图会自动同步到云端' : '已关闭自动同步')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
 
   const saveSettings = async () => {
     if (!settings) return
@@ -173,6 +191,34 @@ export default function ScreenshotsPage(_props: PageProps) {
                 <Switch checked={settings.autoSave} onChange={(v) => patch({ autoSave: v })} />
                 <span className="small">截图后自动保存</span>
               </label>
+              <label className="row" style={{ gap: 8 }}>
+                <Switch checked={autoUpload} onChange={(v) => void saveAutoUpload(v)} />
+                <span className="small">截图自动同步到服务器</span>
+              </label>
+              <div className="row" style={{ gap: 8 }}>
+                <span className="small">全局快捷键</span>
+                <input
+                  className="input mono"
+                  style={{ width: 140 }}
+                  value={hotkey}
+                  onChange={(e) => setHotkey(e.target.value)}
+                  placeholder="Ctrl+Alt+S"
+                />
+                <button
+                  className="btn btn-sm"
+                  onClick={async () => {
+                    try {
+                      const saved = await api.SaveScreenshotHotkey(hotkey)
+                      setHotkey(saved)
+                      toast.push(saved ? `快捷键已设为 ${saved}` : '已关闭快捷键')
+                    } catch (err) {
+                      toast.error(err)
+                    }
+                  }}
+                >
+                  应用
+                </button>
+              </div>
               <label className="row" style={{ gap: 8 }}>
                 <Switch
                   checked={settings.watchClipboard}

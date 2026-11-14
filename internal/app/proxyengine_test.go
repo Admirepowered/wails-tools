@@ -39,16 +39,23 @@ func TestActivateProxyNodeEngine(t *testing.T) {
 		t.Fatalf("engine not running: %+v", st)
 	}
 
+	// Switching a node must not silently rewrite per-tool proxy settings.
 	cfg := store.Get()
-	for _, scope := range []string{settings.ScopeHTTP, settings.ScopeNetdisk, settings.ScopeSSH, settings.ScopeFTP} {
-		rule := cfg.Proxy.Resolve(scope)
-		if rule.Mode != "socks5" || rule.URL != st.Addr {
-			t.Fatalf("scope %s not pointed at the engine: %+v", scope, rule)
+	for _, scope := range settings.Scopes {
+		if rule := cfg.Proxy.Resolve(scope); rule.Mode != "off" {
+			t.Fatalf("scope %s was modified by activation: %+v", scope, rule)
 		}
 	}
-	// The sync link must stay direct.
-	if rule := cfg.Proxy.Resolve(settings.ScopeSync); rule.Mode != "off" {
-		t.Fatalf("sync scope must stay direct: %+v", rule)
+	// Each tool can opt in explicitly.
+	if _, err := a.SetScopeInternalProxy(settings.ScopeHTTP, true); err != nil {
+		t.Fatalf("enable scope: %v", err)
+	}
+	rule := store.Get().Proxy.Resolve(settings.ScopeHTTP)
+	if rule.Mode != "socks5" || rule.URL != st.Addr {
+		t.Fatalf("scope not pointed at the engine: %+v", rule)
+	}
+	if other := store.Get().Proxy.Resolve(settings.ScopeSSH); other.Mode != "off" {
+		t.Fatalf("unrelated scope changed: %+v", other)
 	}
 
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -95,16 +102,14 @@ func TestActivatePlainUpstreamNode(t *testing.T) {
 	if res["mode"] != "upstream" {
 		t.Fatalf("expected upstream mode, got %v", res["mode"])
 	}
-	rule := store.Get().Proxy.Resolve(settings.ScopeHTTP)
-	if rule.Mode != "socks5" || rule.URL != "10.0.0.5:1080" || rule.Username != "u" {
-		t.Fatalf("unexpected rule: %+v", rule)
+	// Upstream nodes are recorded but scopes stay untouched until a tool opts in.
+	for _, scope := range settings.Scopes {
+		if rule := store.Get().Proxy.Resolve(scope); rule.Mode != "off" {
+			t.Fatalf("scope %s was modified by activation: %+v", scope, rule)
+		}
 	}
-	// Switching a node now applies to every scope.
-	if other := store.Get().Proxy.Resolve(settings.ScopeSSH); other.URL != rule.URL {
-		t.Fatalf("scope not switched: %+v", other)
-	}
-	if store.Get().Proxy.Mode != ProxyModeInternal {
-		t.Fatalf("mode not internal: %+v", store.Get().Proxy.Mode)
+	if res["rule"] == nil {
+		t.Fatalf("upstream rule missing: %+v", res)
 	}
 }
 

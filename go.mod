@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/jlaffaye/ftp v0.2.4
+	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pkg/sftp v1.13.12
 	github.com/quic-go/quic-go v0.65.0
 	github.com/wailsapp/wails/v2 v2.12.0

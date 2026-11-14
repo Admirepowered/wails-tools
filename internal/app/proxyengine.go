@@ -64,11 +64,7 @@ func (a *App) ActivateProxyNode(node miproxy.Node) (map[string]any, error) {
 			_ = a.disableSystemProxy()
 		}
 	} else {
-		opts := proxysvc.StartOptions{External: rt.External, Username: rt.Username, Password: rt.Password}
-		if rt.External && rt.Port > 0 {
-			opts.Port = rt.Port
-		}
-		st, err := a.proxySvc.Start(node, opts)
+		st, err := a.startEngine(node)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +74,6 @@ func (a *App) ActivateProxyNode(node miproxy.Node) (map[string]any, error) {
 			rule.Username = rt.Username
 			rule.Password = rt.Password
 		}
-		// Keep the OS proxy in sync when it was already enabled.
 		if rt.SystemProxy && rt.External {
 			if err := sysproxy.Enable(hostPortOf("127.0.0.1", port)); err != nil {
 				a.emit("proxy:error", "系统代理设置失败: "+err.Error())
@@ -86,13 +81,11 @@ func (a *App) ActivateProxyNode(node miproxy.Node) (map[string]any, error) {
 		}
 	}
 
-	cfg, err := a.applyInternalMode(rule)
-	if err != nil {
-		return nil, err
-	}
+	// Switching nodes only changes the engine; per-tool proxy scopes are left
+	// untouched so each tool decides whether to use the internal proxy.
 	st := a.proxySvc.Status()
 	a.emit("proxy:status", st)
-	return map[string]any{"mode": mode, "status": st, "rule": rule, "settings": cfg, "node": node}, nil
+	return map[string]any{"mode": mode, "status": st, "rule": rule, "node": node}, nil
 }
 
 // applyInternalMode stores the rule for every scope and marks the mode.

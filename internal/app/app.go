@@ -16,6 +16,8 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"wailstools/internal/dlengine"
+	"wailstools/internal/geodata"
+	"wailstools/internal/hotkey"
 	"wailstools/internal/netdisk"
 	"wailstools/internal/notes"
 	"wailstools/internal/paths"
@@ -53,6 +55,9 @@ type App struct {
 	proxySvc    *proxysvc.Service
 	customNodes *proxysvc.NodeStore
 	transfers   *transfermgr.Manager
+	geo         *geodata.DB
+	media       *mediaRegistry
+	hotkey      *hotkey.Hotkey
 
 	mu      sync.Mutex
 	terms   map[string]*sshmgr.Terminal
@@ -154,8 +159,26 @@ func New() (*App, error) {
 			a.customNodes = ns
 		}
 	}
+	a.geo = geodata.Open(root)
+	a.media = newMediaRegistry()
 	a.initTransfers()
 	a.shots = shot.NewManager(store, nil)
+	a.shots.SetSavedHandler(func(item shot.Item) {
+		if !a.settings.Get().Screenshots.AutoUpload || a.link == nil || !a.link.Available() {
+			return
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			target := "/screenshots/" + filepath.Base(item.Path)
+			_ = a.link.MkdirRemote(ctx, "/screenshots")
+			if _, err := a.link.Upload(ctx, item.Path, target, nil); err != nil {
+				a.emit("screenshot:upload-failed", err.Error())
+				return
+			}
+			a.emit("screenshot:uploaded", map[string]any{"path": target, "name": filepath.Base(item.Path)})
+		}()
+	})
 	a.shots.SetSavedHandler(func(item shot.Item) {
 		a.emit("screenshot:saved", item)
 	})
@@ -174,7 +197,10 @@ func (a *App) Startup(ctx context.Context) {
 		a.subs.StartAutoRefresh(context.Background())
 	}
 	if cfg := a.settings.Get().Startup; cfg.TrayEnabled {
-		a.startTray()
+		if a.settings.Get().Startup.TrayEnabled {
+			a.startTray()
+		}
+		a.registerScreenshotHotkey()
 	}
 	if cfg := a.settings.Get(); cfg.Update.AutoCheck {
 		go func() {
@@ -249,6 +275,10 @@ func (a *App) Shutdown(ctx context.Context) {
 		a.shots.StopClipboardWatch()
 	}
 	a.stopTray()
+	if a.hotkey != nil {
+		a.hotkey.Unregister()
+		a.hotkey = nil
+	}
 	if a.proxySvc != nil {
 		_ = a.proxySvc.Stop()
 	}
