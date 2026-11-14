@@ -497,9 +497,13 @@ function normalizeRule(rule?: ProxyRule): ProxyRule {
 
 /* ---------------- chain ---------------- */
 
+// 最近一次成功读取的链路配置：即使后端调用失败/延迟，界面也不会退回默认值。
+let chainCache: ProxyChainSettings | null = null
+
 function ChainCard({ onChanged }: { onChanged: () => void }) {
   const toast = useToast()
-  const [cfg, setCfg] = useState<ProxyChainSettings>({ mode: 'off', nodeIds: [] })
+  const [cfg, setCfg] = useState<ProxyChainSettings>(chainCache ?? { mode: 'off', nodeIds: [] })
+  const [loaded, setLoaded] = useState(!!chainCache)
   const [nodes, setNodes] = useState<MiproxyNode[]>([])
   const [busy, setBusy] = useState(false)
 
@@ -553,7 +557,26 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
     <div className="card">
       <h3 className="card-title">代理链路</h3>
       <p className="card-desc">可让出口先经过同步服务器或已有节点中转，最多 2 跳。</p>
-      <div className="small faint mono">当前状态：mode={cfg.mode} nodeIds={(cfg.nodeIds ?? []).join(',') || '（空）'}</div>
+      <div className="row" style={{ gap: 8 }}>
+        <div className="small faint mono">
+          当前状态：mode={cfg.mode} nodeIds={(cfg.nodeIds ?? []).join(',') || '（空）'} loaded={String(loaded)}
+        </div>
+        <button
+          className="btn btn-sm"
+          onClick={async () => {
+            try {
+              const chain = await api.GetProxyChain()
+              chainCache = { mode: chain.mode || 'off', nodeIds: chain.nodeIds ?? [] }
+              setCfg(chainCache)
+              setLoaded(true)
+            } catch (err) {
+              toast.error(err)
+            }
+          }}
+        >
+          重新读取
+        </button>
+      </div>
       <div className="row" style={{ gap: 8 }}>
         <select
           className="select"
@@ -564,7 +587,10 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
             setBusy(true)
             void api
               .SetProxyChainMode(mode)
-              .then((saved) => setCfg({ mode: saved.mode, nodeIds: saved.nodeIds ?? cfg.nodeIds ?? [] }))
+              .then((saved) => {
+            chainCache = { mode: saved.mode, nodeIds: saved.nodeIds ?? cfg.nodeIds ?? [] }
+            setCfg(chainCache)
+          })
               .then(onChanged)
               .catch((err) => toast.error(err))
               .finally(() => setBusy(false))
@@ -720,6 +746,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
