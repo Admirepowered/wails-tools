@@ -27,6 +27,15 @@
 - 圆角 `--radius`，间距紧凑（8/10/14），信息密度优先。
 - **所有图片/视频必须在应用内预览**（MediaViewer），禁止调用系统外部程序打开。
 
+### 品牌图标
+- 形状：**squircle**（超椭圆 `|x|^4.2 + |y|^4.2 <= 1`，视觉圆角约 24%），铺满画布。
+- 颜色：对角渐变 **mint `#3DD3B0`（左上）→ azure `#3D9BE6`（右下）**；字色近黑 `#08120E`。
+- 字形：粗体 **WT**，字框占宽 63% / 高 35.5%，居中；`<= 24px` 时放大到 74% / 44% 并做 gamma 对比度提升，保证托盘里还能认出。
+- 字体链：`ariblk.ttf`（Arial Black）→ `arialbd.ttf` → `segoeuib.ttf`，找不到就退回 5×7 点阵字形（`drawBlockMonogram`）。
+- 生成：`internal/tray/icon.go` 负责绘制（运行时托盘用）；`go run ./cmd/wt-icon` 写出 `build/appicon.png` 与 `build/windows/icon.ico`（16/20/24/32/40/48/64/128/256 多尺寸，exe/任务栏图标用）。
+- `build/` 被 gitignore，**换机器或清空 build 后先跑一次 `go run ./cmd/wt-icon`**，否则 Wails 打包会用旧图标。
+- **alpha 语义坑**：Go 的 `image.RGBA` 是**预乘 alpha**；写 PNG 前必须转 `image.NRGBA`（否则半透明边缘出现彩色花纹）；ICO 的 32bpp BMP 需要**还原成直通 alpha**，否则边缘发黑。
+
 ### 交互约定（重要）
 1. **列表项不放操作按钮**。所有操作走**右键菜单**（`.ctx-backdrop` + `.ctx-menu` + `.ctx-item`）：
    - 订阅卡：右键 → 更新 / 编辑 / 改为走代理(直连) / 删除

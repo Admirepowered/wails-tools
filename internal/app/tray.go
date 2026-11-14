@@ -34,7 +34,7 @@ func (a *App) startTray() {
 	}
 	iconPath := ""
 	if p, err := paths.Join("tray.ico"); err == nil {
-		if err := os.WriteFile(p, tray.BuildICO(32), 0o644); err == nil {
+		if err := os.WriteFile(p, tray.BuildMultiICO([]int{16, 20, 24, 32, 40, 48}), 0o644); err == nil {
 			iconPath = p
 		}
 	}
