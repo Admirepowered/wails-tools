@@ -299,7 +299,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             <span className="small">订阅走代理</span>
           </label>
           <button className="btn" onClick={refreshAll} disabled={busy !== '' || list.length === 0}>
-            全部刷新
+            全部更新
           </button>
           <button className="btn" onClick={() => setImportOpen(true)}>
             导入节点链接
@@ -344,9 +344,8 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                     x: e.clientX,
                     y: e.clientY,
                     items: [
-                      { label: '刷新', action: () => void refreshOne(src) },
+                      { label: '更新', action: () => void refreshOne(src) },
                       { label: '编辑', action: () => setEditing(src) },
-                      { label: '查看节点', action: () => setSelected(src.id) },
                       { label: src.useProxy ? '改为直连' : '改为走代理', action: () => void api.SaveSubscription({ ...src, useProxy: !src.useProxy }).then(() => load()).catch((err) => toast.error(err)) },
                       { label: '删除', danger: true, action: () => setDeleting(src) },
                     ],
@@ -390,23 +389,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                   <span>·</span>
                   <span>{src.lastFetch ? `上次 ${relativeTime(src.lastFetch)}` : '尚未刷新'}</span>
                 </div>
-                {src.lastError ? <div className="small" style={{ color: 'var(--danger)' }}>{src.lastError}</div> : null}
-                <div className="row">
-                  <button className="btn btn-sm" disabled={busy !== ''} onClick={() => refreshOne(src)}>
-                    刷新
-                  </button>
-                  <button className="btn btn-sm" onClick={() => setEditing(src)}>
-                    编辑
-                  </button>
-                  <button className="btn btn-sm" onClick={() => setSelected(src.id)}>
-                    查看节点
-                  </button>
-                  <div className="spacer" />
-                  <button className="btn btn-danger btn-sm" onClick={() => setDeleting(src)}>
-                    删除
-                  </button>
-                </div>
-              </div>
+                {src.lastError ? <div className="small" style={{ color: 'var(--danger)' }}>{src.lastError}</div> : null}</div>
             )
           })}
         </div>
@@ -468,12 +451,6 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                               {result.ok ? `${result.latencyMs ?? 0}ms` : '失败'}
                             </span>
                           ) : null}
-                          <button className="btn btn-sm" onClick={() => testNode(node)}>
-                            测速
-                          </button>
-                          <button className="btn btn-primary btn-sm" disabled={busy === 'activate'} onClick={() => activateNode(node)}>
-                            启用
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -564,14 +541,8 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                             {result.ok ? `${result.latencyMs ?? 0}ms` : '失败'}
                           </span>
                         ) : null}
-                        <button className="btn btn-sm" onClick={() => testNode(node)}>
-                          测速
-                        </button>
                         <button className="btn btn-sm" onClick={() => setNodeModal(node)}>
                           编辑
-                        </button>
-                        <button className="btn btn-primary btn-sm" disabled={busy === 'activate'} onClick={() => activateNode(node)}>
-                          启用
                         </button>
                         <button
                           className="btn btn-danger btn-sm"
@@ -865,6 +836,8 @@ function NodeEditor({
     </Modal>
   )
 }
+
+
 
 
 
