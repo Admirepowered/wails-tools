@@ -128,7 +128,8 @@ wails build
 ### 6.1 设备上限（每用户最多 5 台）
 - 客户端持久化 `server.deviceId`（首次生成 UUID）与 `deviceName`（主机名）。
 - 登录/心跳上报设备；服务端 `devices` 桶：`userID -> {deviceId: lastSeen}`。
-- 新设备且已达 5 台 → 返回 `device_limit`；管理端可移除设备；30 天未活跃自动过期。
+- 新设备且已达 5 台 → 返回 `device_limit`；30 天未活跃自动过期。
+- 任何已登录用户都能在「同步服务」页的「我的设备」卡片自助移除（`admin.devices.self` / `admin.devices.selfRemove`），管理员也可在管理区块按用户移除。
 
 ### 6.2 管理页并入「同步服务」
 - 仅 `role=admin` 可见；区块：公开注册开关、用户列表、新增/删除用户、改角色、移除设备。
@@ -146,9 +147,13 @@ wails build
 - **bbolt 杀手坑**：写事务里绝不能再调 `db.View`（或任何自己开事务的方法）。`Update` 持有 meta 锁，嵌套读事务会永久死锁。设备桶改成在同一个 tx 内用 `readDevices(tx, userID)`；`DeleteDevice` 用 `make([]Device,0,...)` 而不是 `devices[:0]`，避免别名写回。
 - 新增用户必须显式生成 ID：`store.CreateUser` 不会补 `u.ID`，漏了会以空 key 落库（登录查不到）。
 - 设备身份要稳定：`cmd/wt-admin` 把 `server.deviceId` 固定为 `wt-admin-cli`，否则每次 CLI 运行都会占用一台设备名额。
+- **CLI 用完即注销**：`wt-admin` / `wt-publish` 登录后 `defer` 调 `admin.devices.selfRemove` 释放自己那台设备，否则 5 台上限会被工具悄悄吃掉（发布几次就登不进去了）。
+- 满额后无法登录 = 无法用 RPC 删设备（鸡生蛋）：救援入口只能是服务端离线命令，或已在册的客户端。
 - 服务端 CLI（`-list-users` / `-create-user`）在服务运行时打不开 bolt 库（文件锁 5s 超时）；管理操作改用 `cmd/wt-admin` 走 RPC，或先停服务。
+- 远程运维细节：`scp` 不认识 `-m`，要用 `-o Ciphers=... -o MACs=...`；**不要用 here-string / 管道给 ssh 传命令**（PowerShell 会补 `\r`，参数变成 `-list-users\r` 报 flag not defined），改成 `ssh host cmd args` 或 `bash -s` 并确保 LF。
 
 ### 6.5 管理运维工具
-- `cmd/wt-admin`：`-list`（默认）、`-create name:pass[:role]`、`-delete`、`-set-role`、`-devices user`、`-remove-device user:id`、`-registration on|off`、`-settings`。
+- `cmd/wt-admin`：`-list`（默认）、`-create name:pass[:role]`、`-delete`、`-set-role`、`-devices user`、`-remove-device user:id`、`-registration on|off`、`-settings`、`-device-id`。
+- 服务端离线救援（需先 `systemctl stop wt-server`）：`wt-server -data /var/lib/wt-server -list-devices user`、`-remove-device user:deviceID`；`-create-user` 支持 `name:password:role`。
 - 服务端部署：`scripts/build-server` 交叉编译 → gzip → scp 到 `/tmp` → 停服务、`gunzip -c` 写新文件、`mv` 覆盖（避免 Text file busy）、启动。
-- 本次部署验证：`wt-admin -list` 输出 `admire admin 1 device`，`-settings` 返回 `allowRegister=true maxDevices=5`。
+- 本次部署验证：`wt-admin -list` 输出 `admire admin`，`-settings` 返回 `allowRegister=true maxDevices=5`；设备上限实测第 6 台返回 `device_limit`（前 5 台通过，随后已清理探针设备）。
