@@ -27,6 +27,7 @@ func newFileLogger(root string) *fileLogger {
 	if err != nil {
 		return &fileLogger{}
 	}
+	_, _ = f.Seek(0, 0)
 	l := &fileLogger{file: f, path: path}
 	l.Printf("=== WailsTools 启动 %s ===", time.Now().Format("2006-01-02 15:04:05"))
 	return l

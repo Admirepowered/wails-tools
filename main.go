@@ -10,12 +10,19 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"wailstools/internal/app"
+	"wailstools/internal/singleinst"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
+	release, err := singleinst.Acquire(`"WailsTools"`)
+	if err != nil {
+		log.Printf("已有实例在运行，已聚焦到现有窗口")
+		return
+	}
+	defer release()
 	a, err := app.New()
 	if err != nil {
 		log.Fatalf("initialise application: %v", err)
