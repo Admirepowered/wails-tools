@@ -142,7 +142,8 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
         autoResume: downloads.autoResume,
       }
       if (downloads.verifySupported) merged.verifyChecksums = downloads.verifyChecksums
-      await api.SaveSettings({ ...settings, downloads: merged })
+      const cur = await api.GetSettings()
+      await api.SaveSettings({ ...cur, downloads: merged })
       await reloadSettings()
       if (!silent) toast.push('下载设置已保存')
     } catch (err) {
@@ -158,7 +159,8 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
       if (next.theme) document.documentElement.dataset.theme = next.theme
       setSavingUi(true)
       try {
-        await api.SaveSettings({ ...settings, ui: { ...settings.ui, ...next } })
+        const curUi = await api.GetSettings()
+      await api.SaveSettings({ ...curUi, ui: { ...curUi.ui, ...next } })
         await reloadSettings()
         toast.push('外观设置已保存')
       } catch (err) {
@@ -555,6 +557,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     </div>
   )
 }
+
 
 
 

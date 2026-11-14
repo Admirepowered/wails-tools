@@ -280,7 +280,8 @@ export default function ServerPage(props: PageProps) {
     setAutoConnect(value)
     if (!props.settings) return
     try {
-      await api.SaveSettings({ ...props.settings, server: { ...props.settings.server, autoConnect: value } })
+      const cur = await api.GetSettings()
+      await api.SaveSettings({ ...cur, server: { ...cur.server, autoConnect: value } })
       await props.reloadSettings()
       toast.push(value ? '启动时自动连接已开启' : '启动时自动连接已关闭')
     } catch (err) {
@@ -952,5 +953,6 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
