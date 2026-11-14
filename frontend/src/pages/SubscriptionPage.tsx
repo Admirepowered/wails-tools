@@ -346,7 +346,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                     items: [
                       { label: '更新', action: () => void refreshOne(src) },
                       { label: '编辑', action: () => setEditing(src) },
-                      { label: src.useProxy ? '改为直连' : '改为走代理', action: () => void api.SaveSubscription({ ...src, useProxy: !src.useProxy }).then(() => load()).catch((err) => toast.error(err)) },
+                      { label: '通过代理更新（一次）', action: () => void api.RefreshSubscriptionViaProxy(src.id).then(() => load()).catch((err) => toast.error(err)) },
                       { label: '删除', danger: true, action: () => setDeleting(src) },
                     ],
                   })
@@ -836,6 +836,7 @@ function NodeEditor({
     </Modal>
   )
 }
+
 
 
 

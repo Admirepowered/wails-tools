@@ -370,9 +370,20 @@ func (a *App) restoreActiveNode() {
 	if !ok {
 		return
 	}
-	if _, err := a.startEngine(node); err != nil {
-		a.emit("proxy:error", "恢复上次节点失败: "+err.Error())
-		return
+	// 更新重启时旧进程可能还没释放监听端口，重试几次再放弃。
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		if _, err := a.startEngine(node); err == nil {
+			a.emit("proxy:status", a.proxySvc.Status())
+			return
+		} else {
+			lastErr = err
+		}
 	}
-	a.emit("proxy:status", a.proxySvc.Status())
+	if lastErr != nil {
+		a.emit("proxy:error", "恢复上次节点失败: "+lastErr.Error())
+	}
 }

@@ -252,6 +252,36 @@ func (m *Manager) SetUpdateHandler(fn func(UpdateResult)) {
 }
 
 // Refresh fetches and parses one subscription.
+// RefreshWithProxy performs a single fetch through the proxy without changing
+// the subscription's stored preference.
+func (m *Manager) RefreshWithProxy(ctx context.Context, id string) (UpdateResult, error) {
+	src, ok := m.store.Get(id)
+	if !ok {
+		return UpdateResult{}, errors.New("subscription not found")
+	}
+	prev := src.UseProxy
+	src.UseProxy = true
+	res := m.fetch(ctx, src)
+	src.UseProxy = prev
+	if res.Error != "" {
+		src.LastError = res.Error
+		src.LastFetch = res.FetchedAt
+		updated, _ := m.store.Save(src)
+		return UpdateResult{Source: updated, Error: res.Error, FetchedAt: res.FetchedAt}, errors.New(res.Error)
+	}
+	src.LastError = ""
+	src.LastFetch = res.FetchedAt
+	src.Nodes = res.Source.Nodes
+	src.Info = res.Source.Info
+	updated, err := m.store.Save(src)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	res.Source = updated
+	m.emit(res)
+	m.logf("subscription %q refreshed via proxy: %d nodes", updated.Name, len(updated.Nodes))
+	return res, nil
+}
 func (m *Manager) Refresh(ctx context.Context, id string) (UpdateResult, error) {
 	src, ok := m.store.Get(id)
 	if !ok {

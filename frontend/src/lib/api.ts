@@ -947,6 +947,7 @@ const rawApi = {
   SaveSubscription: (src: Partial<SubscriptionSource>) => call<SubscriptionSource>('SaveSubscription', src),
   DeleteSubscription: (id: string) => call<void>('DeleteSubscription', id),
   RefreshSubscription: (id: string) => call<SubscriptionSource>('RefreshSubscription', id),
+  RefreshSubscriptionViaProxy: (id: string) => call<SubscriptionSource>('RefreshSubscriptionViaProxy', id),
   RefreshAllSubscriptions: () => call<any[]>('RefreshAllSubscriptions'),
   ApplySubscriptionNode: (sourceId: string, nodeIndex: number, scopes: string[], all: boolean) =>
     call<Settings>('ApplySubscriptionNode', sourceId, nodeIndex, scopes, all),
@@ -1061,6 +1062,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

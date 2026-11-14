@@ -26,6 +26,18 @@ func (a *App) SaveSubscription(src subscription.Source) (subscription.Source, er
 	return a.subs.Save(src)
 }
 
+// RefreshSubscriptionViaProxy updates a subscription once through the proxy.
+func (a *App) RefreshSubscriptionViaProxy(id string) (subscription.Source, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	res, err := a.subs.RefreshWithProxy(ctx, id)
+	if err != nil {
+		return res.Source, err
+	}
+	a.emit("subscription:updated", res)
+	return res.Source, nil
+}
+
 // DeleteSubscription removes a subscription.
 func (a *App) DeleteSubscription(id string) error { return a.subs.Delete(id) }
 
