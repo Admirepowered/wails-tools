@@ -15,6 +15,7 @@ import (
 
 	"wailstools/internal/geodata"
 	"wailstools/internal/miproxy"
+	"wailstools/internal/paths"
 	"wailstools/internal/proxysvc"
 	"wailstools/internal/settings"
 )
@@ -178,12 +179,50 @@ func (a *App) SaveDirectRules(cfg settings.DirectRuleSettings) (settings.DirectR
 
 // ---- geoip ---------------------------------------------------------------
 
-// GeoIPStatus reports the local geoip database.
+// GeoIPStatus reports the local geoip database, falling back to the default
+// per-user directory when the configured root has no database.
 func (a *App) GeoIPStatus() geodata.Status {
 	if a.geo == nil {
 		return geodata.Status{Error: "geoip 未初始化"}
 	}
-	return a.geo.Status()
+	st := a.geo.Status()
+	if st.Ready {
+		return st
+	}
+	for _, dir := range a.geoCandidateDirs() {
+		if dir == "" || dir == filepath.Dir(a.geo.Path()) {
+			continue
+		}
+		alt := geodata.Open(dir)
+		if alt.Status().Ready {
+			a.geo = alt
+			return alt.Status()
+		}
+	}
+	return st
+}
+
+// geoCandidateDirs lists every directory that may hold a geoip database.
+func (a *App) geoCandidateDirs() []string {
+	dirs := []string{a.rootDir}
+	if v := os.Getenv("LOCALAPPDATA"); v != "" {
+		dirs = append(dirs, filepath.Join(v, "WailsTools"))
+	}
+	if v := os.Getenv("APPDATA"); v != "" {
+		dirs = append(dirs, filepath.Join(v, "WailsTools"))
+	}
+	if root, err := paths.Root(); err == nil {
+		dirs = append(dirs, root)
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		if d != "" && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // DownloadGeoIP fetches geoip.metadb from the MetaCubeX release.

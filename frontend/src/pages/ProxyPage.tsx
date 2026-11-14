@@ -656,6 +656,11 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
         </button>
       </div>
       <p className="card-desc">命中的目标直接连接，不走代理。</p>
+      <div className="small faint mono truncate" title={geo?.path ?? ''}>数据库：{geo?.path ?? ''}</div>
+      {geo?.ready ? (
+        <div className="small faint">大小 {((geo.size ?? 0) / 1048576).toFixed(1)} MB · 更新于 {geo.updatedAt ?? '—'}</div>
+      ) : null}
+      {geo?.error ? <div className="small" style={{ color: 'var(--danger)' }}>读取失败：{geo.error}</div> : null}
       <label className="row" style={{ gap: 8 }}>
         <Switch checked={cfg.useGeoIP} onChange={(v) => void save({ ...cfg, useGeoIP: v })} />
         <span className="small">按国家 IP 直连（geoip.metadb）</span>
@@ -689,6 +694,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
