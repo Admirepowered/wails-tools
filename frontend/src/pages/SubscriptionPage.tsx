@@ -792,10 +792,7 @@ function NodeEditor({
           <select
             className="select"
             value={draft.protocol}
-            onChange={(e) => {
-              const protocol = e.target.value
-              patch(protocol === 'trojan' ? { protocol, tls: true } : { protocol })
-            }}
+            onChange={(e) => patch({ protocol: e.target.value })}
           >
             <option value="vmess">VMess</option>
             <option value="vless">VLESS</option>
@@ -872,6 +869,7 @@ function NodeEditor({
     </Modal>
   )
 }
+
 
 
 

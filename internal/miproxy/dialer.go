@@ -113,8 +113,7 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 // layer applies TLS and WebSocket on top of an existing stream.
 func (d *Dialer) layer(ctx context.Context, conn net.Conn, n Node) (net.Conn, error) {
 	out := conn
-	useTLS := n.TLS || n.Protocol == ProtoTrojan
-	if useTLS {
+	if n.TLS {
 		tlsConn := tls.Client(out, buildTLSConfig(n, n.Server))
 		hsCtx, cancel := context.WithTimeout(ctx, d.Timeout)
 		defer cancel()
