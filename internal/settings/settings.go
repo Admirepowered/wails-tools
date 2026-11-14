@@ -4,6 +4,8 @@ package settings
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -125,14 +127,16 @@ type DownloadSettings struct {
 
 // ServerSettings is the sync server endpoint configuration.
 type ServerSettings struct {
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	Token         string `json:"token,omitempty"`
-	Username      string `json:"username,omitempty"`
-	Pin           string `json:"pin,omitempty"`
-	PreferUDP     bool   `json:"preferUdp"`
-	DisableUDP    bool   `json:"disableUdp"`
-	AutoConnect   bool   `json:"autoConnect"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Token       string `json:"token,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Pin         string `json:"pin,omitempty"`
+	PreferUDP   bool   `json:"preferUdp"`
+	DisableUDP  bool   `json:"disableUdp"`
+	AutoConnect bool   `json:"autoConnect"`
+	// DeviceID identifies this installation for the per-user device limit.
+	DeviceID      string `json:"deviceId,omitempty"`
 	LastUsed      string `json:"lastUsedTransport,omitempty"`
 	AllowInsecure bool   `json:"allowInsecure"`
 }
@@ -452,3 +456,22 @@ func (s *Store) persist(next Settings) error {
 
 // Path exposes the backing file location.
 func (s *Store) Path() string { return s.path }
+
+// DeviceID returns the stable installation id, creating it on first use.
+func (s *Store) DeviceID() string {
+	var id string
+	s.mu.Lock()
+	id = s.cur.Server.DeviceID
+	s.mu.Unlock()
+	if id != "" {
+		return id
+	}
+	buf := make([]byte, 16)
+	_, _ = rand.Read(buf)
+	id = hex.EncodeToString(buf)
+	_, _ = s.Update(func(cfg *Settings) error {
+		cfg.Server.DeviceID = id
+		return nil
+	})
+	return id
+}

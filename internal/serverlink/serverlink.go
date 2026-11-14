@@ -303,7 +303,11 @@ func (c *Client) Login(ctx context.Context, username, password string) (Status, 
 		User  User   `json:"user"`
 		Token string `json:"token"`
 	}
-	if err := c.Call(ctx, "auth.login", map[string]any{"username": username, "password": password}, &out); err != nil {
+	devID, devName := c.deviceIdentity()
+	if err := c.Call(ctx, "auth.login", map[string]any{
+		"username": username, "password": password,
+		"deviceId": devID, "deviceName": devName,
+	}, &out); err != nil {
 		return c.Status(), err
 	}
 	return c.adoptToken(out.Token, out.User)
@@ -954,4 +958,13 @@ func (c *Client) UploadFrom(ctx context.Context, localPath, remotePath string, o
 // Ping verifies the session is alive (used by the keepalive loop).
 func (c *Client) Ping(ctx context.Context) error {
 	return c.Call(ctx, "server.info", nil, nil)
+}
+
+// deviceIdentity returns a stable per-install id and the host name.
+func (c *Client) deviceIdentity() (string, string) {
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "windows"
+	}
+	return c.store.DeviceID(), host
 }

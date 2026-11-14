@@ -172,6 +172,22 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.filesRename(body)
 	case "files.usage":
 		return ctx.filesUsage()
+	case "admin.users.list":
+		return ctx.adminUsersList()
+	case "admin.users.create":
+		return ctx.adminUsersCreate(body)
+	case "admin.users.delete":
+		return ctx.adminUsersDelete(body)
+	case "admin.users.setRole":
+		return ctx.adminUsersSetRole(body)
+	case "admin.settings.get":
+		return ctx.adminSettingsGet()
+	case "admin.settings.set":
+		return ctx.adminSettingsSet(body)
+	case "admin.devices.list":
+		return ctx.adminDevicesList(body)
+	case "admin.devices.remove":
+		return ctx.adminDevicesRemove(body)
 	case "subs.get":
 		return ctx.subsGet()
 	case "subs.put":
@@ -253,9 +269,8 @@ func (c *callCtx) register(body json.RawMessage) (any, error) {
 	if err := wire.Decode(body, &req); err != nil {
 		return nil, wire.Errorf("bad_request", "invalid body: %v", err)
 	}
-	if !c.api.Opts.AllowRegistration {
-		// The first account is always allowed so a fresh server is usable.
-		if n, _ := c.api.DB.CountUsers(); n > 0 {
+	if n, _ := c.api.DB.CountUsers(); n > 0 {
+		if !c.api.Opts.AllowRegistration || !c.api.DB.AllowRegister() {
 			return nil, wire.Errorf("forbidden", "registration is disabled on this server")
 		}
 	}
@@ -306,9 +321,11 @@ func (c *callCtx) register(body json.RawMessage) (any, error) {
 }
 
 type loginReq struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Label    string `json:"label"`
+	DeviceID   string `json:"deviceId"`
+	DeviceName string `json:"deviceName"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	Label      string `json:"label"`
 }
 
 func (c *callCtx) login(body json.RawMessage) (any, error) {
@@ -327,6 +344,9 @@ func (c *callCtx) login(body json.RawMessage) (any, error) {
 	}
 	if u.Disabled {
 		return nil, wire.Errorf("forbidden", "account disabled")
+	}
+	if err := c.registerDevice(u.ID, req.DeviceID, req.DeviceName); err != nil {
+		return nil, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	u.LastLoginAt = now
