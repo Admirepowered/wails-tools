@@ -334,3 +334,20 @@ wails build
 ### 11.4 验证
 - `TestLocalProxyInterceptsRulesOnly`：本地 mixed 代理 + 拦截器 → 规则内域名被 SNI 接管（源站确认收到的握手 **ServerName 为空**），非规则域名落到链路。
 - 实机（真实网络、直连出口）：经本地代理 `https://discord.com/api/v9/gateway` 200、`https://github.com/` 200，`example.com`（不在规则内）走链路。
+
+---
+
+## 十二、2026-11-15 CI 发布流程（.github/workflows/build-release.yml）
+
+- **只手动触发**：`workflow_dispatch`，输入项 `build` / `release` / `version` / `prerelease` / `upx`。
+  - `build=true` 构建全部产物；`release=true` 才会创建 GitHub Release（需要 build 同时为 true）。
+  - `version` 留空则读 `internal/version/version.go`；填了就在构建前改写该常量，保证产物与 tag 一致。
+- 产物：
+  - 服务端：`wt-server-linux-amd64.gz`（linux amd64，CGO 关闭、`-trimpath -s -w`）、`wt-server-windows-amd64.exe`。
+  - 客户端：Ubuntu 24.04 amd64（`wails build -tags webkit2_41` + tar.gz）、Windows amd64（可选 UPX）、macOS arm64（`.app` → zip，ad-hoc 签名）。
+- 关键点：
+  - `build/` 被 gitignore，所以每个客户端任务在 `wails build` 之前先跑 `go run ./cmd/wt-icon` 生成 appicon/windows icon。
+  - Linux 24.04 必须 `libwebkit2gtk-4.1-dev` + `-tags webkit2_41`。
+  - Wails CLI 固定 `v2.12.0`，Go 版本由 `go.mod`（`go-version-file`）决定。
+  - Windows 客户端默认 `-webview2 download`，UPX 由 `upx` 输入控制。
+- 手动排查：GitHub Release 用 `softprops/action-gh-release@v2`，`generate_release_notes` 打开、`fail_on_unmatched_files` 打开，避免少资产却发成功。

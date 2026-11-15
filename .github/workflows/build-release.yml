@@ -1,0 +1,320 @@
+name: Build & Release
+
+# 只能手动触发；可以选择只构建、或构建并上传到 GitHub Release。
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: 构建产物（服务端 + 客户端）
+        type: boolean
+        default: true
+      release:
+        description: 构建并上传到 GitHub Release
+        type: boolean
+        default: false
+      version:
+        description: 版本号（留空则用 internal/version/version.go 里的值）
+        type: string
+        required: false
+      prerelease:
+        description: 标记为预发布（Pre-release）
+        type: boolean
+        default: false
+      upx:
+        description: Windows 客户端用 UPX 压缩
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      explicit: ${{ steps.resolve.outputs.explicit }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ inputs.version }}"
+          explicit=false
+          if [ -n "$v" ]; then
+            explicit=true
+          else
+            v=$(grep -oP 'const Version = "\K[^"]+' internal/version/version.go)
+          fi
+          v="${v#v}"
+          if [ -z "$v" ]; then echo "无法确定版本号"; exit 1; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          echo "explicit=$explicit" >> "$GITHUB_OUTPUT"
+          echo "resolved version: v$v (explicit=$explicit)"
+
+  # ---------------------------------------------------------------- server ----
+  server-linux:
+    name: Server / linux amd64
+    needs: meta
+    if: ${{ inputs.build }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply requested version
+        if: ${{ needs.meta.outputs.explicit == 'true' }}
+        shell: bash
+        run: |
+          sed -i "s/^const Version = \"[^\"]*\"/const Version = \"${{ needs.meta.outputs.version }}\"/" internal/version/version.go
+          grep 'const Version' internal/version/version.go
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" -o dist/wt-server-linux-amd64 ./server/cmd/wt-server
+          gzip -9 -f dist/wt-server-linux-amd64
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-linux-amd64
+          path: dist/wt-server-linux-amd64.gz
+          if-no-files-found: error
+
+  server-windows:
+    name: Server / windows amd64
+    needs: meta
+    if: ${{ inputs.build }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply requested version
+        if: ${{ needs.meta.outputs.explicit == 'true' }}
+        shell: pwsh
+        run: |
+          $path = 'internal/version/version.go'
+          $raw = Get-Content $path -Raw
+          $raw = $raw -replace 'const Version = "[^"]*"', "const Version = `"${{ needs.meta.outputs.version }}`""
+          Set-Content -Path $path -Value $raw -Encoding utf8
+          Select-String -Path $path -Pattern 'const Version'
+      - name: Build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -trimpath -ldflags="-s -w" -o dist/wt-server-windows-amd64.exe ./server/cmd/wt-server
+          if ($LASTEXITCODE -ne 0) { throw 'server build failed' }
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-windows-amd64
+          path: dist/wt-server-windows-amd64.exe
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- client ----
+  client-linux:
+    name: Client / Ubuntu 24.04 amd64
+    needs: meta
+    if: ${{ inputs.build }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Wails dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev upx-ucl
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Wails CLI
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/wails" version
+      - name: Apply requested version
+        if: ${{ needs.meta.outputs.explicit == 'true' }}
+        shell: bash
+        run: |
+          sed -i "s/^const Version = \"[^\"]*\"/const Version = \"${{ needs.meta.outputs.version }}\"/" internal/version/version.go
+      - name: Prepare icon assets
+        shell: bash
+        run: go run ./cmd/wt-icon
+      - name: Build client
+        shell: bash
+        run: |
+          set -euo pipefail
+          wails build -clean -platform linux/amd64 -tags webkit2_41
+          mkdir -p dist
+          tar -czf "dist/WailsTools-linux-amd64-${{ needs.meta.outputs.version }}.tar.gz" -C build/bin WailsTools
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-linux-amd64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  client-windows:
+    name: Client / Windows amd64
+    needs: meta
+    if: ${{ inputs.build }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          (Join-Path (go env GOPATH) 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          (Join-Path (go env GOPATH) 'bin\wails.exe') | ForEach-Object { & $_ version }
+      - name: Apply requested version
+        if: ${{ needs.meta.outputs.explicit == 'true' }}
+        shell: pwsh
+        run: |
+          $path = 'internal/version/version.go'
+          $raw = Get-Content $path -Raw
+          $raw = $raw -replace 'const Version = "[^"]*"', "const Version = `"${{ needs.meta.outputs.version }}`""
+          Set-Content -Path $path -Value $raw -Encoding utf8
+      - name: Prepare icon assets
+        shell: pwsh
+        run: go run ./cmd/wt-icon
+      - name: Build client
+        shell: pwsh
+        run: |
+          wails build -clean -platform windows/amd64
+          if ($LASTEXITCODE -ne 0) { throw 'wails build failed' }
+      - name: UPX compress
+        if: ${{ inputs.upx }}
+        shell: pwsh
+        run: |
+          choco install upx -y --no-progress | Out-Null
+          $upx = (Get-Command upx -ErrorAction SilentlyContinue).Source
+          if (-not $upx) { throw 'upx not found' }
+          & $upx --best --force build\bin\WailsTools.exe | Out-Null
+          Get-Item build\bin\WailsTools.exe | Select-Object Length
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build\bin\WailsTools.exe "dist\WailsTools-windows-amd64-${{ needs.meta.outputs.version }}.exe"
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-windows-amd64
+          path: dist/*.exe
+          if-no-files-found: error
+
+  client-macos-arm64:
+    name: Client / macOS arm64
+    needs: meta
+    if: ${{ inputs.build }}
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Wails CLI
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/wails" version
+      - name: Apply requested version
+        if: ${{ needs.meta.outputs.explicit == 'true' }}
+        shell: bash
+        run: |
+          sed -i '' "s/^const Version = \"[^\"]*\"/const Version = \"${{ needs.meta.outputs.version }}\"/" internal/version/version.go
+      - name: Prepare icon assets
+        shell: bash
+        run: go run ./cmd/wt-icon
+      - name: Build client
+        shell: bash
+        run: |
+          set -euo pipefail
+          wails build -clean -platform darwin/arm64
+          # Ad-hoc sign so Gatekeeper does not report a damaged bundle.
+          codesign --force --deep --sign - build/bin/WailsTools.app || true
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent build/bin/WailsTools.app \
+            "dist/WailsTools-macos-arm64-${{ needs.meta.outputs.version }}.zip"
+          ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-macos-arm64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # --------------------------------------------------------------- release ----
+  release:
+    name: Upload to GitHub Release
+    needs: [meta, server-linux, server-windows, client-linux, client-windows, client-macos-arm64]
+    if: ${{ inputs.build && inputs.release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List release files
+        shell: bash
+        run: ls -lh dist
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: WailsTools ${{ needs.meta.outputs.tag }}
+          draft: false
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*
+
