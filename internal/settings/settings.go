@@ -123,6 +123,7 @@ type DownloadSettings struct {
 	ConnectionsPer  int    `json:"connectionsPerTask"`
 	ChunkSize       int64  `json:"chunkSizeBytes"`
 	UserAgent       string `json:"userAgent"`
+	Cookie          string `json:"cookie"`
 	SpeedLimitKBps  int    `json:"speedLimitKBps"`
 	RetryCount      int    `json:"retryCount"`
 	AutoResume      bool   `json:"autoResume"`

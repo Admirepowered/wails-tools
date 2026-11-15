@@ -100,10 +100,7 @@ export default function SNICard() {
           <Switch checked={!!cfg?.mitm} onChange={(v) => void save({ mitm: v })} />
           <span className="small">允许 MITM（需要根证书）</span>
         </label>
-        <label className="row" style={{ gap: 8 }}>
-          <Switch checked={!!cfg?.useExistingProxy} onChange={(v) => void save({ useExistingProxy: v })} />
-          <span className="small">SNI 出站也走代理链路</span>
-        </label>
+
         <button className="btn btn-sm" onClick={() => void installCA()}>
           导入根证书
         </button>
@@ -176,3 +173,4 @@ export default function SNICard() {
     </div>
   )
 }
+

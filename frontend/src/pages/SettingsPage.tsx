@@ -15,6 +15,7 @@ interface DownloadForm {
   speedLimitKBps: number
   retryCount: number
   userAgent: string
+  cookie: string
   autoResume: boolean
   verifySupported: boolean
   verifyChecksums: boolean
@@ -37,6 +38,7 @@ function toDownloadForm(settings: Settings): DownloadForm {
     speedLimitKBps: dl.speedLimitKBps || 0,
     retryCount: typeof dl.retryCount === 'number' ? dl.retryCount : 3,
     userAgent: dl.userAgent ?? '',
+    cookie: dl.cookie ?? '',
     autoResume: dl.autoResume !== false,
     verifySupported: typeof raw.verifyChecksums === 'boolean',
     verifyChecksums: raw.verifyChecksums === true,
@@ -139,6 +141,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
         speedLimitKBps: Math.max(0, Math.round(downloads.speedLimitKBps)),
         retryCount: clamp(Math.round(downloads.retryCount), 0, 20),
         userAgent: downloads.userAgent.trim(),
+    cookie: downloads.cookie.trim(),
         autoResume: downloads.autoResume,
       }
       if (downloads.verifySupported) merged.verifyChecksums = downloads.verifyChecksums
@@ -281,6 +284,14 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
                 value={downloads.userAgent}
                 onChange={(e) => patchDownloads({ userAgent: e.target.value })}
                 placeholder="Mozilla/5.0 ..."
+              />
+            </Field>
+            <Field label="Cookie" hint="全局 Cookie 请求头；单个任务可在下载页单独覆盖">
+              <input
+                className="input mono"
+                value={downloads.cookie}
+                onChange={(e) => patchDownloads({ cookie: e.target.value })}
+                placeholder="session=xxx; token=yyy"
               />
             </Field>
           </div>
@@ -558,6 +569,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     </div>
   )
 }
+
 
 
 

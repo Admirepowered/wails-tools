@@ -117,6 +117,7 @@ export interface DownloadSettings {
   connectionsPerTask: number
   chunkSizeBytes: number
   userAgent: string
+  cookie?: string
   speedLimitKBps: number
   retryCount: number
   autoResume: boolean
@@ -1201,6 +1202,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

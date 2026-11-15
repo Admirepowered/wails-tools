@@ -120,17 +120,17 @@ func (a *App) applySNIProxy() error {
 	state.ca = ca
 	state.rules = sniproxy.ParseRules(effectiveSNIRules(cfg.Rules))
 
-	var upstream func(ctx context.Context, network, addr string) (net.Conn, error)
-	if cfg.UseExistingProxy {
-		dialer := a.sniChainDialer()
-		upstream = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.Dial(ctx, addr)
-		}
-		state.resolver.SetUpstream(func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.Dial(ctx, addr)
-		})
-		logf("sniproxy: outbound follows the proxy chain")
+	// SNI traffic always leaves through the proxy chain: the intercepted
+	// connection is re-dialled by the engine (direct when no node is active,
+	// through the node/relay when there is one).
+	dialer := a.sniChainDialer()
+	upstream := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.Dial(ctx, addr)
 	}
+	state.resolver.SetUpstream(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.Dial(ctx, addr)
+	})
+	logf("sniproxy: outbound follows the proxy chain")
 	state.handler = sniproxy.NewHandler(sniproxy.Options{
 		Rules:    state.rules,
 		Resolver: state.resolver,

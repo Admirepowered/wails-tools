@@ -13,6 +13,7 @@ export default function DownloadsPage({ settings }: PageProps) {
   const [filename, setFilename] = useState('')
   const [directory, setDirectory] = useState(settings?.downloads?.directory ?? '')
   const [connections, setConnections] = useState(settings?.downloads?.connectionsPerTask || 8)
+  const [cookie, setCookie] = useState(settings?.downloads?.cookie ?? '')
   const [proxyMode, setProxyMode] = useState<'inherit' | 'off' | 'on'>('inherit')
   const [probe, setProbe] = useState<{ ok: boolean; filename?: string; total?: number; error?: string } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -39,6 +40,9 @@ export default function DownloadsPage({ settings }: PageProps) {
     }
     if (settings?.downloads?.connectionsPerTask) {
       setConnections(settings.downloads.connectionsPerTask)
+    }
+    if (!cookie && settings?.downloads?.cookie) {
+      setCookie(settings.downloads.cookie)
     }
   }, [settings])
 
@@ -72,6 +76,7 @@ export default function DownloadsPage({ settings }: PageProps) {
       directory: directory || undefined,
       connections,
       proxyMode,
+      headers: cookie.trim() ? { Cookie: cookie.trim() } : undefined,
     }
     try {
       const task = start ? await api.AddDownloadAndStart(req) : await api.AddDownload(req)
@@ -202,6 +207,15 @@ export default function DownloadsPage({ settings }: PageProps) {
               max={32}
               value={connections}
               onChange={(e) => setConnections(Math.max(1, Math.min(32, Number(e.target.value) || 1)))}
+            />
+          </div>
+          <div className="field" style={{ gridColumn: 'span 2' }}>
+            <label>Cookie（可选，留空使用设置里的默认值）</label>
+            <input
+              className="input mono truncate"
+              placeholder="session=xxx; token=yyy"
+              value={cookie}
+              onChange={(e) => setCookie(e.target.value)}
             />
           </div>
           <div className="field">
@@ -362,3 +376,4 @@ function TaskRow({ task, onAction }: { task: DownloadTask; onAction: (fn: () => 
     </div>
   )
 }
+

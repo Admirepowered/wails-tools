@@ -49,7 +49,7 @@ func (e *Engine) clientFor(t Task) (clientInfo, error) {
 	return clientInfo{client: client, desc: desc}, nil
 }
 
-func buildRequest(ctx context.Context, method, rawURL string, t Task) (*http.Request, error) {
+func buildRequest(ctx context.Context, method, rawURL string, t Task, cookie string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -57,6 +57,11 @@ func buildRequest(ctx context.Context, method, rawURL string, t Task) (*http.Req
 	ua := "WailsTools/1.0"
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "*/*")
+	if _, ok := headerLookup(t.Headers, "cookie"); !ok {
+		if ck := strings.TrimSpace(cookie); ck != "" {
+			req.Header.Set("Cookie", ck)
+		}
+	}
 	for k, v := range t.Headers {
 		if strings.EqualFold(k, "Host") {
 			continue
@@ -87,7 +92,7 @@ func (e *Engine) probe(ctx context.Context, t Task) (*probeResult, error) {
 
 	// A ranged GET of one byte is the most reliable capability probe and also
 	// reveals the real filename/length for redirecting links.
-	req, err := buildRequest(ctx, http.MethodGet, t.URL, t)
+	req, err := buildRequest(ctx, http.MethodGet, t.URL, t, e.store.Get().Downloads.Cookie)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +100,7 @@ func (e *Engine) probe(ctx context.Context, t Task) (*probeResult, error) {
 	resp, err := ci.client.Do(req)
 	if err != nil {
 		// Retry without the range header: some servers reject Range requests.
-		req2, err2 := buildRequest(ctx, http.MethodGet, t.URL, t)
+		req2, err2 := buildRequest(ctx, http.MethodGet, t.URL, t, e.store.Get().Downloads.Cookie)
 		if err2 != nil {
 			return nil, err2
 		}
@@ -139,7 +144,7 @@ func (e *Engine) probe(ctx context.Context, t Task) (*probeResult, error) {
 	}
 	if pr.Total == 0 && pr.RangeOK {
 		// HEAD fallback for length.
-		if hreq, err := buildRequest(ctx, http.MethodHead, t.URL, t); err == nil {
+		if hreq, err := buildRequest(ctx, http.MethodHead, t.URL, t, e.store.Get().Downloads.Cookie); err == nil {
 			if hresp, err := ci.client.Do(hreq); err == nil {
 				pr.Total = hresp.ContentLength
 				_ = hresp.Body.Close()
@@ -497,7 +502,7 @@ func (e *Engine) fetchChunkOnce(ctx context.Context, tr *taskRunner, idx int) er
 	if err != nil {
 		return err
 	}
-	req, err := buildRequest(ctx, http.MethodGet, path, task)
+	req, err := buildRequest(ctx, http.MethodGet, path, task, e.store.Get().Downloads.Cookie)
 	if err != nil {
 		return err
 	}
@@ -711,4 +716,14 @@ func (r *rateLimiter) wait(n int64) {
 	if expected > elapsed {
 		time.Sleep(expected - elapsed)
 	}
+}
+
+// headerLookup finds a header case-insensitively.
+func headerLookup(headers map[string]string, key string) (string, bool) {
+	for k, v := range headers {
+		if strings.EqualFold(k, key) {
+			return v, true
+		}
+	}
+	return "", false
 }
