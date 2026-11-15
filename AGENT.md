@@ -380,3 +380,20 @@ wails build
 
 
 
+
+---
+
+## 十三、2026-11-15 Discord Gateway WebSocket 诊断
+
+`wss://gateway.discord.gg/?encoding=json&v=9&compress=zlib-stream` 实测：
+
+| 路径 | 结果 |
+|---|---|
+| 本地直连 + 真 SNI | TLS 握手被 RST（SNI 阻断） |
+| 本地直连 + 无 SNI（162.159.128.233） | 握手 OK（证书 discord.com）→ **403**（zone 不匹配） |
+| 经代理 :48952 | TLS OK（证书 discord.gg）→ **101 Switching Protocols** + `sec-websocket-accept` + 首帧 opcode=0x2、`x\xda…`（zlib 流的 hello 帧）✅ |
+| 经代理 :7890 | TLS OK（证书 gateway.discord.gg）→ **403**（该出口 IP 被 Cloudflare/Discord 风控） |
+
+- 结论：gateway 能代理，**只要出口干净**；403 是出口 IP 被拒，不是代理协议问题。
+- 判定"真成功"：`101` + `Sec-WebSocket-Accept` + 二进制帧（`0x2`，zlib 压缩的 `{"op":10}`）。收到 403 HTML 就说明被拒。
+- `gateway.discord.gg` 属于 CDN/网关域名，**不要**塞进 SNI 规则（无 SNI 必 403），让它走代理链路。
