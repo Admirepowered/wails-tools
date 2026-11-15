@@ -518,3 +518,26 @@ v1.3.56 只用 curl（只支持 HTTP/1.1）验证过，浏览器一上 HTTP/2 �
   - 前端统一 `const offlineTasks = offline?.tasks ?? []`，并对返回做归一化。
 - 删除语义调整：默认「删除任务」只删记录、**保留文件**（文件页可自行清理）；完成任务多一个「连文件删除」，显式 `purge=true` 才会 `os.RemoveAll`。
 
+
+---
+
+## 十八、2026-11-16 打洞重做（参考 n2n）+ 设备号（阶段 1/…）
+
+### 18.1 n2n 的做法与我们的问题
+n2n 的"打洞"本质是：两端都用**同一个 UDP socket** 持续向 supernode 注册，supernode 记住各自公网地址；两端拿到对方地址后**同时**向对方发包，把各自 NAT 上的映射打开，直连成功后 supernode 只做兜底。
+我们旧实现的问题：
+- 每次打洞都 `ListenUDP(..., nil)` 随机端口，NAT 映射随机、难复现；
+- 只朝"supernode 看到的那个地址"发，**没有端口预测**，对称型 NAT 必失败；
+- 收到对端包后仍用**宣告地址**做 QUIC 拨号，实际回包地址若不同就断。
+
+### 18.2 阶段 1 已实现
+- `p2p.Options.LocalPort`：优先绑定固定端口（`ProxyRuntime.P2PPort`，0=随机），映射稳定可预测。
+- `punchProbe` 返回**实际回包地址**，QUIC 用它拨号；超时 2 秒后同时对 `±1..±10` 预测端口发包（对称 NAT 的连续端口分配）。
+- 双方仍然"拿到对方地址就开始互发"，保持同时打洞。
+- **9 位设备号**：`Device.Number`（`000000000` 风格且首位非零），`AddDevice`/`TouchDevice` 时分配，全局唯一（`allocDeviceNumber` 扫 `bucketDevices`），`FindDeviceByNumber` 供后续"输入对方设备号发起穿透"用；管理工具与客户端「我的设备」都会显示，右键可复制。
+- 单测：`server/internal/store/devnum_test.go`（分配长度 9、按号查得到、Touch 不变号）。
+
+### 18.3 待完成（后续轮次，goal 保持 active）
+1. `p2p.request`/`p2p.respond`：输入对方**9 位设备号**发起，被穿透端必须显式接受；拒绝/超时自动结束。
+2. 角色锁：一台设备同一时刻只能是"穿透端"或"被穿透端"；被穿透端可同时被多台穿透。
+3. 端口映射：打洞成功后本地 TCP 监听 → QUIC 流 → 对端拨本机端口（TCP over UDP），断开打洞即销毁映射；单连接用完即释放。

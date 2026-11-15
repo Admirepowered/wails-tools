@@ -44,7 +44,10 @@ type Options struct {
 	Role string
 	// Timeout bounds the whole attempt; defaults to 45s.
 	Timeout time.Duration
-	Logf    func(string, ...any)
+	// LocalPort pins the punch socket (0 = random). A stable port keeps the NAT
+	// mapping predictable and makes simultaneous punching much more reliable.
+	LocalPort int
+	Logf      func(string, ...any)
 }
 
 // announce is the datagram sent to the rendezvous server.
@@ -80,7 +83,7 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	if o.Role == "b" || o.Role == "B" {
 		role = "b"
 	}
-	conn, err := net.ListenUDP("udp4", nil)
+	conn, err := listenPunchSocket(o.LocalPort)
 	if err != nil {
 		return nil, err
 	}
@@ -102,10 +105,14 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 		return nil, fmt.Errorf("解析对端地址失败: %w", err)
 	}
 
-	if err := punchProbe(ctx, conn, peerAddr, o.Secret, deadline); err != nil {
+	verified, err := punchProbe(ctx, conn, peerAddr, o.Secret, deadline)
+	if err != nil {
 		return nil, err
 	}
-	o.Logf("p2p: direct path open, starting QUIC handshake")
+	if verified != nil {
+		peerAddr = verified
+	}
+	o.Logf("p2p: direct path open via %s, starting QUIC handshake", peerAddr)
 
 	quicConn, err := handshake(ctx, conn, peerAddr, role, o.Secret)
 	if err != nil {
@@ -157,31 +164,62 @@ func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadlin
 	return "", ErrPeerOffline
 }
 
-// punchProbe sends probes until the peer answers with the same authenticated
-// datagram, which proves the NAT mapping works in both directions.
-func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secret string, deadline time.Time) error {
+// listenPunchSocket binds the punch socket, preferring a stable local port so
+// the NAT mapping created towards the rendezvous server is predictable.
+func listenPunchSocket(port int) (*net.UDPConn, error) {
+	if port > 0 {
+		if conn, err := net.ListenUDP("udp4", &net.UDPAddr{Port: port}); err == nil {
+			return conn, nil
+		}
+	}
+	return net.ListenUDP("udp4", nil)
+}
+
+// punchProbe sends authenticated probes to the peer and to a small window of
+// predicted ports (symmetric NATs allocate consecutive ports). It returns the
+// address that actually answered, which may differ from the announced one.
+func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secret string, deadline time.Time) (*net.UDPAddr, error) {
 	probe := []byte(probeMagic + " " + token(secret, "probe"))
 	buf := make([]byte, 2048)
+	predict := portWindow(peer, 10)
+	start := time.Now()
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 		if _, err := conn.WriteToUDP(probe, peer); err != nil {
-			return err
+			return nil, err
+		}
+		// Only start spraying predicted ports when the announced port stays
+		// silent: most networks do not need it and it keeps traffic low.
+		if time.Since(start) > 2*time.Second {
+			for _, cand := range predict {
+				_, _ = conn.WriteToUDP(probe, cand)
+			}
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(probeInterval))
 		n, from, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			continue
 		}
-		if from.String() != peer.String() {
-			continue
-		}
 		if string(buf[:n]) == string(probe) {
-			return nil
+			return from, nil
 		}
 	}
-	return ErrPunchFailed
+	return nil, ErrPunchFailed
+}
+
+// portWindow expands a peer address into a small set of predicted ports.
+func portWindow(peer *net.UDPAddr, radius int) []*net.UDPAddr {
+	out := make([]*net.UDPAddr, 0, radius*2)
+	for d := 1; d <= radius; d++ {
+		for _, p := range []int{peer.Port + d, peer.Port - d} {
+			if p > 0 && p < 65536 {
+				out = append(out, &net.UDPAddr{IP: peer.IP, Port: p})
+			}
+		}
+	}
+	return out
 }
 
 // handshake upgrades the punched socket to QUIC and authenticates it with the

@@ -207,7 +207,7 @@ func (a *App) P2PConnect(deviceID string) (map[string]any, error) {
 	}
 	channel, err := p2p.Punch(ctx, p2p.Options{
 		Rendezvous: rendezvous, Session: offer.Session, Secret: offer.Secret,
-		Role: "a", Timeout: 45 * time.Second,
+		Role: "a", Timeout: 45 * time.Second, LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
 		Logf: func(format string, args ...any) {
 			if a.log != nil {
 				a.log.Printf(format, args...)
@@ -291,7 +291,7 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 	defer cancel()
 	channel, err := p2p.Punch(ctx, p2p.Options{
 		Rendezvous: rendezvous, Session: sessionID, Secret: secret,
-		Role: "b", Timeout: 40 * time.Second,
+		Role: "b", Timeout: 40 * time.Second, LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
 		Logf: func(format string, args ...any) {
 			if a.log != nil {
 				a.log.Printf(format, args...)

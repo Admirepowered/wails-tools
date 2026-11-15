@@ -422,7 +422,9 @@ export interface AdminUser {
 
 export interface AdminDevice {
   id: string
+  number?: string
   name: string
+  machine?: string
   lastSeen: string
 }
 
@@ -1225,6 +1227,8 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
 
 
 

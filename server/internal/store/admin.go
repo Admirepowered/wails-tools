@@ -1,8 +1,11 @@
 package store
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"math/big"
+	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -13,10 +16,79 @@ var bucketMeta = []byte("meta")
 
 // Device is one registered client device.
 type Device struct {
-	ID       string `json:"id"`
+	ID string `json:"id"`
+	// Number is the public 9-digit device id ("设备号") used for hole punching.
+	Number   string `json:"number,omitempty"`
 	Name     string `json:"name"`
 	Machine  string `json:"machine,omitempty"`
 	LastSeen string `json:"lastSeen"`
+}
+
+// allocDeviceNumber returns a free 9-digit device number.
+func allocDeviceNumber(tx *bolt.Tx) (string, error) {
+	used := map[string]bool{}
+	b := tx.Bucket(bucketDevices)
+	if b != nil {
+		_ = b.ForEach(func(_, v []byte) error {
+			var list []Device
+			if json.Unmarshal(v, &list) == nil {
+				for _, d := range list {
+					if d.Number != "" {
+						used[d.Number] = true
+					}
+				}
+			}
+			return nil
+		})
+	}
+	for i := 0; i < 500; i++ {
+		var buf [9]byte
+		for j := range buf {
+			n, err := rand.Int(rand.Reader, big.NewInt(10))
+			if err != nil {
+				return "", err
+			}
+			buf[j] = byte('0' + n.Int64())
+		}
+		if buf[0] == '0' { // keep the leading digit non-zero so it stays 9 digits
+			buf[0] = '9'
+		}
+		num := string(buf[:])
+		if !used[num] {
+			return num, nil
+		}
+	}
+	return "", errors.New("failed to allocate a device number")
+}
+
+// FindDeviceByNumber locates a user device by its public number.
+func (d *DB) FindDeviceByNumber(number string) (userID string, dev Device, ok bool) {
+	number = strings.TrimSpace(number)
+	if number == "" {
+		return "", Device{}, false
+	}
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketDevices)
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(userIDRaw, v []byte) error {
+			var list []Device
+			if json.Unmarshal(v, &list) != nil {
+				return nil
+			}
+			for _, item := range list {
+				if item.Number == number {
+					userID = string(userIDRaw)
+					dev = item
+					ok = true
+					return nil
+				}
+			}
+			return nil
+		})
+	})
+	return userID, dev, ok
 }
 
 // EnsureAdminBuckets creates the buckets used by admin features.
@@ -104,7 +176,11 @@ func (d *DB) AddDevice(userID, id, name, machine string) error {
 	}
 	return d.db.Update(func(tx *bolt.Tx) error {
 		devices := readDevices(tx, userID)
-		devices = append(devices, Device{ID: id, Name: name, Machine: machine, LastSeen: time.Now().UTC().Format(time.RFC3339)})
+		number, err := allocDeviceNumber(tx)
+		if err != nil {
+			return err
+		}
+		devices = append(devices, Device{ID: id, Number: number, Name: name, Machine: machine, LastSeen: time.Now().UTC().Format(time.RFC3339)})
 		return putDevices(tx, userID, devices)
 	})
 }
@@ -115,6 +191,11 @@ func (d *DB) TouchDevice(userID, id, name, machine string) error {
 		devices := readDevices(tx, userID)
 		for i := range devices {
 			if devices[i].ID == id {
+				if devices[i].Number == "" {
+					if num, err := allocDeviceNumber(tx); err == nil {
+						devices[i].Number = num
+					}
+				}
 				devices[i].LastSeen = time.Now().UTC().Format(time.RFC3339)
 				if name != "" {
 					devices[i].Name = name

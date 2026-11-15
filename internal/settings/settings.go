@@ -114,6 +114,8 @@ type ProxyRuntimeSettings struct {
 	Password string `json:"password,omitempty"`
 	// SystemProxy mirrors the local proxy into the OS proxy settings.
 	SystemProxy bool `json:"systemProxy"`
+	// P2PPort pins the hole-punch UDP socket (0 = random).
+	P2PPort int `json:"p2pPort"`
 }
 
 // DownloadSettings tunes the HTTP download engine.

@@ -1276,6 +1276,7 @@ export default function ServerPage(props: PageProps) {
                             ? { label: '断开直连', action: () => void disconnectDevice(d.id) }
                             : { label: '连接到此设备（打洞）', action: () => void connectDevice(d.id) },
                           { label: '复制设备 ID', action: () => void copyDeviceId(d.id) },
+                          ...(d.number ? [{ label: `复制设备号 ${d.number}`, action: () => void navigator.clipboard.writeText(d.number ?? '') }] : []),
                         ],
                       })
                     }}
@@ -1285,6 +1286,7 @@ export default function ServerPage(props: PageProps) {
                     <span className="file-name">
                       {d.name || d.id.slice(0, 8)}
                       {isSelf ? '（本机）' : ''}
+                      {d.number ? <span className="mono faint"> #{d.number}</span> : null}
                     </span>
                     {online ? <Tag kind="ok">直连中</Tag> : null}
                     <span className="file-size">{d.lastSeen ? relativeTime(d.lastSeen) : '—'}</span>
@@ -1587,6 +1589,7 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
 

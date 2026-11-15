@@ -289,6 +289,7 @@ type adminUser struct {
 }
 
 type adminDevice struct {
+	Number   string `json:"number"`
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	LastSeen string `json:"lastSeen"`
@@ -318,7 +319,7 @@ func printDevices(call func(string, any, any), u adminUser) {
 	call("admin.devices.list", map[string]any{"userId": u.ID}, &out)
 	fmt.Printf("devices of %s (%d):\n", u.Username, len(out.Devices))
 	for _, d := range out.Devices {
-		fmt.Printf("  %-40s %-24s %s\n", d.ID, d.Name, d.LastSeen)
+		fmt.Printf("  %-40s #%-9s %-24s %s\n", d.ID, d.Number, d.Name, d.LastSeen)
 	}
 }
 
