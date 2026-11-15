@@ -248,10 +248,20 @@ pixiv.net=[pi]
 .pixiv.net=[pi]
 .pximg.net=[pi]
 # --- Discord ---
-# 只放"能靠无 SNI 直连"的站点；CDN 域名（dl2.discordapp.net / cdn.discordapp.com
-# 等）依赖 Cloudflare 按 SNI 选 zone，写进来会 403，交给代理链路即可。
+# Discord 每个 zone 有专属 IP，其默认证书就是该 zone；固定 IP + 不发 SNI + Host
+# 头即可本地直通。下面这些 IP 均已实测：
+#   discord.com       -> 162.159.128.233（默认证书 discord.com，GET / 200）
+#   gateway.discord.gg-> 162.159.130.234（默认证书 discord.gg，WSS 101）
+#   cdn.discordapp.com-> 162.159.134.233（默认证书 discordapp.com，资源 200）
+#   stable.dl2.discordapp.net -> 34.126.226.51（GCP，默认证书 dl2.discordapp.net，安装包 206）
 discord.com=162.159.128.233
 .discord.com=162.159.128.233
+gateway.discord.gg=162.159.130.234,162.159.133.234,162.159.134.234,162.159.135.234
+.discord.gg=162.159.130.234,162.159.133.234,162.159.134.234,162.159.135.234
+cdn.discordapp.com=162.159.134.233,162.159.135.233,162.159.130.233
+.discordapp.com=162.159.134.233,162.159.135.233,162.159.130.233
+stable.dl2.discordapp.net=34.126.226.51
+.dl2.discordapp.net=34.126.226.51
 
 # Others
 dropboxapi.com

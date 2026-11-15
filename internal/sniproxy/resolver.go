@@ -3,6 +3,7 @@ package sniproxy
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,17 +70,29 @@ func NewResolver(dir string, logf func(string, ...any)) *Resolver {
 	r.client = &http.Client{
 		Timeout: 8 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// DoH is reached by pinned IP *without SNI*: the local network
+			// resets handshakes that carry the DoH hostname, while Cloudflare's
+			// default certificate for these IPs is exactly cloudflare-dns.com.
+			// Verification still checks the certificate against that name.
+			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				host, port, err := net.SplitHostPort(addr)
 				if err != nil {
 					return nil, err
 				}
 				ip := pinnedDohIP(host)
 				if ip == "" {
-					return (&net.Dialer{Timeout: 6 * time.Second}).DialContext(ctx, network, addr)
+					ip = host
 				}
-				return (&net.Dialer{Timeout: 6 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip, port))
+				raw, err := (&net.Dialer{Timeout: 6 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip, port))
+				if err != nil {
+					return nil, err
+				}
+				tc := tls.Client(raw, noSNIConfig(host))
+				if err := tc.HandshakeContext(ctx); err != nil {
+					_ = raw.Close()
+					return nil, err
+				}
+				return tc, nil
 			},
 		},
 	}
@@ -273,4 +286,24 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// noSNIConfig performs a TLS handshake without the SNI extension while still
+// verifying that the certificate is valid for host.
+func noSNIConfig(host string) *tls.Config {
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // manual verification below (no SNI is sent)
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("doh: peer sent no certificate")
+			}
+			intermediates := x509.NewCertPool()
+			for _, cert := range cs.PeerCertificates[1:] {
+				intermediates.AddCert(cert)
+			}
+			_, err := cs.PeerCertificates[0].Verify(x509.VerifyOptions{DNSName: host, Intermediates: intermediates})
+			return err
+		},
+	}
 }

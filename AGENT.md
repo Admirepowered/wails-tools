@@ -397,3 +397,33 @@ wails build
 - 结论：gateway 能代理，**只要出口干净**；403 是出口 IP 被拒，不是代理协议问题。
 - 判定"真成功"：`101` + `Sec-WebSocket-Accept` + 二进制帧（`0x2`，zlib 压缩的 `{"op":10}`）。收到 403 HTML 就说明被拒。
 - `gateway.discord.gg` 属于 CDN/网关域名，**不要**塞进 SNI 规则（无 SNI 必 403），让它走代理链路。
+
+---
+
+## 十四、2026-11-15 Discord 本地直连打通（v1.3.54）
+
+### 14.1 关键规律：每个 zone 有"专属 IP"
+Cloudflare 上 Discord 各 zone 的 A 记录 IP，**默认证书就是那个 zone**，因此"固定 IP + 不发 SNI + Host 头"可以完全本地直连：
+
+| 域名 | 专属 IP（实测） | 无 SNI 默认证书 | 结果 |
+|---|---|---|---|
+| discord.com | 162.159.128.233 | discord.com | GET / → 200 |
+| gateway.discord.gg | 162.159.130.234 / .133 / .134 / .135.234 | discord.gg | WSS → 101 + zlib 首帧 |
+| cdn.discordapp.com | 162.159.134.233 / .135 / .130.233 | discordapp.com | 资源 200 / 404（zone 正确） |
+| stable.dl2.discordapp.net | 34.126.226.51（GCP，不是 CF） | dl2.discordapp.net | 安装包 → **206 Partial Content** |
+
+- 用户给的 104.17.112.188 / 104.21.2.112 / 172.67.129.30 属于 CF 的"通用 anycast IP"，**没有默认 zone**：不发 SNI → `tls: handshake failure`；发 SNI → 被本地链路 RST → 这几个 IP 用不了。
+- 所以固定 IP 必须**逐域名使用它自己的 A 记录 IP**，不能拿一个 Discord IP 通吃所有 Discord 域名。
+
+### 14.2 本地 DoH 也必须不发 SNI
+- 之前 DoH 直连 `cloudflare-dns.com` 一直被 RST；现在改成：**连接固定 DoH IP、握手不发 SNI**，再用 `x509.VerifyOptions{DNSName: host}` 手动校验证书（CF 对 104.16.249.249 的默认证书就是 cloudflare-dns.com）。
+- 效果：不挂任何代理，`github.com` 也能 `via=doh` 解析成功。
+
+### 14.3 实测（无上游、纯本地出口）
+```
+本地 DoH: github.com -> 172.182.252.133 via=doh
+https://discord.com/                         200
+https://cdn.discordapp.com/attachments/...   404（fake 路径，zone 正确）
+DiscordSetup.exe (Range 1K)                  206 application/x-msdownload  MZ...
+wss://gateway.discord.gg/...                 101 Switching Protocols + x\xda 首帧
+```
