@@ -82,6 +82,9 @@ func (a *App) restartSNIProxy() error {
 			logf("sniproxy: no upstream proxy configured, dialing directly")
 		}
 	}
+	if upstream != nil {
+		state.resolver.SetUpstream(upstream)
+	}
 	server, err := sniproxy.Start(sniproxy.Options{
 		Addr:     sniAddrOrDefault(cfg.Addr),
 		Rules:    sniproxy.ParseRules(effectiveSNIRules(cfg.Rules)),

@@ -20,14 +20,19 @@ const dnsCacheTTL = 3 * 24 * time.Hour
 
 // dohEndpoints are pinned Cloudflare DNS endpoints. Resolving the DoH hostname
 // itself is exactly what is broken on censored networks, so the IPs are fixed.
-var dohEndpoints = []struct {
+type dohEndpoint struct {
 	Host string
 	IP   string
-}{
-	{"cloudflare-dns.com", "104.16.249.249"},
-	{"cloudflare-dns.com", "104.16.248.249"},
-	{"cloudflare-dns.com", "1.1.1.1"},
-	{"cloudflare-dns.com", "1.0.0.1"},
+	Path string
+}
+
+var dohEndpoints = []dohEndpoint{
+	{"cloudflare-dns.com", "104.16.249.249", "/dns-query"},
+	{"cloudflare-dns.com", "104.16.248.249", "/dns-query"},
+	{"cloudflare-dns.com", "1.1.1.1", "/dns-query"},
+	{"cloudflare-dns.com", "1.0.0.1", "/dns-query"},
+	{"dns.google", "8.8.8.8", "/resolve"},
+	{"dns.google", "8.8.4.4", "/resolve"},
 }
 
 type cacheEntry struct {
@@ -44,6 +49,7 @@ type Resolver struct {
 	cache map[string]cacheEntry
 
 	client *http.Client
+	proxyC *http.Client
 	logf   func(string, ...any)
 }
 
@@ -77,7 +83,33 @@ func NewResolver(dir string, logf func(string, ...any)) *Resolver {
 			},
 		},
 	}
+	r.proxyC = &http.Client{Timeout: 10 * time.Second}
 	return r
+}
+
+// SetUpstream routes DoH through the app proxy when the direct path is blocked.
+func (r *Resolver) SetUpstream(dial func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	if dial == nil {
+		return
+	}
+	r.proxyC = &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				// The proxy may resolve names through a poisoned resolver, so
+				// hand it the pinned DoH IP directly while TLS still verifies
+				// the cloudflare-dns.com certificate.
+				host, port, err := net.SplitHostPort(addr)
+				if err == nil {
+					if ip := pinnedDohIP(host); ip != "" {
+						addr = net.JoinHostPort(ip, port)
+					}
+				}
+				return dial(ctx, network, addr)
+			},
+		},
+	}
 }
 
 func pinnedDohIP(host string) string {
@@ -168,45 +200,72 @@ type dohResponse struct {
 
 func (r *Resolver) lookupDoH(ctx context.Context, host string) (string, error) {
 	var lastErr error
-	for _, endpoint := range dohEndpoints {
-		name := normalizeHost(host)
-		url := fmt.Sprintf("https://%s/dns-query?name=%s&type=A", endpoint.Host, name)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return "", err
+	type attempt struct {
+		client    *http.Client
+		endpoints []dohEndpoint
+	}
+	attempts := []attempt{{client: r.client, endpoints: dohEndpoints[:minInt(2, len(dohEndpoints))]}}
+	if r.proxyC != nil {
+		attempts = append(attempts, attempt{client: r.proxyC, endpoints: dohEndpoints})
+	}
+	for _, att := range attempts {
+		if ctx.Err() != nil {
+			break
 		}
-		req.Header.Set("Accept", "application/dns-json")
-		req.Header.Set("User-Agent", "WailsTools/1.0")
-		resp, err := r.client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		var parsed dohResponse
-		decodeErr := json.NewDecoder(resp.Body).Decode(&parsed)
-		_ = resp.Body.Close()
-		if decodeErr != nil {
-			lastErr = decodeErr
-			continue
-		}
-		if parsed.Status != 0 {
-			lastErr = fmt.Errorf("dns status %d", parsed.Status)
-			continue
-		}
-		for _, ans := range parsed.Answer {
-			if ans.Type != 1 {
+		for _, endpoint := range att.endpoints {
+			if ctx.Err() != nil {
+				break
+			}
+			name := normalizeHost(host)
+			url := fmt.Sprintf("https://%s%s?name=%s&type=A", endpoint.Host, endpoint.Path, name)
+			reqCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+			if err != nil {
+				cancel()
+				return "", err
+			}
+			req.Header.Set("Accept", "application/dns-json")
+			req.Header.Set("User-Agent", "WailsTools/1.0")
+			resp, err := att.client.Do(req)
+			if err != nil {
+				cancel()
+				lastErr = err
 				continue
 			}
-			if ip := net.ParseIP(ans.Data); ip != nil {
-				if v4 := ip.To4(); v4 != nil {
-					return v4.String(), nil
+			var parsed dohResponse
+			decodeErr := json.NewDecoder(resp.Body).Decode(&parsed)
+			_ = resp.Body.Close()
+			cancel()
+			if decodeErr != nil {
+				lastErr = decodeErr
+				continue
+			}
+			if parsed.Status != 0 {
+				lastErr = fmt.Errorf("dns status %d", parsed.Status)
+				continue
+			}
+			for _, ans := range parsed.Answer {
+				if ans.Type != 1 {
+					continue
+				}
+				if ip := net.ParseIP(ans.Data); ip != nil {
+					if v4 := ip.To4(); v4 != nil {
+						return v4.String(), nil
+					}
 				}
 			}
+			lastErr = errors.New("no A record")
 		}
-		lastErr = errors.New("no A record")
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no DoH endpoint")
 	}
 	return "", lastErr
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

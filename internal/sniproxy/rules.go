@@ -182,22 +182,22 @@ func HostOf(hostport string) (string, string) {
 // DefaultRules is the built-in allowlist: GitHub, Wikipedia, HuggingFace,
 // Twitter/X, Pixiv and a few commonly blocked sites.
 const DefaultRules = `# SNI 代理规则
-# 域名 = 固定 IP（可多个，逗号分隔）；不带 IP 的条目用 DoH 解析
-# 以点开头表示匹配所有子域；[别名] 复用别的条目的 IP；! 前缀表示不做 MITM
+# 域名 / .子域 / 域名 = 固定IP（可多个，逗号分隔）/ 别名 = [别名]
+# 不带 IP 的条目用 DoH 解析并缓存 3 天；! 前缀表示只换 IP、不做 MITM
 
-# --- GitHub ---
-github.com=140.82.116.3,140.82.114.4
-.github.com=140.82.116.3,140.82.114.4
+# ---github---
+github.com
+.github.com
 githubassets.com
 .githubassets.com
 github.githubassets.com
 .github.io
-api.github.com=140.82.112.5,140.82.113.5
+api.github.com
 raw.githubusercontent.com=185.199.108.133,185.199.109.133,185.199.110.133,185.199.111.133
 objects.githubusercontent.com=185.199.108.133,185.199.109.133
 release-assets.githubusercontent.com=185.199.108.133,185.199.109.133
 avatars.githubusercontent.com=185.199.108.133
-.githubusercontent.com=185.199.108.133,185.199.109.133
+githubusercontent.com=185.199.108.133,185.199.109.133
 
 # --- Wikipedia ---
 wiki=208.80.153.224
@@ -235,8 +235,8 @@ cas-bridge.xethub.hf.co
 
 # --- Twitter / X ---
 tw1=104.244.42.13
-twitter.com=[tw1]
-.twitter.com=[tw1]
+x.com=[tw1]
+.x.com=[tw1]
 abs.twimg.com=93.184.220.70
 abs-0.twimg.com
 pbs.twimg.com=151.101.244.159
@@ -246,22 +246,24 @@ pi=210.140.139.133
 pixiv.net=[pi]
 .pixiv.net=[pi]
 .pximg.net=[pi]
+# --- Discord ---
+discord.com=162.159.128.233
+.discord.com=162.159.128.233
+discordapp.com=162.159.128.233
+.discordapp.com=162.159.128.233
+.discord.gg=162.159.128.233
+.discordapp.net=162.159.128.233
 
-# --- 其它常用 ---
-reddit.com=151.101.65.140
-.reddit.com=151.101.65.140
-.redditmedia.com
-dropbox.com=78.129.226.64
-.dropbox.com=78.129.226.64
+# Others
 dropboxapi.com
 vercel.app=76.76.21.98
-api.b.ai=52.223.39.133
 .nodeseek.com
 nslookup.io
 .nslookup.io
 .openai.com
 chatgpt.com
 .chatgpt.com
+steamcommunity.com
 `
 
 // Validate checks a host before it is used as a certificate name.

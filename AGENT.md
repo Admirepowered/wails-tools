@@ -288,6 +288,18 @@ wails build
 - 根私钥只存在本机 `sniproxy/root-ca.key`（0600），叶证书内存缓存，不落盘。
 - 规则里用 `!domain` 可以强制"只用固定 IP、不解密"，适合证书固定（pinning）的应用。
 
-### 10.4 验证
+### 10.4 DoH 走代理（中国网络必须）
+- 实测：直连 `cloudflare-dns.com` 的固定 IP（104.16.249.249 等）在本地会被重置，系统 DNS 对 `discord.com` / `github.com` 返回的是污染答案（`face:b00c` 段、Azure 地址）。
+- `Resolver.SetUpstream()` 让 DoH 在直连失败后改走已有代理，并且**把目标地址改写成固定 IP 再 CONNECT**（避免代理侧 DNS 也被污染）；默认端点是 Cloudflare（`/dns-query`）+ Google（`/resolve`/8.8.8.8）。
+- 直连只尝试前 2 个端点、每个请求 6s，避免把总超时耗在直连上。
+
+### 10.5 `discord.com=162.159.128.233` 诊断结论（2026-11-15）
+- 同一 IP + SNI `example.com` → TLS 成功（证书 CN=example.com）；同一 IP + SNI `discord.com` 直连 → **握手阶段被 RST/EOF**。
+- 从境内服务器（s2）经 relay 发同样的 ClientHello 也被重置；把 ClientHello 从香港节点发出（`CONNECT 162.159.128.233:443`）→ **TLS 成功，证书 CN=discord.com**，`GET /` 200，`/api/v9/gateway` 返回 `wss://gateway.discord.gg`。
+- 结论：**不是 Cloudflare 拒绝**，而是链路上按 SNI 重置（固定 IP 只能解决 DNS 污染，不能解决 SNI 阻断）。使用 SNI 代理时必须保持「出站走已有代理」，让第二段 TLS 从境外发出。
+- 已把 Discord 系列（`discord.com` / `discordapp.com` / `discord.gg` / `discordapp.net`）加入默认规则，均验证在同一固定 IP 上可握手。
+
+### 10.6 验证
 - `TestParseAndMatchRules` / `TestDefaultRulesCoverGithub`：规则解析、别名、子域、`!` 透传。
 - `TestMitmTunnelThroughProxy`：本地起 TLS 源站（8443）→ SNI 代理 MITM（规则 `origin.test=127.0.0.1`）→ 客户端用根证书校验通过并回显 `ping-mitm`，且 `stats.mitm==1`。
+
