@@ -15,6 +15,22 @@ import (
 	"time"
 )
 
+// InterceptInfo describes a parsed tunnel request before the proxy chain dials.
+type InterceptInfo struct {
+	Client net.Conn
+	// Reader carries bytes already buffered from the client.
+	Reader io.Reader
+	Host   string
+	Port   string
+	// Kind is "http-connect" or "socks5".
+	Kind string
+}
+
+// Interceptor lets the app take a tunnel over itself (SNI proxy). Returning
+// true means the interceptor owns the connection and already sent the success
+// reply to the client.
+type Interceptor func(info InterceptInfo) bool
+
 // ServerConfig configures the local mixed inbound.
 type ServerConfig struct {
 	Node Node
@@ -30,7 +46,9 @@ type ServerConfig struct {
 	// Username/Password enable SOCKS5 user/pass auth and HTTP Basic proxy auth.
 	Username string
 	Password string
-	Logf     func(format string, args ...any)
+	// Intercept runs before the chain dials; it can handle the tunnel itself.
+	Intercept Interceptor
+	Logf      func(format string, args ...any)
 }
 
 // Stats counts inbound activity.
@@ -233,6 +251,12 @@ func (s *Server) handleSOCKS5(conn net.Conn, br *bufio.Reader) error {
 	if err != nil {
 		return err
 	}
+	if s.cfg.Intercept != nil {
+		host, port := splitTarget(target)
+		if s.cfg.Intercept(InterceptInfo{Client: conn, Reader: br, Host: host, Port: port, Kind: "socks5"}) {
+			return nil
+		}
+	}
 	upstream, err := s.dialer.Dial(context.Background(), target)
 	if err != nil {
 		_, _ = conn.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
@@ -330,6 +354,12 @@ func (s *Server) handleHTTP(conn net.Conn, br *bufio.Reader) error {
 		return errors.New("http: proxy auth required")
 	}
 	if strings.EqualFold(req.method, "CONNECT") {
+		if s.cfg.Intercept != nil {
+			host, port := splitTarget(req.target)
+			if s.cfg.Intercept(InterceptInfo{Client: conn, Reader: br, Host: host, Port: port, Kind: "http-connect"}) {
+				return nil
+			}
+		}
 		upstream, err := s.dialer.Dial(context.Background(), req.target)
 		if err != nil {
 			_, _ = conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"))
@@ -477,4 +507,16 @@ func closeWrite(c net.Conn) {
 		return
 	}
 	_ = c.Close()
+}
+
+// splitTarget splits host:port, tolerating a bare host.
+func splitTarget(target string) (string, string) {
+	host, port, err := net.SplitHostPort(target)
+	if err != nil {
+		return strings.TrimSpace(target), "443"
+	}
+	if port == "" {
+		port = "443"
+	}
+	return strings.ToLower(host), port
 }

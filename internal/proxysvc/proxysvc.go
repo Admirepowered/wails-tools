@@ -30,6 +30,8 @@ type StartOptions struct {
 	Relay miproxy.RelayFunc
 	// Direct decides whether a destination bypasses the proxy.
 	Direct func(host string) bool
+	// Intercept takes over matching TLS tunnels (SNI engine) before the chain.
+	Intercept miproxy.Interceptor
 }
 
 // Status describes the running local proxy.
@@ -88,6 +90,7 @@ func (s *Service) Start(node miproxy.Node, opts StartOptions) (Status, error) {
 		ListenAddr: listen,
 		Username:   opts.Username,
 		Password:   opts.Password,
+		Intercept:  opts.Intercept,
 		Logf:       s.logf,
 	})
 	if err != nil {

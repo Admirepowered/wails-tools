@@ -3,21 +3,25 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"wailstools/internal/proxyx"
+	"wailstools/internal/miproxy"
 	"wailstools/internal/settings"
 	"wailstools/internal/sniproxy"
 )
 
-// sniState owns the running local SNI proxy.
+// sniState owns the SNI tunnel engine. It has no listener of its own: the
+// local proxy asks it first and only falls back to the proxy chain when the
+// domain is not covered by the rules.
 type sniState struct {
-	server   *sniproxy.Server
+	rules    *sniproxy.RuleSet
 	resolver *sniproxy.Resolver
 	ca       *sniproxy.CA
+	handler  *sniproxy.Handler
 	dir      string
 }
 
@@ -38,96 +42,156 @@ func effectiveSNIRules(raw string) string {
 	return raw
 }
 
-// restartSNIProxy applies the current settings: stop the old listener, start a
-// new one when enabled.
-func (a *App) restartSNIProxy() error {
-	if a.sni != nil && a.sni.server != nil {
-		_ = a.sni.server.Close()
-	}
-	state := &sniState{}
+// sniChainDialer builds the outbound dialer used by the SNI tunnel, honouring
+// the same chain/relay settings as the local proxy.
+func (a *App) sniChainDialer() *miproxy.Dialer {
+	hops, relay := a.buildChain()
+	return miproxy.NewChainDialer(hops, relay, a.buildDirectFunc(), 15e9)
+}
+
+// applySNIProxy rebuilds the SNI engine from settings (no listener).
+func (a *App) applySNIProxy() error {
 	cfg := a.settings.Get().SNIProxy
 	if !cfg.Enabled {
-		a.sni = state
+		a.setSNI(nil)
+		a.emit("sniproxy:state", a.SNIProxyStatus())
 		return nil
 	}
 	dir, err := a.sniDir()
 	if err != nil {
 		return err
 	}
-	state.dir = dir
 	logf := func(format string, args ...any) {
 		if a.log != nil {
 			a.log.Printf(format, args...)
 		}
 	}
+	state := &sniState{dir: dir}
 	state.resolver = sniproxy.NewResolver(dir, logf)
 	ca, err := sniproxy.LoadOrCreateCA(dir)
 	if err != nil {
 		return err
 	}
 	state.ca = ca
+	state.rules = sniproxy.ParseRules(effectiveSNIRules(cfg.Rules))
 
 	var upstream func(ctx context.Context, network, addr string) (net.Conn, error)
 	if cfg.UseExistingProxy {
-		rule := a.settings.Get().Proxy.Resolve(settings.ScopeAll)
-		if dialer, derr := proxyx.New(rule); derr == nil && dialer != nil {
-			upstream = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				if dialer.Bypassed(addr) {
-					return (&net.Dialer{Timeout: 15e9}).DialContext(ctx, network, addr)
-				}
-				return dialer.DialContext(ctx, network, addr)
-			}
-			logf("sniproxy: upstream uses %s://%s", rule.Mode, rule.URL)
-		} else {
-			logf("sniproxy: no upstream proxy configured, dialing directly")
+		dialer := a.sniChainDialer()
+		upstream = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.Dial(ctx, addr)
 		}
+		state.resolver.SetUpstream(func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.Dial(ctx, addr)
+		})
+		logf("sniproxy: outbound follows the proxy chain")
 	}
-	if upstream != nil {
-		state.resolver.SetUpstream(upstream)
-	}
-	server, err := sniproxy.Start(sniproxy.Options{
-		Addr:     sniAddrOrDefault(cfg.Addr),
-		Rules:    sniproxy.ParseRules(effectiveSNIRules(cfg.Rules)),
+	state.handler = sniproxy.NewHandler(sniproxy.Options{
+		Rules:    state.rules,
 		Resolver: state.resolver,
 		CA:       ca,
 		Mitm:     cfg.Mitm,
 		Upstream: upstream,
 		Logf:     logf,
 	})
-	if err != nil {
-		a.sni = state
-		return err
-	}
-	state.server = server
-	a.sni = state
+	a.setSNI(state)
+	logf("sniproxy: %d rule entries, mitm=%v", len(strings.Split(strings.TrimSpace(effectiveSNIRules(cfg.Rules)), "\n")), cfg.Mitm)
 	a.emit("sniproxy:state", a.SNIProxyStatus())
 	return nil
 }
 
-// SNIProxyStatus reports the listener state and counters.
+func (a *App) setSNI(state *sniState) {
+	a.sniMu.Lock()
+	a.sni = state
+	a.sniMu.Unlock()
+}
+
+// sniSnapshot returns the current engine (nil when disabled).
+func (a *App) sniSnapshot() *sniState {
+	a.sniMu.Lock()
+	defer a.sniMu.Unlock()
+	return a.sni
+}
+
+// sniIntercept is handed to the local proxy: matching TLS tunnels are served by
+// the SNI engine (no SNI sent upstream), everything else falls through to the
+// proxy chain.
+func (a *App) sniIntercept(info miproxy.InterceptInfo) bool {
+	state := a.sniSnapshot()
+	if state == nil || state.handler == nil || info.Client == nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(info.Host))
+	port := strings.TrimSpace(info.Port)
+	if host == "" || port == "" {
+		return false
+	}
+	if port != "443" && port != "8443" {
+		return false
+	}
+	if _, ok := state.handler.Match(host); !ok {
+		return false
+	}
+	// The interceptor owns the success reply from here on.
+	switch info.Kind {
+	case "socks5":
+		if _, err := info.Client.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+			return true
+		}
+	case "http-connect":
+		if _, err := info.Client.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
+			return true
+		}
+	}
+	conn := info.Client
+	if info.Reader != nil {
+		conn = &readerConn{Conn: info.Client, r: info.Reader}
+	}
+	state.handler.HandleTunnel(conn, host, port)
+	return true
+}
+
+// readerConn overlays bytes buffered by the inbound parser.
+type readerConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (c *readerConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+// SNIProxyStatus reports the SNI engine state (it shares the proxy port).
 func (a *App) SNIProxyStatus() map[string]any {
 	cfg := a.settings.Get().SNIProxy
 	out := map[string]any{
-		"enabled": cfg.Enabled, "addr": cfg.Addr, "mitm": cfg.Mitm,
+		"enabled": cfg.Enabled, "mitm": cfg.Mitm,
 		"useExistingProxy": cfg.UseExistingProxy, "running": false,
+		"proxyAddr": a.proxySvcStatusAddr(),
 	}
-	if a.sni != nil && a.sni.server != nil {
-		stats := a.sni.server.Stats()
+	state := a.sniSnapshot()
+	if state != nil && state.handler != nil {
+		stats := state.handler.Stats()
 		out["running"] = true
-		out["listen"] = a.sni.server.Addr()
 		out["stats"] = map[string]any{
 			"active": stats.Active, "total": stats.Total, "mitm": stats.Mitm,
 			"passthrough": stats.Passthrough, "upstream": stats.Upstream,
 			"failed": stats.Failed, "lastError": stats.LastError,
 		}
-	}
-	if a.sni != nil && a.sni.resolver != nil {
-		out["cachedDomains"] = a.sni.resolver.CacheSize()
-	}
-	if a.sni != nil && a.sni.ca != nil {
-		out["caPath"] = a.sni.ca.CertPath()
+		out["cachedDomains"] = state.resolver.CacheSize()
+		out["caPath"] = state.ca.CertPath()
 	}
 	return out
+}
+
+// proxySvcStatusAddr is the local proxy address once it is running.
+func (a *App) proxySvcStatusAddr() string {
+	if a.proxySvc == nil {
+		return ""
+	}
+	st := a.proxySvc.Status()
+	if !st.Running {
+		return ""
+	}
+	return st.Addr
 }
 
 // GetSNIProxySettings returns the saved settings plus the effective rule text.
@@ -138,21 +202,14 @@ func (a *App) GetSNIProxySettings() map[string]any {
 		rules = sniproxy.DefaultRules
 	}
 	return map[string]any{
-		"enabled": cfg.Enabled, "addr": cfg.Addr, "mitm": cfg.Mitm,
+		"enabled": cfg.Enabled, "mitm": cfg.Mitm,
 		"useExistingProxy": cfg.UseExistingProxy, "rules": rules,
 		"rulesAreDefault": strings.TrimSpace(cfg.Rules) == "",
 	}
 }
 
-// SaveSNIProxySettings persists the settings and restarts the listener.
+// SaveSNIProxySettings persists the settings and rebuilds the engine live.
 func (a *App) SaveSNIProxySettings(next settings.SNIProxySettings) (map[string]any, error) {
-	next.Addr = strings.TrimSpace(next.Addr)
-	if next.Addr == "" {
-		next.Addr = "127.0.0.1:17891"
-	}
-	if _, _, err := net.SplitHostPort(next.Addr); err != nil {
-		return nil, errors.New("监听地址格式应为 host:port，例如 127.0.0.1:17891")
-	}
 	if strings.TrimSpace(next.Rules) == "" {
 		next.Rules = sniproxy.DefaultRules
 	}
@@ -162,7 +219,7 @@ func (a *App) SaveSNIProxySettings(next settings.SNIProxySettings) (map[string]a
 	}); err != nil {
 		return nil, err
 	}
-	if err := a.restartSNIProxy(); err != nil {
+	if err := a.applySNIProxy(); err != nil {
 		return a.SNIProxyStatus(), err
 	}
 	return a.SNIProxyStatus(), nil
@@ -170,10 +227,11 @@ func (a *App) SaveSNIProxySettings(next settings.SNIProxySettings) (map[string]a
 
 // InstallSNIProxyCA trusts the generated root certificate (current user).
 func (a *App) InstallSNIProxyCA() (map[string]any, error) {
-	if a.sni == nil || a.sni.ca == nil {
-		return nil, errors.New("请先开启 SNI 代理以生成根证书")
+	state := a.sniSnapshot()
+	if state == nil || state.ca == nil {
+		return nil, errors.New("请先开启 SNI 分流以生成根证书")
 	}
-	path, err := a.sni.ca.InstallRoot()
+	path, err := state.ca.InstallRoot()
 	out := map[string]any{"caPath": path}
 	if err != nil {
 		return out, err
@@ -184,8 +242,8 @@ func (a *App) InstallSNIProxyCA() (map[string]any, error) {
 
 // SNIProxyCAPath returns where the root certificate lives.
 func (a *App) SNIProxyCAPath() (string, error) {
-	if a.sni != nil && a.sni.ca != nil {
-		return a.sni.ca.CertPath(), nil
+	if state := a.sniSnapshot(); state != nil && state.ca != nil {
+		return state.ca.CertPath(), nil
 	}
 	dir, err := a.sniDir()
 	if err != nil {
@@ -215,18 +273,15 @@ func (a *App) ResetSNIProxyRules() (map[string]any, error) {
 	}); err != nil {
 		return nil, err
 	}
-	return a.GetSNIProxySettings(), a.restartSNIProxy()
+	if err := a.applySNIProxy(); err != nil {
+		return nil, err
+	}
+	return a.GetSNIProxySettings(), nil
 }
 
 // startSNIProxyOnBoot applies the saved state at startup.
 func (a *App) startSNIProxyOnBoot() {
-	if err := a.restartSNIProxy(); err != nil && a.log != nil {
+	if err := a.applySNIProxy(); err != nil && a.log != nil {
 		a.log.Printf("sniproxy start: %v", err)
 	}
-}
-func sniAddrOrDefault(addr string) string {
-	if strings.TrimSpace(addr) == "" {
-		return "127.0.0.1:17891"
-	}
-	return strings.TrimSpace(addr)
 }

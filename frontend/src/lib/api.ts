@@ -437,7 +437,7 @@ export interface SecretSyncResult {
 
 export interface SNIProxySettings {
   enabled: boolean
-  addr: string
+  addr?: string
   mitm: boolean
   useExistingProxy: boolean
   rules: string
@@ -456,11 +456,11 @@ export interface SNIProxyStats {
 
 export interface SNIProxyStatus {
   enabled: boolean
-  addr: string
   mitm: boolean
   useExistingProxy: boolean
   running: boolean
-  listen?: string
+  /** Local proxy address the SNI engine shares. */
+  proxyAddr?: string
   stats?: SNIProxyStats
   cachedDomains?: number
   caPath?: string
@@ -1201,6 +1201,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

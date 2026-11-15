@@ -53,6 +53,32 @@ type Server struct {
 	lastErr                                            string
 }
 
+// Handler is the tunnel engine without its own listener. The local proxy calls
+// it for domains covered by the rules.
+type Handler struct{ srv *Server }
+
+// NewHandler builds a listener-less handler.
+func NewHandler(opts Options) *Handler {
+	return &Handler{srv: &Server{opts: opts, conns: map[net.Conn]struct{}{}}}
+}
+
+// HandleTunnel serves one already-accepted tunnel. The caller must have sent
+// the protocol success reply (HTTP 200 / SOCKS5 reply) beforehand.
+func (h *Handler) HandleTunnel(conn net.Conn, host, port string) {
+	atomic.AddInt64(&h.srv.total, 1)
+	atomic.AddInt64(&h.srv.active, 1)
+	defer atomic.AddInt64(&h.srv.active, -1)
+	h.srv.tunnel(conn, host, port)
+}
+
+// Match reports whether the rules cover host.
+func (h *Handler) Match(host string) (Rule, bool) {
+	return h.srv.opts.Rules.Match(host)
+}
+
+// Stats snapshots the counters.
+func (h *Handler) Stats() Stats { return h.srv.Stats() }
+
 // Start binds the proxy and serves until Close.
 func Start(opts Options) (*Server, error) {
 	if opts.Addr == "" {

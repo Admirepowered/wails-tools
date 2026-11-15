@@ -69,6 +69,7 @@ type App struct {
 	notesSyncTimer *time.Timer
 	p2p            *p2pHub
 	sni            *sniState
+	sniMu          sync.Mutex
 	lastRelayKind  string
 
 	mu      sync.Mutex

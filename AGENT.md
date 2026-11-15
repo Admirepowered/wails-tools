@@ -309,3 +309,28 @@ wails build
 - `TestMitmTunnelThroughProxy`：本地起 TLS 源站（8443）→ SNI 代理 MITM（规则 `origin.test=127.0.0.1`）→ 客户端用根证书校验通过并回显 `ping-mitm`，且 `stats.mitm==1`。
 
 
+
+---
+
+## 十一、2026-11-15 第六批（v1.3.52）：SNI 分流并入本地代理
+
+### 11.1 只有一个监听端口
+- `miproxy.ServerConfig` 新增 `Intercept(miproxy.InterceptInfo) bool`：在 SOCKS5 / HTTP CONNECT 解析出目标后、链路拨号**之前**调用。
+  - `InterceptInfo{Client, Reader, Host, Port, Kind}`；`Reader` 是 inbound 已经缓冲的字节（TLS ClientHello 可能在其中）。
+  - 返回 `true` = 拦截者接管连接（并且**由它自己写**成功应答：HTTP `200 Connection established` / SOCKS5 回复）。
+- `proxysvc.StartOptions.Intercept` 透传；`app.startEngine` 把它设成 `a.sniIntercept`。
+- `sniproxy.Handler`（无监听器版本）：`NewHandler(opts)` + `HandleTunnel(conn, host, port)` + `Match(host)` + `Stats()`；独立 `Start()` 仅留给测试用。
+- 判定顺序：**SNI 分流 → 代理链路**。只要 `SNIProxy.Enabled=false` 或域名不在规则里或端口不是 443/8443，就 `return false`，走原来的节点链路。
+
+### 11.2 出站顺序
+- SNI 接管后：客户端 TLS 由本地根证书终止 → 出站重新握手到固定/DoH 解析出的 IP，**不发送 SNI**，站点由 `Host` 头决定。
+- `useExistingProxy` 打开时，SNI 出站也走同一套链路（`buildChain()` 的节点/服务器中转/打洞设备），所以"本地网络连不上目标 IP"时仍可由节点代连；关闭则直连。
+- DoH 解析同样在直连失败后走这条链路，并把目标改写成固定 IP 再 CONNECT（避免节点侧 DNS 污染）。
+
+### 11.3 状态与开关
+- SNI 卡片不再有监听地址；状态显示「与本地代理共用端口」+ 接管/MITM/透传/失败计数 + DNS 缓存数 + CA 路径。
+- 开关只控制 SNI 引擎，不影响代理链路本身；关闭后所有流量照旧走节点。
+
+### 11.4 验证
+- `TestLocalProxyInterceptsRulesOnly`：本地 mixed 代理 + 拦截器 → 规则内域名被 SNI 接管（源站确认收到的握手 **ServerName 为空**），非规则域名落到链路。
+- 实机（真实网络、直连出口）：经本地代理 `https://discord.com/api/v9/gateway` 200、`https://github.com/` 200，`example.com`（不在规则内）走链路。

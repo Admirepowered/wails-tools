@@ -139,6 +139,9 @@ func (a *App) startEngine(node miproxy.Node) (proxysvc.Status, error) {
 		Username: rt.Username,
 		Password: rt.Password,
 		Direct:   a.buildDirectFunc(),
+		// The SNI engine runs inside this listener: matching domains are served
+		// locally (no SNI upstream), everything else goes through the chain.
+		Intercept: a.sniIntercept,
 	}
 	if rt.External && rt.Port > 0 {
 		opts.Port = rt.Port
