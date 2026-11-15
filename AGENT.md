@@ -550,3 +550,13 @@ n2n 的"打洞"本质是：两端都用**同一个 UDP socket** 持续向 supern
   - 端口映射：`P2PPMapPort(device, local, remote)` 在 `127.0.0.1:local` 监听，每条本地 TCP 连接开一条 QUIC 流让对端拨 `127.0.0.1:remote`，连接结束即关流（单连接单流、用完即释放）；`P2PUnmap` 删映射；`p2pHub.drop` 关闭打洞时**连带关闭该设备的全部监听**。
 - 测试：`TestP2PInviteAcceptAndMap`（9 位设备号邀请 → 接受 → 角色锁拒绝反向发起 → 双方打洞 → 通过映射通道对 echo 服务做 echo）通过；全仓库 `go vet`/`go test` 通过。
 
+
+---
+
+## 十九、2026-11-16 设备号补齐与界面去重（v1.3.63）
+
+- **登录即分配**：`registerDevice` 在 Touch/Add 之后调用 `EnsureDeviceNumbers(userID)`，把该账号下所有缺号的设备一次性补 9 位号（老数据也能立刻用），不再要求"让对方重新登录"。
+- `p2p.request` 支持 `targetDevice`：设备列表右键「连接到此设备」直接按设备 ID 邀请，不再依赖先拿到设备号；解析到目标后若仍无号会即时补。
+- 发起方的设备号缺失时同样即时补齐，邀请里不会出现空的 `#`。
+- 前端修复：`设备号穿透` 卡片被 `Replace` 插入两次，删掉重复块（`tsc` 通过）。
+- 实测部署后 `wt-admin -devices admire` 三台设备全部有号（924240027 / 418047612 / 113514314）。

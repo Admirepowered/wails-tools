@@ -291,7 +291,13 @@ func (c *callCtx) registerDevice(userID, deviceID, deviceName, machineID string)
 	if len(c.api.DB.ListDevices(userID)) >= maxDevicesPerUser {
 		return wire.Errorf("device_limit", "该账号已达 %d 台设备上限，请在管理页移除旧设备", maxDevicesPerUser)
 	}
-	return c.api.DB.AddDevice(userID, deviceID, deviceName, machineID)
+	if err := c.api.DB.AddDevice(userID, deviceID, deviceName, machineID); err != nil {
+		return err
+	}
+	// Make sure every device of this account has a 9-digit number; legacy rows
+	// were created before the feature existed.
+	_, _ = c.api.DB.EnsureDeviceNumbers(userID)
+	return nil
 }
 
 var errNoUser = errors.New("no user")

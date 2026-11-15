@@ -74,6 +74,12 @@ func (a *App) P2PConnectByNumber(number string) (map[string]any, error) {
 	if len(number) != 9 {
 		return nil, errors.New("请输入 9 位设备号")
 	}
+	return a.p2pConnectTarget("", number, "")
+}
+
+// p2pConnectTarget invites a device either by 9-digit number or by device id,
+// then waits for acceptance and punches.
+func (a *App) p2pConnectTarget(targetDevice, number, label string) (map[string]any, error) {
 	link, err := a.requireLink()
 	if err != nil {
 		return nil, err
@@ -81,7 +87,12 @@ func (a *App) P2PConnectByNumber(number string) (map[string]any, error) {
 	me := a.localDeviceID()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	res, err := link.P2PRequest(ctx, number, me)
+	var res map[string]any
+	if number != "" {
+		res, err = link.P2PRequest(ctx, number, me)
+	} else {
+		res, err = link.P2PRequestDevice(ctx, targetDevice, me)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +102,7 @@ func (a *App) P2PConnectByNumber(number string) (map[string]any, error) {
 	if id == "" {
 		return nil, errors.New("服务器没有返回邀请编号")
 	}
-	a.emit("p2p:invite-sent", map[string]any{"request": id, "number": number})
+	a.emit("p2p:invite-sent", map[string]any{"request": id, "number": number, "device": toDevice, "label": label})
 
 	// Wait for the target to answer (max 90s, matching the server TTL).
 	deadline := time.Now().Add(95 * time.Second)

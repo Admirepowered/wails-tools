@@ -24,24 +24,54 @@ func (c *callCtx) p2pRequest(body json.RawMessage) (any, error) {
 		return nil, wire.Errorf("unsupported", "this server has no p2p rendezvous enabled")
 	}
 	var req struct {
-		Number string `json:"number"`
-		Device string `json:"device"`
+		Number       string `json:"number"`
+		Device       string `json:"device"`
+		TargetDevice string `json:"targetDevice"`
 	}
 	if err := wire.Decode(body, &req); err != nil {
 		return nil, wire.Errorf("bad_request", "invalid body: %v", err)
 	}
 	me := strings.TrimSpace(req.Device)
 	number := strings.TrimSpace(req.Number)
-	if me == "" || number == "" {
+	if me == "" {
+		return nil, wire.Errorf("bad_request", "缺少当前设备")
+	}
+	if number == "" && strings.TrimSpace(req.TargetDevice) == "" {
 		return nil, wire.Errorf("bad_request", "设备号不能为空")
 	}
-	myDev, ok := findDevice(c.api.DB.ListDevices(uid), me)
-	if !ok {
+	myDev, meFound := findDevice(c.api.DB.ListDevices(uid), me)
+	if !meFound {
 		return nil, wire.Errorf("not_found", "当前设备未登记，请重新登录后再试")
 	}
-	targetUser, targetDev, ok := c.api.DB.FindDeviceByNumber(number)
-	if !ok {
-		return nil, wire.Errorf("not_found", "没有找到设备号 %s 对应的设备", number)
+	if myDev.Number == "" {
+		_, _ = c.api.DB.EnsureDeviceNumbers(uid)
+		if devs, err := c.api.DB.EnsureDeviceNumbers(uid); err == nil {
+			if d, ok := findDevice(devs, me); ok {
+				myDev = d
+			}
+		}
+	}
+	var targetUser string
+	var targetDev store.Device
+	var ok bool
+	if number != "" {
+		targetUser, targetDev, ok = c.api.DB.FindDeviceByNumber(number)
+		if !ok {
+			return nil, wire.Errorf("not_found", "没有找到设备号 %s 对应的设备", number)
+		}
+	} else {
+		// Direct device id: used by "connect to this device" from the list.
+		targetID := strings.TrimSpace(req.TargetDevice)
+		targetUser, targetDev, ok = c.api.DB.FindDeviceByID(targetID)
+		if !ok {
+			return nil, wire.Errorf("not_found", "设备不存在，请刷新设备列表")
+		}
+		if targetDev.Number == "" {
+			_, _ = c.api.DB.EnsureDeviceNumbers(targetUser)
+			if _, updated, ok2 := c.api.DB.FindDeviceByID(targetDev.ID); ok2 {
+				targetDev = updated
+			}
+		}
 	}
 	if targetDev.ID == me {
 		return nil, wire.Errorf("bad_request", "不能穿透自己")

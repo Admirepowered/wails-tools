@@ -213,29 +213,7 @@ func (a *App) P2PConnect(deviceID string) (map[string]any, error) {
 	if _, ok := a.p2p.get(deviceID); ok {
 		return a.P2PStatus(), nil
 	}
-	// The invite flow needs the peer's 9-digit number; resolve it first.
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	var out struct {
-		Devices []struct {
-			ID     string `json:"id"`
-			Number string `json:"number"`
-		} `json:"devices"`
-	}
-	if err := a.link.Call(ctx, "admin.devices.self", nil, &out); err != nil {
-		return nil, err
-	}
-	number := ""
-	for _, d := range out.Devices {
-		if d.ID == deviceID {
-			number = d.Number
-			break
-		}
-	}
-	if len(number) != 9 {
-		return nil, errors.New("该设备还没有分配 9 位设备号，请让对方重新登录一次")
-	}
-	if _, err := a.P2PConnectByNumber(number); err != nil {
+	if _, err := a.p2pConnectTarget(deviceID, "", deviceID); err != nil {
 		a.p2p.fail(deviceID, err)
 		return nil, err
 	}

@@ -1054,6 +1054,16 @@ func (c *Client) P2PRequest(ctx context.Context, number, device string) (map[str
 	return out, nil
 }
 
+// P2PRequestDevice invites a device by its local device id (no number needed).
+func (c *Client) P2PRequestDevice(ctx context.Context, targetDevice, device string) (map[string]any, error) {
+	var out map[string]any
+	body := map[string]any{"targetDevice": targetDevice, "device": device}
+	if err := c.Call(ctx, "p2p.request", body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // P2PRequests lists pending invitations for a device.
 func (c *Client) P2PRequests(ctx context.Context, device string) ([]map[string]any, error) {
 	var out struct {

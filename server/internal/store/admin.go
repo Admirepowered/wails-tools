@@ -266,3 +266,59 @@ func (d *DB) DeleteUserDevices(userID string) {
 		return b.Delete([]byte(userID))
 	})
 }
+
+// EnsureDeviceNumbers assigns a 9-digit number to every device of the user
+// that is still missing one (rows created before the feature existed).
+func (d *DB) EnsureDeviceNumbers(userID string) ([]Device, error) {
+	var out []Device
+	err := d.db.Update(func(tx *bolt.Tx) error {
+		devices := readDevices(tx, userID)
+		changed := false
+		for i := range devices {
+			if devices[i].Number == "" {
+				num, err := allocDeviceNumber(tx)
+				if err != nil {
+					continue
+				}
+				devices[i].Number = num
+				changed = true
+			}
+		}
+		out = devices
+		if !changed {
+			return nil
+		}
+		return putDevices(tx, userID, devices)
+	})
+	return out, err
+}
+
+// FindDeviceByID locates a device by its id across all users.
+func (d *DB) FindDeviceByID(id string) (userID string, dev Device, ok bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", Device{}, false
+	}
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketDevices)
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(userIDRaw, v []byte) error {
+			var list []Device
+			if json.Unmarshal(v, &list) != nil {
+				return nil
+			}
+			for _, item := range list {
+				if item.ID == id {
+					userID = string(userIDRaw)
+					dev = item
+					ok = true
+					return nil
+				}
+			}
+			return nil
+		})
+	})
+	return userID, dev, ok
+}
