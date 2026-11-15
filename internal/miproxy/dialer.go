@@ -109,7 +109,7 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 		if i < len(hops)-1 {
 			next = hops[i+1].Addr()
 		}
-		stream, err = d.handshake(hop, layered, next)
+		stream, err = d.handshake(hop, layered, stream, next)
 		if err != nil {
 			_ = layered.Close()
 			return nil, fmt.Errorf("%s hop %d (%s): %w", hop.Protocol, i+1, hop.Addr(), err)
@@ -156,12 +156,12 @@ func (d *Dialer) layer(ctx context.Context, conn net.Conn, n Node) (net.Conn, er
 	return out, nil
 }
 
-func (d *Dialer) handshake(node Node, conn net.Conn, target string) (net.Conn, error) {
+func (d *Dialer) handshake(node Node, conn, raw net.Conn, target string) (net.Conn, error) {
 	switch node.Protocol {
 	case ProtoVMess:
 		return newVMessConn(node, conn, target)
 	case ProtoVLESS:
-		return newVLESSConn(node, conn, target)
+		return newVLESSConn(node, conn, raw, target)
 	case ProtoTrojan:
 		return newTrojanConn(node, conn, target)
 	case ProtoSS:

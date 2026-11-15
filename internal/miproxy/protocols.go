@@ -27,7 +27,7 @@ type vlessConn struct {
 	header bool
 }
 
-func newVLESSConn(node Node, conn net.Conn, target string) (net.Conn, error) {
+func newVLESSConn(node Node, conn, raw net.Conn, target string) (net.Conn, error) {
 	uuid, err := uuidBytes(node.UUID)
 	if err != nil {
 		return nil, err
@@ -46,13 +46,13 @@ func newVLESSConn(node Node, conn net.Conn, target string) (net.Conn, error) {
 		return nil, err
 	}
 	buf = append(buf, dest...)
-	// The request header is written unframed; Vision wraps only the payload.
+	// Xray writes the VLESS request header raw; only the body is Vision padded.
 	if _, err := conn.Write(buf); err != nil {
 		return nil, err
 	}
 	stream := conn
-	if flow == "xtls-rprx-vision" && node.Network != NetWS {
-		stream = newVisionConn(conn, uuid)
+	if flow == "xtls-rprx-vision" && node.Network != NetWS && raw != nil {
+		stream = newVisionConn(conn, raw, uuid, conn)
 	}
 	return &vlessConn{raw: conn, conn: stream}, nil
 }

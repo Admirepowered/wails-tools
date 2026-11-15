@@ -476,3 +476,14 @@ wss://gateway.discord.gg/...                 101 Switching Protocols + x\xda 首
 内层 TLS 1.3 (0x304) 证书 *.gstatic.com；HTTPS → 204 No Content
 ```
 单测：链接解析、reality 参数校验、Vision 写帧布局、Vision 读帧（含 direct 切换后裸流）、addons 编码。
+
+### 16.4 v1.3.57：Vision 的 splice 语义（浏览器 HTTP/2 才真正可用）
+v1.3.56 只用 curl（只支持 HTTP/1.1）验证过，浏览器一上 HTTP/2 就 `ERR_CONNECTION_CLOSED` / `bad record MAC`，因为 Vision 不是"纯 padding"协议：
+
+- 客户端**一直 padding** 时，Xray 服务端只要在未 padding 的字节流里看到 `17 03 03`（TLS 应用数据）就会切到 **splice**：它把内层 TLS 记录**直接写到裸 TCP**（绕过外层 TLS），先发一个 `cmd=0x02 (direct)` 的块作为标记。
+- 所以客户端也必须跟着切：读到 `cmd=2` 之后**停止解 padding，直接读裸 TCP**；写方向在首个 `17 03 03` 写时发 `cmd=2` 块，之后**直接写裸 TCP**。
+- 关键坑：切换瞬间 TLS 栈里可能已经缓冲了明文（`input`/`rawInput`），必须先搬出来（Xray 用反射访问这两个字段，我们也用 `unsafe` + `reflect` 照做），否则丢字节 → `bad record MAC`。
+- 另一个坑：`cmd=0x01 (end)` 只表示"padding 结束"，**仍然走外层 TLS**，不能当成 splice；之前把 1 也当 splice，导致 Chrome 的 `edge.microsoft.com`、`www.google.com.hk` 等连接 `ERR_SSL_PROTOCOL_ERROR`。
+- 实现：`visionConn{tls, raw, inner}`；写：padding 块→外层 TLS，splice 后→raw；读：解 padding→`cmd=1` 转"裸 TLS 直读"→`cmd=2` 转 raw 并把 TLS 缓冲并入。
+- 验证：Go 的 h2 客户端与真实 headless Edge 都通过美国 REALITY 节点打开 example.com / google.com.hk / youtube.com / github.com（标题正确）。
+

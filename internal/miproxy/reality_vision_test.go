@@ -48,7 +48,7 @@ func TestVisionWriteFraming(t *testing.T) {
 	a, b := net.Pipe()
 	uuid := make([]byte, 16)
 	_, _ = rand.Read(uuid)
-	vc := newVisionConn(a, uuid)
+	vc := newVisionConn(a, a, uuid, nil)
 	payload := []byte("hello-vision")
 	go func() {
 		_, _ = vc.Write(payload)
@@ -100,7 +100,7 @@ func TestVisionReadFraming(t *testing.T) {
 	a, b := net.Pipe()
 	uuid := make([]byte, 16)
 	_, _ = rand.Read(uuid)
-	vc := newVisionConn(a, uuid)
+	vc := newVisionConn(a, a, uuid, nil)
 
 	go func() {
 		write := func(withUUID bool, cmd byte, payload []byte, padding int) {
