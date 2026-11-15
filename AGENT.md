@@ -263,3 +263,31 @@ wails build
 - `TestSessionLifecycle` / `TestHandleAnnounceExchange`：会话归属、替换、丢弃与 endpoint 交换。
 - 线上验证：UDP 8643 从本机可收发（`{"ok":false,"err":"unknown_or_expired_session"}` 回包），说明云安全组放行了打洞端口。
 
+
+---
+
+## 十、2026-11-15 第五批（v1.3.49）：本地 SNI 代理
+
+### 10.1 结构
+- `internal/sniproxy`：
+  - `rules.go`：文本规则表（`domain` / `domain=IP[,IP]` / `.suffix` / `alias` / `!domain` 透传），域名默认包含子域；内置 GitHub / Wikipedia / HuggingFace / Twitter / Pixiv 等默认规则。
+  - `resolver.go`：**自迭代 DNS**——先查规则里的固定 IP，再查本地缓存（3 天），再用 DoH（Cloudflare 固定 IP + 正常证书校验），最后系统 DNS；缓存落 `sniproxy/dns-cache.json`。
+  - `ca.go`：本地生成 ECDSA P-256 根证书（10 年），按 SNI 签 30 天叶证书；`InstallRoot()` 用 `certutil -user -addstore -f Root` 导入当前用户，失败时返回证书路径让用户手动导入。
+  - `proxy.go`：HTTP CONNECT + SOCKS5 双入口；规则内的域名优先 MITM（终止客户端 TLS → 用真实 SNI 重新握手到固定 IP），`!` 前缀或不支持 MITM 时走"原始 TLS 透传"（只换 IP 不解密）；规则外域名走**已有代理**。
+- 入口：`ProxyPage` 新增「SNI 代理」卡片（开关、监听地址、出站方式、MITM 开关、导入/复制根证书、规则编辑与恢复默认、连接统计、DNS 缓存数、最近错误）。
+- 复用已有代理：出站用 `settings.Proxy.Resolve(ScopeAll)` 构造 `proxyx.Dialer`；`useExistingProxy` 关闭则直连固定 IP。
+
+### 10.2 使用方式
+1. 打开开关（默认监听 `127.0.0.1:17891`）。
+2. 需要 MITM 时点「导入根证书」（Windows 当前用户信任库；其它平台按提示手动导入）。
+3. 把浏览器/系统代理指向该地址；协议是 HTTP 代理（CONNECT）或 SOCKS5，两种都支持。
+4. 规则里 `domain=IP` 用固定 IP（绕过 DNS 污染），不写 IP 的交给 DoH 解析。
+
+### 10.3 安全边界
+- 只在规则命中的域名上解密；未命中域名永远不 MITM，只做转发。
+- 根私钥只存在本机 `sniproxy/root-ca.key`（0600），叶证书内存缓存，不落盘。
+- 规则里用 `!domain` 可以强制"只用固定 IP、不解密"，适合证书固定（pinning）的应用。
+
+### 10.4 验证
+- `TestParseAndMatchRules` / `TestDefaultRulesCoverGithub`：规则解析、别名、子域、`!` 透传。
+- `TestMitmTunnelThroughProxy`：本地起 TLS 源站（8443）→ SNI 代理 MITM（规则 `origin.test=127.0.0.1`）→ 客户端用根证书校验通过并回显 `ping-mitm`，且 `stats.mitm==1`。

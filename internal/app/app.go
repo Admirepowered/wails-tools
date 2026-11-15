@@ -68,6 +68,7 @@ type App struct {
 	notesSyncMu    sync.Mutex
 	notesSyncTimer *time.Timer
 	p2p            *p2pHub
+	sni            *sniState
 	lastRelayKind  string
 
 	mu      sync.Mutex
@@ -269,6 +270,7 @@ func (a *App) Startup(ctx context.Context) {
 	go a.restoreActiveNode()
 	a.startKeepalive()
 	a.startP2PWatcher()
+	a.startSNIProxyOnBoot()
 	if a.settings.Get().Server.AutoConnect {
 		go func() {
 			c, cancel := context.WithTimeout(context.Background(), 20*time.Second)

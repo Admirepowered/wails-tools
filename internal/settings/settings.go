@@ -149,6 +149,18 @@ type ServerSettings struct {
 	AllowInsecure  bool   `json:"allowInsecure"`
 }
 
+// SNIProxySettings configures the local SNI proxy.
+type SNIProxySettings struct {
+	Enabled bool   `json:"enabled"`
+	Addr    string `json:"addr"`
+	// Mitm intercepts TLS for allowlisted domains with the local root CA.
+	Mitm bool `json:"mitm"`
+	// UseExistingProxy sends the outbound leg through the app proxy engine.
+	UseExistingProxy bool `json:"useExistingProxy"`
+	// Rules is the editable domain list (see sniproxy.DefaultRules).
+	Rules string `json:"rules"`
+}
+
 // SecretSyncSettings controls end-to-end encrypted client secret sync.
 type SecretSyncSettings struct {
 	// Enabled turns automatic sync of SSH hosts/keys and FTP profiles on/off.
@@ -224,6 +236,7 @@ type Settings struct {
 	Screenshots   ScreenshotSettings   `json:"screenshots"`
 	Startup       StartupSettings      `json:"startup"`
 	SecretSync    SecretSyncSettings   `json:"secretSync"`
+	SNIProxy      SNIProxySettings     `json:"sniProxy"`
 }
 
 // Default returns the built-in configuration.
@@ -267,6 +280,7 @@ func Default() Settings {
 		DirectRules:  DirectRuleSettings{UseGeoIP: false},
 		Startup:      StartupSettings{TrayEnabled: true, CloseToTray: true},
 		SecretSync:   SecretSyncSettings{Enabled: true},
+		SNIProxy:     SNIProxySettings{Addr: "127.0.0.1:17891", Mitm: true, UseExistingProxy: true},
 		ProxyRuntime: ProxyRuntimeSettings{Port: 7890},
 	}
 }

@@ -15,6 +15,7 @@ import {
 } from '../lib/api'
 import { Field, Spinner, Switch, Tag, useToast } from '../components/ui'
 import { useAutoSave } from '../lib/autosave'
+import SNICard from './SNICard'
 import type { PageProps } from '../App'
 
 const SCOPE_META: Record<string, { title: string; desc: string }> = {
@@ -352,6 +353,7 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
 
       <div className="grid-2" style={{ marginTop: 14 }}>
         <ChainCard onChanged={() => void loadRuntime()} />
+        <SNICard />
         <DirectRulesCard onChanged={() => void loadRuntime()} />
       </div>
 
@@ -770,6 +772,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 

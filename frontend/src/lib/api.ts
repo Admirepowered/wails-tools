@@ -435,6 +435,36 @@ export interface SecretSyncResult {
   counts: Record<string, number>
 }
 
+export interface SNIProxySettings {
+  enabled: boolean
+  addr: string
+  mitm: boolean
+  useExistingProxy: boolean
+  rules: string
+  rulesAreDefault?: boolean
+}
+
+export interface SNIProxyStats {
+  active: number
+  total: number
+  mitm: number
+  passthrough: number
+  upstream: number
+  failed: number
+  lastError?: string
+}
+
+export interface SNIProxyStatus {
+  enabled: boolean
+  addr: string
+  mitm: boolean
+  useExistingProxy: boolean
+  running: boolean
+  listen?: string
+  stats?: SNIProxyStats
+  cachedDomains?: number
+  caPath?: string
+}
 export interface P2PStatus {
   localDevice: string
   connected: string[]
@@ -912,6 +942,16 @@ const rawApi = {
   // NAT hole punching (device-to-device direct link)
   P2PStatus: () => call<P2PStatus>('P2PStatus'),
   P2PProbe: () => call<{ ok: boolean; rendezvous?: string; error?: string; reply?: string }>('P2PProbe'),
+
+  // local SNI proxy (pinned-IP TLS with optional MITM)
+  GetSNIProxySettings: () => call<SNIProxySettings>('GetSNIProxySettings'),
+  SaveSNIProxySettings: (cfg: SNIProxySettings) => call<SNIProxyStatus>('SaveSNIProxySettings', cfg),
+  SNIProxyStatus: () => call<SNIProxyStatus>('SNIProxyStatus'),
+  InstallSNIProxyCA: () => call<{ caPath?: string; installed?: boolean }>('InstallSNIProxyCA'),
+  SNIProxyCAPath: () => call<string>('SNIProxyCAPath'),
+  OpenSNIProxyFolder: () => call<void>('OpenSNIProxyFolder'),
+  ResetSNIProxyRules: () => call<SNIProxySettings>('ResetSNIProxyRules'),
+
   P2PConnect: (deviceId: string) => call<P2PStatus>('P2PConnect', deviceId),
   P2PDisconnect: (deviceId: string) => call<P2PStatus>('P2PDisconnect', deviceId),
   UnlockSecretSync: (password: string) => call<SecretSyncResult>('UnlockSecretSync', password),
@@ -1161,6 +1201,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 
