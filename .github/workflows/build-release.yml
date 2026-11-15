@@ -24,6 +24,14 @@ on:
         description: Windows 客户端用 UPX 压缩
         type: boolean
         default: true
+      build_macos:
+        description: 构建 macOS arm64 客户端（账号没有 macOS runner 时关掉）
+        type: boolean
+        default: true
+      macos_runner:
+        description: macOS runner 标签（按账号支持情况填，例如 macos-latest / macos-15 / macos-14）
+        type: string
+        default: macos-latest
 
 permissions:
   contents: write
@@ -246,8 +254,8 @@ jobs:
   client-macos-arm64:
     name: Client / macOS arm64
     needs: meta
-    if: ${{ inputs.build }}
-    runs-on: macos-14
+    if: ${{ inputs.build && inputs.build_macos }}
+    runs-on: ${{ inputs.macos_runner }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -295,7 +303,12 @@ jobs:
   release:
     name: Upload to GitHub Release
     needs: [meta, server-linux, server-windows, client-linux, client-windows, client-macos-arm64]
-    if: ${{ inputs.build && inputs.release }}
+    # macOS 任务可能因为 runner 不可用而被跳过，不能因此连累发布。
+    if: >-
+      ${{ always() && inputs.build && inputs.release
+          && needs.meta.result == 'success'
+          && !contains(needs.*.result, 'failure')
+          && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -317,4 +330,5 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*
+
 
