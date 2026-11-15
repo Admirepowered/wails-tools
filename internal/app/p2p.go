@@ -408,3 +408,43 @@ func (d *p2pDevice) DialTCP(ctx context.Context, deviceID, target string) (net.C
 }
 
 var _ settings.SecretSyncSettings
+
+// P2PLocalNumber returns this installation's 9-digit device number as stored on
+// the sync server (empty when the account has no device row yet).
+func (a *App) P2PLocalNumber() map[string]any {
+	out := map[string]any{"deviceId": a.localDeviceID(), "number": "", "name": ""}
+	if a.link == nil || !a.link.Available() {
+		out["error"] = "同步服务器未连接"
+		return out
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	var res struct {
+		Devices []struct {
+			ID     string `json:"id"`
+			Number string `json:"number"`
+			Name   string `json:"name"`
+		} `json:"devices"`
+	}
+	if err := a.link.Call(ctx, "admin.devices.self", nil, &res); err != nil {
+		out["error"] = err.Error()
+		return out
+	}
+	want := a.localDeviceID()
+	for _, d := range res.Devices {
+		if d.ID == want {
+			out["number"] = d.Number
+			out["name"] = d.Name
+			return out
+		}
+	}
+	// Fall back to a row whose machine matches this host (legacy ids).
+	for _, d := range res.Devices {
+		if d.Name == out["name"] && d.Number != "" {
+			out["number"] = d.Number
+			return out
+		}
+	}
+	out["error"] = "本机设备尚未登记，请重新登录"
+	return out
+}

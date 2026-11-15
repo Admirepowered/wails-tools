@@ -29,7 +29,7 @@ import (
 const (
 	probeMagic    = "WTP2P1"
 	annInterval   = 250 * time.Millisecond
-	probeInterval = 200 * time.Millisecond
+	probeInterval = 100 * time.Millisecond
 	alpn          = "wailstools-p2p"
 )
 
@@ -61,6 +61,7 @@ type announceReply struct {
 	Error string `json:"err"`
 	You   string `json:"you"`
 	Peer  string `json:"peer"`
+	Start int64  `json:"start"`
 }
 
 var (
@@ -95,9 +96,19 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	}()
 
 	deadline := time.Now().Add(o.Timeout)
-	peerStr, err := announceEndpoint(ctx, conn, o, deadline)
+	peerStr, startAt, err := announceEndpoint(ctx, conn, o, deadline)
 	if err != nil {
 		return nil, err
+	}
+	// Wait for the server-agreed moment so both peers blast at the same time.
+	if startAt > 0 {
+		if wait := time.Until(time.UnixMilli(startAt)); wait > 0 && wait < 5*time.Second {
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 	}
 	o.Logf("p2p: peer endpoint %s", peerStr)
 	peerAddr, err := net.ResolveUDPAddr("udp4", peerStr)
@@ -105,7 +116,12 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 		return nil, fmt.Errorf("解析对端地址失败: %w", err)
 	}
 
-	verified, err := punchProbe(ctx, conn, peerAddr, o.Secret, deadline)
+	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
+	if err != nil {
+		return nil, fmt.Errorf("rendezvous 地址无效: %w", err)
+	}
+	annPayload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role})
+	verified, err := punchProbe(ctx, conn, peerAddr, o.Secret, deadline, raddr, annPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -124,20 +140,20 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 
 // announceEndpoint keeps announcing until the server reports the peer's public
 // endpoint.
-func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadline time.Time) (string, error) {
+func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadline time.Time) (string, int64, error) {
 	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
 	if err != nil {
-		return "", fmt.Errorf("rendezvous 地址无效: %w", err)
+		return "", 0, fmt.Errorf("rendezvous 地址无效: %w", err)
 	}
 	payload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role})
 	buf := make([]byte, 2048)
 	lastErr := ""
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			return "", 0, ctx.Err()
 		}
 		if _, err := conn.WriteToUDP(payload, raddr); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(annInterval))
 		n, from, err := conn.ReadFromUDP(buf)
@@ -155,13 +171,13 @@ func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadlin
 			lastErr = rep.Error
 		}
 		if rep.OK && rep.Peer != "" {
-			return rep.Peer, nil
+			return rep.Peer, rep.Start, nil
 		}
 	}
 	if lastErr != "" {
-		return "", fmt.Errorf("打洞会话无效: %s", lastErr)
+		return "", 0, fmt.Errorf("打洞会话无效: %s", lastErr)
 	}
-	return "", ErrPeerOffline
+	return "", 0, ErrPeerOffline
 }
 
 // listenPunchSocket binds the punch socket, preferring a stable local port so
@@ -178,21 +194,28 @@ func listenPunchSocket(port int) (*net.UDPConn, error) {
 // punchProbe sends authenticated probes to the peer and to a small window of
 // predicted ports (symmetric NATs allocate consecutive ports). It returns the
 // address that actually answered, which may differ from the announced one.
-func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secret string, deadline time.Time) (*net.UDPAddr, error) {
+func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secret string, deadline time.Time, raddr *net.UDPAddr, announcePayload []byte) (*net.UDPAddr, error) {
 	probe := []byte(probeMagic + " " + token(secret, "probe"))
 	buf := make([]byte, 2048)
-	predict := portWindow(peer, 10)
+	predict := portWindow(peer, 20)
 	start := time.Now()
+	lastAnnounce := time.Now()
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		// Keep the mapping towards the rendezvous server fresh so the peer's
+		// view of our address stays valid while the punch is in progress.
+		if time.Since(lastAnnounce) > 2*time.Second {
+			lastAnnounce = time.Now()
+			_, _ = conn.WriteToUDP(announcePayload, raddr)
 		}
 		if _, err := conn.WriteToUDP(probe, peer); err != nil {
 			return nil, err
 		}
 		// Only start spraying predicted ports when the announced port stays
 		// silent: most networks do not need it and it keeps traffic low.
-		if time.Since(start) > 2*time.Second {
+		if time.Since(start) > 1*time.Second {
 			for _, cand := range predict {
 				_, _ = conn.WriteToUDP(probe, cand)
 			}

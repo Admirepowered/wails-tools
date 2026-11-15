@@ -25,11 +25,15 @@ type Announce struct {
 }
 
 // Reply tells the client its own public endpoint and, once known, the peer's.
+// Start is a synchronized punch time (unix milliseconds): both sides should
+// begin blasting probes then, which is how n2n-style punching beats one-sided
+// timing.
 type Reply struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"err,omitempty"`
 	You   string `json:"you,omitempty"`
 	Peer  string `json:"peer,omitempty"`
+	Start int64  `json:"start,omitempty"`
 }
 
 // Session is one pending hole-punch attempt.
@@ -42,6 +46,7 @@ type Session struct {
 	Created time.Time
 	addrA   *net.UDPAddr
 	addrB   *net.UDPAddr
+	punchAt time.Time
 }
 
 // Info is the client-facing view of a session.
@@ -221,6 +226,14 @@ func (h *Hub) handle(req Announce, addr *net.UDPAddr) Reply {
 	}
 	if role == "b" && s.addrA != nil {
 		out.Peer = s.addrA.String()
+	}
+	if out.Peer != "" {
+		// Both endpoints are known: agree on a moment (slightly in the future)
+		// at which both peers start sending probes.
+		if s.punchAt.IsZero() || time.Now().After(s.punchAt.Add(5*time.Second)) {
+			s.punchAt = time.Now().Add(700 * time.Millisecond)
+		}
+		out.Start = s.punchAt.UnixMilli()
 	}
 	return out
 }

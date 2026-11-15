@@ -79,6 +79,7 @@ export default function ServerPage(props: PageProps) {
   const [myDevices, setMyDevices] = useState<DeviceSummary | null>(null)
   const [invites, setInvites] = useState<P2PInvite[]>([])
   const [peerNumber, setPeerNumber] = useState('')
+  const [myNumber, setMyNumber] = useState('')
   const [punching, setPunching] = useState(false)
   const [maps, setMaps] = useState<P2PMap[]>([])
   const [mapDevice, setMapDevice] = useState('')
@@ -1232,14 +1233,21 @@ export default function ServerPage(props: PageProps) {
           </p>
           {(() => {
             const mine = myDevices?.devices.find((d) => d.id === p2p?.localDevice)
-            if (!mine?.number) return null
+            const localNo = (mine?.number || myNumber || '').trim()
+            if (!localNo) {
+              return (
+                <div className="small faint" style={{ marginBottom: 10 }}>
+                  本机设备号尚未同步（需要登录同步服务器后刷新）
+                </div>
+              )
+            }
             return (
               <div className="row" style={{ gap: 8, marginBottom: 10 }}>
                 <span className="small faint">本机设备号</span>
                 <span className="mono" style={{ fontSize: 18, letterSpacing: 2 }}>
-                  #{mine.number}
+                  #{localNo}
                 </span>
-                <button className="btn btn-sm btn-ghost" onClick={() => void navigator.clipboard.writeText(mine.number ?? '')}>
+                <button className="btn btn-sm btn-ghost" onClick={() => void navigator.clipboard.writeText(localNo)}>
                   复制
                 </button>
                 <span className="small faint">把它告诉对方，由对方发起穿透</span>
@@ -1748,6 +1756,8 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
+
 
 
 
