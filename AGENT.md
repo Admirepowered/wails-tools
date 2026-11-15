@@ -313,6 +313,20 @@ wails build
 - 默认规则已移除 `discordapp.net` / `discordapp.com`，只保留 `discord.com`。
 - DoH 顺序调整：配置了代理链路时**优先穿代理**（目标改写成固定 IP 再 CONNECT），避免直连被墙时把解析总超时耗光。
 
+### 10.5.2 “带 SNI 直连”能不能救 CDN 域名（2026-11-15 实测，结论：不能）
+对本机多个候选 IP（系统 DNS 的 128.242.240.221 / 104.16.251.55，以及 CF 边缘 104.16.248.55 / 104.16.250.55 / 162.159.128.233 / 162.159.129.233 / 104.16.249.249）做了三组对比：
+
+| 组 | SNI | 结果 |
+|---|---|---|
+| 1 | `stable.dl2.discordapp.net`（真实） | 全部 TCP 超时或 **握手被 RST** |
+| 2 | 不存在的名字 | 部分 IP 能握手（默认证书）→ 403 |
+| 3 | `example.com` | 同一批 IP **握手成功**（证书 example.com）→ 403 |
+
+第 3 组证明 IP 与 443 都是通的；第 1 组只有真实 SNI 被重置 → **是本机链路的 SNI 阻断，不是 Cloudflare 拒绝**。
+因此“加一个 `@domain` 让 SNI 引擎发真 SNI 做本地直连”没有意义：带 SNI 直连一样连不上。CDN 域名只有两条路：
+1. 留在规则外，走代理链路（客户端 SNI 在加密隧道内，实测 206）；
+2. `!domain` 原始透传（也必须挂在代理链路上，否则 SNI 照样裸奔被阻断）。
+
 ### 10.6 验证
 - `TestParseAndMatchRules` / `TestDefaultRulesCoverGithub`：规则解析、别名、子域、`!` 透传。
 - `TestMitmTunnelThroughProxy`：本地起 TLS 源站（8443）→ SNI 代理 MITM（规则 `origin.test=127.0.0.1`）→ 客户端用根证书校验通过并回显 `ping-mitm`，且 `stats.mitm==1`。
@@ -362,6 +376,7 @@ wails build
 - 手动排查：GitHub Release 用 `softprops/action-gh-release@v2`，`generate_release_notes` 打开、`fail_on_unmatched_files` 打开，避免少资产却发成功。
 - **macOS 产物路径**：Wails 的 `.app` 目录名来自 `wails.json` 的 `name`（`wails-tools.app`），而里面的可执行文件才是 `outputfilename`（`WailsTools`）。workflow 里用 `find build/bin -maxdepth 1 -name '*.app'` 定位，再复制成 `dist/WailsTools.app` 压缩，压完删掉目录（否则 `files: dist/*` 会把目录当资产上传而失败）。
 - **macOS runner 兼容**：`runs-on: macos-14` 在部分账号会解析成 `macos-14-arm64-us-default` 并报 "configuration is not supported"（私有仓库/区域无 arm64 容量）。所以加了 `macos_runner` 输入（默认 `macos-latest`，可改 `macos-15`/`macos-14`/`macos-13`）和 `build_macos` 开关；release 任务用 `always() + !contains(needs.*.result,'failure')`，macOS 被跳过时其余产物照样发。
+
 
 
 
