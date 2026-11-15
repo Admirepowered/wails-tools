@@ -537,7 +537,16 @@ n2n 的"打洞"本质是：两端都用**同一个 UDP socket** 持续向 supern
 - **9 位设备号**：`Device.Number`（`000000000` 风格且首位非零），`AddDevice`/`TouchDevice` 时分配，全局唯一（`allocDeviceNumber` 扫 `bucketDevices`），`FindDeviceByNumber` 供后续"输入对方设备号发起穿透"用；管理工具与客户端「我的设备」都会显示，右键可复制。
 - 单测：`server/internal/store/devnum_test.go`（分配长度 9、按号查得到、Touch 不变号）。
 
-### 18.3 待完成（后续轮次，goal 保持 active）
-1. `p2p.request`/`p2p.respond`：输入对方**9 位设备号**发起，被穿透端必须显式接受；拒绝/超时自动结束。
-2. 角色锁：一台设备同一时刻只能是"穿透端"或"被穿透端"；被穿透端可同时被多台穿透。
-3. 端口映射：打洞成功后本地 TCP 监听 → QUIC 流 → 对端拨本机端口（TCP over UDP），断开打洞即销毁映射；单连接用完即释放。
+### 18.3 阶段 2：按设备号邀请 + 接受 + 端口映射（v1.3.62）
+- 服务端 rendezvous 新增 `Request` 模型（`CreateRequest`/`Requests`/`Respond`/`RequestState`/`CancelRequest`）：
+  - 邀请带发起方设备号/名称，TTL 90s；接受时才 `CreateSession` 并把 `session`/`secret` 写回邀请，**未接受不交换任何地址**。
+  - 角色锁：`roleCountsLocked` 统计 2 分钟内 `To==device`（被穿透）/`From==device`（穿透）的会话数；
+    被穿透端不能发起（`CreateRequest` 返回"当前设备作为被穿透端正在被使用"），正在穿透的设备不能接受（`Respond` 返回"当前设备正在穿透其他设备"）。
+    被穿透端可同时接受多台（只限制"不能反向发起"）。
+- API：`p2p.request`（按 9 位设备号查 `FindDeviceByNumber`，跨账号允许）、`p2p.requests`、`p2p.respond`、`p2p.requestState`、`p2p.cancel`。
+- 客户端：
+  - `P2PConnectByNumber`：邀请 → 轮询状态（最长 95s）→ 接受后用 `punch` 建链并 `Serve`；旧的"右键连接到此设备"会先解析设备号再走同一条路径。
+  - 后台 watcher 改为轮询 `p2p.requests`，**不再自动应答**，只落邀请列表并 `emit("p2p:invite")`；UI「我的设备」卡片里显示"XX 想穿透本机 #设备号"，有接受/拒绝按钮。
+  - 端口映射：`P2PPMapPort(device, local, remote)` 在 `127.0.0.1:local` 监听，每条本地 TCP 连接开一条 QUIC 流让对端拨 `127.0.0.1:remote`，连接结束即关流（单连接单流、用完即释放）；`P2PUnmap` 删映射；`p2pHub.drop` 关闭打洞时**连带关闭该设备的全部监听**。
+- 测试：`TestP2PInviteAcceptAndMap`（9 位设备号邀请 → 接受 → 角色锁拒绝反向发起 → 双方打洞 → 通过映射通道对 echo 服务做 echo）通过；全仓库 `go vet`/`go test` 通过。
+

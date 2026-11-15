@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type P2PStatus, type SecretSyncStatus, type ServerStatus, type Settings } from '../lib/api'
+import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type P2PInvite, type P2PMap, type P2PStatus, type SecretSyncStatus, type ServerStatus, type Settings } from '../lib/api'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Switch, Tabs, Tag, useToast } from '../components/ui'
 import { formatBytes, formatTime, percent, relativeTime } from '../lib/format'
 import type { PageProps } from '../App'
@@ -77,6 +77,12 @@ export default function ServerPage(props: PageProps) {
 
   // devices + admin
   const [myDevices, setMyDevices] = useState<DeviceSummary | null>(null)
+  const [invites, setInvites] = useState<P2PInvite[]>([])
+  const [peerNumber, setPeerNumber] = useState('')
+  const [maps, setMaps] = useState<P2PMap[]>([])
+  const [mapDevice, setMapDevice] = useState('')
+  const [mapLocal, setMapLocal] = useState('')
+  const [mapRemote, setMapRemote] = useState('')
   const [allowRegister, setAllowRegister] = useState(true)
   const [maxDevices, setMaxDevices] = useState(5)
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([])
@@ -1219,6 +1225,139 @@ export default function ServerPage(props: PageProps) {
 
       {authed ? (
         <div className="card">
+          <h3 className="card-title">设备号穿透</h3>
+          <p className="card-desc" style={{ marginBottom: 8 }}>
+            输入对方 9 位设备号发起打洞；对方必须在「我的设备」里接受后才会建立直连。打洞成功后可以加端口映射：本地 TCP 端口 → 对端端口（数据走 UDP/QUIC，断开打洞即释放）。
+          </p>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="input mono"
+              placeholder="对方设备号，如 582308553"
+              value={peerNumber}
+              onChange={(e) => setPeerNumber(e.target.value.replace(/\D/g, '').slice(0, 9))}
+              style={{ flex: 1 }}
+            />
+            <button
+              className="btn btn-primary"
+              disabled={peerNumber.length !== 9}
+              onClick={async () => {
+                try {
+                  const res = await api.P2PConnectByNumber(peerNumber)
+                  toast.push(`已与设备 ${res.device.slice(0, 8)} 建立直连`)
+                  setPeerNumber('')
+                  setP2p(await api.P2PStatus())
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            >
+              发起穿透
+            </button>
+          </div>
+          {invites.length > 0 ? (
+            <div className="list" style={{ marginTop: 10 }}>
+              {invites.map((inv) => (
+                <div key={inv.id} className="file-row">
+                  <span className="file-icon">📡</span>
+                  <span className="file-name">
+                    {inv.name || '陌生设备'} 想穿透本机 <span className="mono faint">#{inv.number || '—'}</span>
+                  </span>
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={async () => {
+                      try {
+                        await api.P2PAcceptInvite(inv.id)
+                        setInvites(await api.P2PInvites())
+                        toast.push('已接受，正在打洞')
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  >
+                    接受
+                  </button>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={async () => {
+                      try {
+                        await api.P2PDeclineInvite(inv.id)
+                        setInvites(await api.P2PInvites())
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  >
+                    拒绝
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="divider" />
+          <h4 className="small" style={{ margin: '6px 0' }}>端口映射</h4>
+          <div className="row" style={{ gap: 8 }}>
+            {(() => {
+              const connected = p2p?.connected ?? []
+              return (
+                <select className="select" value={mapDevice} onChange={(e) => setMapDevice(e.target.value)} style={{ minWidth: 160 }}>
+                  <option value="">选择已直连设备</option>
+                  {connected.map((d) => (
+                    <option key={d} value={d}>
+                      {d.slice(0, 8)}
+                    </option>
+                  ))}
+                </select>
+              )
+            })()}
+            <input className="input mono" placeholder="本地端口" value={mapLocal} onChange={(e) => setMapLocal(e.target.value.replace(/\D/g, '').slice(0, 5))} style={{ width: 110 }} />
+            <span className="small faint">→</span>
+            <input className="input mono" placeholder="对端端口" value={mapRemote} onChange={(e) => setMapRemote(e.target.value.replace(/\D/g, '').slice(0, 5))} style={{ width: 110 }} />
+            <button
+              className="btn btn-sm"
+              disabled={!mapDevice || !mapLocal || !mapRemote}
+              onClick={async () => {
+                try {
+                  setMaps(await api.P2PMapPort(mapDevice, Number(mapLocal), Number(mapRemote)))
+                  toast.push(`已映射 127.0.0.1:${mapLocal} → 设备 ${mapRemote}`)
+                  setMapLocal('')
+                  setMapRemote('')
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            >
+              添加映射
+            </button>
+          </div>
+          {maps.length > 0 ? (
+            <div style={{ marginTop: 8 }}>
+              {maps.map((m) => (
+                <div key={`${m.device}:${m.local}`} className="row small" style={{ gap: 10, padding: '4px 0' }}>
+                  <span className="mono">
+                    127.0.0.1:{m.local} → {m.device.slice(0, 8)}:{m.remote}
+                  </span>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={async () => {
+                      try {
+                        setMaps(await api.P2PUnmap(m.device, m.local))
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  >
+                    移除
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {authed ? (
+        <div className="card">
           <div className="row">
             <div style={{ flex: 1 }}>
               <h3 className="card-title">
@@ -1313,6 +1452,139 @@ export default function ServerPage(props: PageProps) {
               暂无已登记设备，下次登录时会自动登记本机。
             </div>
           )}
+        </div>
+      ) : null}
+
+      {authed ? (
+        <div className="card">
+          <h3 className="card-title">设备号穿透</h3>
+          <p className="card-desc" style={{ marginBottom: 8 }}>
+            输入对方 9 位设备号发起打洞；对方必须在「我的设备」里接受后才会建立直连。打洞成功后可以加端口映射：本地 TCP 端口 → 对端端口（数据走 UDP/QUIC，断开打洞即释放）。
+          </p>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="input mono"
+              placeholder="对方设备号，如 582308553"
+              value={peerNumber}
+              onChange={(e) => setPeerNumber(e.target.value.replace(/\D/g, '').slice(0, 9))}
+              style={{ flex: 1 }}
+            />
+            <button
+              className="btn btn-primary"
+              disabled={peerNumber.length !== 9}
+              onClick={async () => {
+                try {
+                  const res = await api.P2PConnectByNumber(peerNumber)
+                  toast.push(`已与设备 ${res.device.slice(0, 8)} 建立直连`)
+                  setPeerNumber('')
+                  setP2p(await api.P2PStatus())
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            >
+              发起穿透
+            </button>
+          </div>
+          {invites.length > 0 ? (
+            <div className="list" style={{ marginTop: 10 }}>
+              {invites.map((inv) => (
+                <div key={inv.id} className="file-row">
+                  <span className="file-icon">📡</span>
+                  <span className="file-name">
+                    {inv.name || '陌生设备'} 想穿透本机 <span className="mono faint">#{inv.number || '—'}</span>
+                  </span>
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={async () => {
+                      try {
+                        await api.P2PAcceptInvite(inv.id)
+                        setInvites(await api.P2PInvites())
+                        toast.push('已接受，正在打洞')
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  >
+                    接受
+                  </button>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={async () => {
+                      try {
+                        await api.P2PDeclineInvite(inv.id)
+                        setInvites(await api.P2PInvites())
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  >
+                    拒绝
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="divider" />
+          <h4 className="small" style={{ margin: '6px 0' }}>端口映射</h4>
+          <div className="row" style={{ gap: 8 }}>
+            {(() => {
+              const connected = p2p?.connected ?? []
+              return (
+                <select className="select" value={mapDevice} onChange={(e) => setMapDevice(e.target.value)} style={{ minWidth: 160 }}>
+                  <option value="">选择已直连设备</option>
+                  {connected.map((d) => (
+                    <option key={d} value={d}>
+                      {d.slice(0, 8)}
+                    </option>
+                  ))}
+                </select>
+              )
+            })()}
+            <input className="input mono" placeholder="本地端口" value={mapLocal} onChange={(e) => setMapLocal(e.target.value.replace(/\D/g, '').slice(0, 5))} style={{ width: 110 }} />
+            <span className="small faint">→</span>
+            <input className="input mono" placeholder="对端端口" value={mapRemote} onChange={(e) => setMapRemote(e.target.value.replace(/\D/g, '').slice(0, 5))} style={{ width: 110 }} />
+            <button
+              className="btn btn-sm"
+              disabled={!mapDevice || !mapLocal || !mapRemote}
+              onClick={async () => {
+                try {
+                  setMaps(await api.P2PMapPort(mapDevice, Number(mapLocal), Number(mapRemote)))
+                  toast.push(`已映射 127.0.0.1:${mapLocal} → 设备 ${mapRemote}`)
+                  setMapLocal('')
+                  setMapRemote('')
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            >
+              添加映射
+            </button>
+          </div>
+          {maps.length > 0 ? (
+            <div style={{ marginTop: 8 }}>
+              {maps.map((m) => (
+                <div key={`${m.device}:${m.local}`} className="row small" style={{ gap: 10, padding: '4px 0' }}>
+                  <span className="mono">
+                    127.0.0.1:{m.local} → {m.device.slice(0, 8)}:{m.remote}
+                  </span>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={async () => {
+                      try {
+                        setMaps(await api.P2PUnmap(m.device, m.local))
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  >
+                    移除
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1589,6 +1861,8 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
+
 
 
 

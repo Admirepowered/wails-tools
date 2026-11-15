@@ -57,6 +57,7 @@ type Info struct {
 type Hub struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
+	requests map[string]*Request
 	conn     *net.UDPConn
 	logf     func(string, ...any)
 	closed   chan struct{}
@@ -68,7 +69,7 @@ func NewHub(logf func(string, ...any)) *Hub {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Hub{sessions: map[string]*Session{}, logf: logf, closed: make(chan struct{})}
+	return &Hub{sessions: map[string]*Session{}, requests: map[string]*Request{}, logf: logf, closed: make(chan struct{})}
 }
 
 // Listen binds the rendezvous socket and starts serving.
@@ -254,3 +255,174 @@ func randomID(n int) string {
 }
 
 var _ = log.Printf
+
+// ---- punch requests (explicit accept) ------------------------------------
+
+// requestTTL bounds how long an unaccepted invitation stays visible.
+const requestTTL = 90 * time.Second
+
+// Request is an invitation to punch towards a device. The target must accept
+// before any endpoint is exchanged.
+type Request struct {
+	ID         string
+	FromUser   string
+	FromDevice string
+	FromNumber string
+	FromName   string
+	ToUser     string
+	ToDevice   string
+	State      string // pending|accepted|declined|canceled
+	Session    string
+	Secret     string
+	Created    time.Time
+}
+
+// RequestInfo is the client-facing view of a request.
+type RequestInfo struct {
+	ID         string `json:"id"`
+	FromNumber string `json:"fromNumber"`
+	FromName   string `json:"fromName"`
+	FromDevice string `json:"fromDevice"`
+	ToDevice   string `json:"toDevice"`
+	State      string `json:"state"`
+	Session    string `json:"session,omitempty"`
+	Secret     string `json:"secret,omitempty"`
+	Created    string `json:"created"`
+}
+
+func (r *Request) info() RequestInfo {
+	return RequestInfo{
+		ID: r.ID, FromNumber: r.FromNumber, FromName: r.FromName, FromDevice: r.FromDevice,
+		ToDevice: r.ToDevice, State: r.State, Session: r.Session, Secret: r.Secret,
+		Created: r.Created.UTC().Format(time.RFC3339),
+	}
+}
+
+// roleCountsLocked returns how many sessions the device serves and initiates.
+func (h *Hub) roleCountsLocked(device string, cutoff time.Time) (serving, initiating int) {
+	for _, s := range h.sessions {
+		if s.Created.Before(cutoff) {
+			continue
+		}
+		if s.To == device {
+			serving++
+		}
+		if s.From == device {
+			initiating++
+		}
+	}
+	return
+}
+
+// CreateRequest registers an invitation from device -> target device.
+func (h *Hub) CreateRequest(fromUser, fromDevice, fromNumber, fromName, toUser, toDevice string) (RequestInfo, error) {
+	if fromDevice == "" || toDevice == "" {
+		return RequestInfo{}, errors.New("device ids are required")
+	}
+	if fromDevice == toDevice {
+		return RequestInfo{}, errors.New("不能穿透自己")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if serving, _ := h.roleCountsLocked(fromDevice, time.Now().Add(-sessionTTL)); serving > 0 {
+		return RequestInfo{}, errors.New("当前设备作为被穿透端正在被使用，不能发起穿透")
+	}
+	// Replace a stale invitation for the same pair.
+	for id, r := range h.requests {
+		if r.FromDevice == fromDevice && r.ToDevice == toDevice && r.State == "pending" {
+			delete(h.requests, id)
+		}
+	}
+	r := &Request{
+		ID: "pr-" + randomID(6), FromUser: fromUser, FromDevice: fromDevice, FromNumber: fromNumber,
+		FromName: fromName, ToUser: toUser, ToDevice: toDevice, State: "pending", Created: time.Now(),
+	}
+	h.requests[r.ID] = r
+	h.logf("p2p request %s: %s(#%s) -> %s", r.ID, fromDevice, fromNumber, toDevice)
+	return r.info(), nil
+}
+
+// Requests lists pending invitations for a target device.
+func (h *Hub) Requests(toUser, toDevice string) []RequestInfo {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := []RequestInfo{}
+	cutoff := time.Now().Add(-requestTTL)
+	for id, r := range h.requests {
+		if r.Created.Before(cutoff) {
+			delete(h.requests, id)
+			continue
+		}
+		if r.ToUser != toUser || r.ToDevice != toDevice || r.State != "pending" {
+			continue
+		}
+		out = append(out, r.info())
+	}
+	return out
+}
+
+// Respond accepts or declines an invitation. Accepting creates the punch
+// session shared with both devices.
+func (h *Hub) Respond(toUser, toDevice, requestID string, accept bool) (RequestInfo, error) {
+	h.mu.Lock()
+	r, ok := h.requests[requestID]
+	if !ok || r.ToUser != toUser || r.ToDevice != toDevice || time.Since(r.Created) > requestTTL {
+		h.mu.Unlock()
+		return RequestInfo{}, errors.New("请求不存在或已过期")
+	}
+	if r.State != "pending" {
+		info := r.info()
+		h.mu.Unlock()
+		return info, nil
+	}
+	if !accept {
+		r.State = "declined"
+		info := r.info()
+		h.mu.Unlock()
+		return info, nil
+	}
+	if _, initiating := h.roleCountsLocked(toDevice, time.Now().Add(-sessionTTL)); initiating > 0 {
+		h.mu.Unlock()
+		return RequestInfo{}, errors.New("当前设备正在穿透其他设备，不能接受穿透")
+	}
+	h.mu.Unlock()
+
+	info, err := h.CreateSession(r.ToUser, r.FromDevice, r.ToDevice)
+	if err != nil {
+		return RequestInfo{}, err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r.State = "accepted"
+	r.Session = info.ID
+	r.Secret = info.Secret
+	return r.info(), nil
+}
+
+// RequestState lets either side poll for the invitation state.
+func (h *Hub) RequestState(userID, device, requestID string) (RequestInfo, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r, ok := h.requests[requestID]
+	if !ok {
+		return RequestInfo{}, false
+	}
+	if r.FromUser != userID || r.FromDevice != device {
+		if r.ToUser != userID || r.ToDevice != device {
+			return RequestInfo{}, false
+		}
+	}
+	if time.Since(r.Created) > requestTTL && r.State == "pending" {
+		r.State = "expired"
+	}
+	return r.info(), true
+}
+
+// CancelRequest withdraws a pending invitation.
+func (h *Hub) CancelRequest(userID, device, requestID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if r, ok := h.requests[requestID]; ok && r.FromUser == userID && r.FromDevice == device {
+		r.State = "canceled"
+	}
+}

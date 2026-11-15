@@ -24,8 +24,19 @@ type p2pHub struct {
 	errors   map[string]string       // deviceID -> last failure reason
 	busy     map[string]bool
 	seen     map[string]bool // answered rendezvous sessions
+	incoming map[string]bool // device -> we answered its punch (serving)
+	outgoing map[string]bool // device -> we punched to it
+	maps     map[string]map[int]*portMap
 	watchMu  sync.Mutex
 	watching bool
+}
+
+// portMap is one local TCP listener forwarded to the peer's port.
+type portMap struct {
+	Local  int
+	Remote int
+	Device string
+	ln     net.Listener
 }
 
 func newP2PHub() *p2pHub {
@@ -34,6 +45,9 @@ func newP2PHub() *p2pHub {
 		errors:   map[string]string{},
 		busy:     map[string]bool{},
 		seen:     map[string]bool{},
+		incoming: map[string]bool{},
+		outgoing: map[string]bool{},
+		maps:     map[string]map[int]*portMap{},
 	}
 }
 
@@ -46,9 +60,25 @@ func (h *p2pHub) get(deviceID string) (*p2p.Channel, bool) {
 
 func (h *p2pHub) put(deviceID string, c *p2p.Channel) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.channels[deviceID] = c
 	delete(h.errors, deviceID)
+	h.mu.Unlock()
+}
+
+// markIncoming records that this device answers punches from deviceID.
+func (h *p2pHub) markIncoming(deviceID string) {
+	h.mu.Lock()
+	h.incoming[deviceID] = true
+	delete(h.outgoing, deviceID)
+	h.mu.Unlock()
+}
+
+// markOutgoing records that this device punched towards deviceID.
+func (h *p2pHub) markOutgoing(deviceID string) {
+	h.mu.Lock()
+	h.outgoing[deviceID] = true
+	delete(h.incoming, deviceID)
+	h.mu.Unlock()
 }
 
 func (h *p2pHub) fail(deviceID string, err error) {
@@ -63,9 +93,19 @@ func (h *p2pHub) drop(deviceID string) {
 	h.mu.Lock()
 	c := h.channels[deviceID]
 	delete(h.channels, deviceID)
+	delete(h.incoming, deviceID)
+	delete(h.outgoing, deviceID)
+	maps := h.maps[deviceID]
+	delete(h.maps, deviceID)
 	h.mu.Unlock()
 	if c != nil {
 		_ = c.Close()
+	}
+	// Disconnecting the punch releases every port mapping bound to it.
+	for _, pm := range maps {
+		if pm.ln != nil {
+			_ = pm.ln.Close()
+		}
 	}
 }
 
@@ -170,59 +210,35 @@ func (a *App) P2PConnect(deviceID string) (map[string]any, error) {
 	if !a.sess.loggedIn || a.link == nil || !a.link.Available() {
 		return nil, errors.New("请先连接并登录同步服务器")
 	}
-	h := a.p2p
-	h.mu.Lock()
-	if _, ok := h.channels[deviceID]; ok {
-		h.mu.Unlock()
+	if _, ok := a.p2p.get(deviceID); ok {
 		return a.P2PStatus(), nil
 	}
-	if h.busy[deviceID] {
-		h.mu.Unlock()
-		return nil, errors.New("该设备正在打洞中，请稍候")
-	}
-	h.busy[deviceID] = true
-	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		delete(h.busy, deviceID)
-		h.mu.Unlock()
-	}()
-
-	rendezvous, err := a.rendezvousAddr()
-	if err != nil {
-		h.fail(deviceID, err)
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// The invite flow needs the peer's 9-digit number; resolve it first.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	var offer struct {
-		Session string `json:"session"`
-		Secret  string `json:"secret"`
+	var out struct {
+		Devices []struct {
+			ID     string `json:"id"`
+			Number string `json:"number"`
+		} `json:"devices"`
 	}
-	if err := a.link.Call(ctx, "p2p.offer", map[string]any{
-		"fromDevice": a.localDeviceID(), "toDevice": deviceID,
-	}, &offer); err != nil {
-		h.fail(deviceID, err)
+	if err := a.link.Call(ctx, "admin.devices.self", nil, &out); err != nil {
 		return nil, err
 	}
-	channel, err := p2p.Punch(ctx, p2p.Options{
-		Rendezvous: rendezvous, Session: offer.Session, Secret: offer.Secret,
-		Role: "a", Timeout: 45 * time.Second, LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
-		Logf: func(format string, args ...any) {
-			if a.log != nil {
-				a.log.Printf(format, args...)
-			}
-		},
-	})
-	if err != nil {
-		h.fail(deviceID, err)
-		a.emit("p2p:error", map[string]any{"device": deviceID, "error": err.Error()})
+	number := ""
+	for _, d := range out.Devices {
+		if d.ID == deviceID {
+			number = d.Number
+			break
+		}
+	}
+	if len(number) != 9 {
+		return nil, errors.New("该设备还没有分配 9 位设备号，请让对方重新登录一次")
+	}
+	if _, err := a.P2PConnectByNumber(number); err != nil {
+		a.p2p.fail(deviceID, err)
 		return nil, err
 	}
-	h.put(deviceID, channel)
-	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
-	a.emit("p2p:connected", map[string]any{"device": deviceID, "peer": channel.Peer()})
-	_ = a.link.Call(ctx, "p2p.drop", map[string]any{"session": offer.Session}, nil)
 	return a.P2PStatus(), nil
 }
 
@@ -233,7 +249,8 @@ func (a *App) P2PDisconnect(deviceID string) (map[string]any, error) {
 	return a.P2PStatus(), nil
 }
 
-// startP2PWatcher answers incoming hole-punch requests from other devices.
+// startP2PWatcher polls incoming punch invitations for this device. Nothing is
+// answered automatically: the user must accept in the UI.
 func (a *App) startP2PWatcher() {
 	h := a.p2p
 	h.watchMu.Lock()
@@ -251,27 +268,26 @@ func (a *App) startP2PWatcher() {
 				continue
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			var out struct {
-				Sessions []struct {
-					ID     string `json:"id"`
-					From   string `json:"from"`
-					Secret string `json:"secret"`
-				} `json:"sessions"`
-			}
-			err := a.link.Call(ctx, "p2p.pending", map[string]any{"device": a.localDeviceID()}, &out)
+			list, err := a.link.P2PRequests(ctx, a.localDeviceID())
 			cancel()
 			if err != nil {
 				continue
 			}
-			for _, s := range out.Sessions {
-				h.mu.Lock()
-				if h.seen[s.ID] {
-					h.mu.Unlock()
+			known := map[string]bool{}
+			for _, inv := range a.invites.list() {
+				known[inv.ID] = true
+			}
+			for _, item := range list {
+				id, _ := item["id"].(string)
+				if id == "" || known[id] {
 					continue
 				}
-				h.seen[s.ID] = true
-				h.mu.Unlock()
-				go a.answerPunch(s.ID, s.From, s.Secret)
+				number, _ := item["fromNumber"].(string)
+				name, _ := item["fromName"].(string)
+				from, _ := item["fromDevice"].(string)
+				created, _ := item["created"].(string)
+				a.invites.put(p2pInvite{ID: id, Number: number, Name: name, From: from, State: "pending", Created: created})
+				a.emit("p2p:invite", map[string]any{"id": id, "number": number, "name": name})
 			}
 		}
 	}()
@@ -304,6 +320,7 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 		return
 	}
 	a.p2p.put(fromDevice, channel)
+	a.p2p.markIncoming(fromDevice)
 	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
 	a.emit("p2p:connected", map[string]any{"device": fromDevice, "peer": channel.Peer(), "incoming": true})
 }

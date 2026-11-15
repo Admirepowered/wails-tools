@@ -247,3 +247,216 @@ func (h *relayHandler) Pipe(method string, body json.RawMessage, conn net.Conn, 
 	<-done
 	return nil
 }
+
+// TestP2PInviteAcceptAndMap covers the explicit-accept flow: the initiator asks
+// by 9-digit device number, the target accepts, both punch and the initiator
+// can forward a local TCP port to the peer (port mapping uses the same path).
+func TestP2PInviteAcceptAndMap(t *testing.T) {
+	srv := startP2PServer(t)
+	_, tcpAddr := srv.Addrs()
+	_, portStr, err := net.SplitHostPort(tcpAddr)
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	port := atoi(portStr)
+	rendezvous := net.JoinHostPort("127.0.0.1", itoa(port+1))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	echo, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("echo listen: %v", err)
+	}
+	defer echo.Close()
+	go func() {
+		for {
+			conn, err := echo.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				_, _ = io.Copy(c, c)
+			}(conn)
+		}
+	}()
+
+	mkClient := func(deviceID, machine string) *serverlink.Client {
+		dir := t.TempDir()
+		store, err := settings.NewStore(filepath.Join(dir, "settings.json"))
+		if err != nil {
+			t.Fatalf("settings: %v", err)
+		}
+		if _, err := store.Update(func(s *settings.Settings) error {
+			s.Server.Host = "127.0.0.1"
+			s.Server.Port = port
+			s.Server.DeviceID = deviceID
+			return nil
+		}); err != nil {
+			t.Fatalf("configure: %v", err)
+		}
+		c := serverlink.New(store, t.Logf)
+		c.SetMachineID(machine)
+		t.Cleanup(func() { _ = c.Close() })
+		return c
+	}
+
+	a := mkClient("dev-a", "machine-a")
+	b := mkClient("dev-b", "machine-b")
+	if _, err := a.Connect(ctx); err != nil {
+		t.Fatalf("connect A: %v", err)
+	}
+	if _, err := a.Register(ctx, "bob", "super-secret-2", "", "Bob"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := a.Login(ctx, "bob", "super-secret-2"); err != nil {
+		t.Fatalf("login A: %v", err)
+	}
+	if _, err := b.Connect(ctx); err != nil {
+		t.Fatalf("connect B: %v", err)
+	}
+	if _, err := b.Login(ctx, "bob", "super-secret-2"); err != nil {
+		t.Fatalf("login B: %v", err)
+	}
+
+	// Device numbers are allocated per device.
+	type selfDevices struct {
+		Devices []struct {
+			ID     string `json:"id"`
+			Number string `json:"number"`
+		} `json:"devices"`
+	}
+	numberOf := func(c *serverlink.Client, device string) string {
+		var out selfDevices
+		if err := c.Call(ctx, "admin.devices.self", nil, &out); err != nil {
+			t.Fatalf("devices.self: %v", err)
+		}
+		for _, d := range out.Devices {
+			if d.ID == device {
+				return d.Number
+			}
+		}
+		return ""
+	}
+	numB := numberOf(b, "dev-b")
+	if len(numB) != 9 {
+		t.Fatalf("device B number = %q", numB)
+	}
+
+	// A invites B by number.
+	var invite struct {
+		Request struct {
+			ID string `json:"id"`
+			To string `json:"toDevice"`
+		} `json:"request"`
+	}
+	if err := a.Call(ctx, "p2p.request", map[string]any{"number": numB, "device": "dev-a"}, &invite); err != nil {
+		t.Fatalf("p2p.request: %v", err)
+	}
+	if invite.Request.ID == "" {
+		t.Fatal("empty request id")
+	}
+
+	// B sees it and accepts.
+	var pending struct {
+		Requests []struct {
+			ID     string `json:"id"`
+			Number string `json:"fromNumber"`
+		} `json:"requests"`
+	}
+	if err := b.Call(ctx, "p2p.requests", map[string]any{"device": "dev-b"}, &pending); err != nil {
+		t.Fatalf("p2p.requests: %v", err)
+	}
+	if len(pending.Requests) != 1 || pending.Requests[0].ID != invite.Request.ID {
+		t.Fatalf("B did not see the invitation: %+v", pending.Requests)
+	}
+	var accepted struct {
+		Request struct {
+			State   string `json:"state"`
+			Session string `json:"session"`
+			Secret  string `json:"secret"`
+		} `json:"request"`
+	}
+	if err := b.Call(ctx, "p2p.respond", map[string]any{"device": "dev-b", "request": invite.Request.ID, "accept": true}, &accepted); err != nil {
+		t.Fatalf("p2p.respond: %v", err)
+	}
+	if accepted.Request.State != "accepted" || accepted.Request.Session == "" {
+		t.Fatalf("accept failed: %+v", accepted.Request)
+	}
+
+	// While serving, B may not initiate (role lock).
+	if err := b.Call(ctx, "p2p.request", map[string]any{"number": numB, "device": "dev-b"}, new(map[string]any)); err == nil {
+		t.Fatal("serving device must not initiate a punch")
+	}
+
+	// A polls and gets the same session.
+	var state struct {
+		Found   bool `json:"found"`
+		Request struct {
+			State   string `json:"state"`
+			Session string `json:"session"`
+			Secret  string `json:"secret"`
+		} `json:"request"`
+	}
+	if err := a.Call(ctx, "p2p.requestState", map[string]any{"device": "dev-a", "request": invite.Request.ID}, &state); err != nil {
+		t.Fatalf("p2p.requestState: %v", err)
+	}
+	if !state.Found || state.Request.State != "accepted" || state.Request.Session != accepted.Request.Session {
+		t.Fatalf("initiator did not see acceptance: %+v", state)
+	}
+
+	// Both sides punch with the accepted session.
+	type result struct {
+		ch  *p2p.Channel
+		err error
+	}
+	doneA := make(chan result, 1)
+	doneB := make(chan result, 1)
+	go func() {
+		ch, err := p2p.Punch(ctx, p2p.Options{Rendezvous: rendezvous, Session: state.Request.Session, Secret: state.Request.Secret, Role: "a", Timeout: 40 * time.Second})
+		doneA <- result{ch, err}
+	}()
+	go func() {
+		ch, err := p2p.Punch(ctx, p2p.Options{Rendezvous: rendezvous, Session: state.Request.Session, Secret: state.Request.Secret, Role: "b", Timeout: 40 * time.Second})
+		doneB <- result{ch, err}
+	}()
+	var chA, chB *p2p.Channel
+	for i := 0; i < 2; i++ {
+		select {
+		case r := <-doneA:
+			if r.err != nil {
+				t.Fatalf("punch A: %v", r.err)
+			}
+			chA = r.ch
+		case r := <-doneB:
+			if r.err != nil {
+				t.Fatalf("punch B: %v", r.err)
+			}
+			chB = r.ch
+		case <-ctx.Done():
+			t.Fatal("punch timed out")
+		}
+	}
+	defer chA.Close()
+	defer chB.Close()
+	go chB.Serve(context.Background(), &relayHandler{})
+
+	// Port mapping: forward through the channel to the echo server.
+	conn, err := chA.DialTCP(ctx, echo.Addr().String())
+	if err != nil {
+		t.Fatalf("DialTCP: %v", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte("mapped")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	buf := make([]byte, len("mapped"))
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(buf) != "mapped" {
+		t.Fatalf("echo mismatch: %q", buf)
+	}
+}

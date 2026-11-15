@@ -1041,3 +1041,54 @@ func (c *Client) OfflineDelete(ctx context.Context, id string, purge bool) (map[
 	}
 	return out, nil
 }
+
+// ---- hole-punch invitations -------------------------------------------
+
+// P2PRequest invites a device (by 9-digit number) to a punch.
+func (c *Client) P2PRequest(ctx context.Context, number, device string) (map[string]any, error) {
+	var out map[string]any
+	body := map[string]any{"number": number, "device": device}
+	if err := c.Call(ctx, "p2p.request", body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// P2PRequests lists pending invitations for a device.
+func (c *Client) P2PRequests(ctx context.Context, device string) ([]map[string]any, error) {
+	var out struct {
+		Requests []map[string]any `json:"requests"`
+	}
+	if err := c.Call(ctx, "p2p.requests", map[string]any{"device": device}, &out); err != nil {
+		return nil, err
+	}
+	if out.Requests == nil {
+		out.Requests = []map[string]any{}
+	}
+	return out.Requests, nil
+}
+
+// P2PRespond accepts or declines an invitation.
+func (c *Client) P2PRespond(ctx context.Context, device, request string, accept bool) (map[string]any, error) {
+	var out map[string]any
+	body := map[string]any{"device": device, "request": request, "accept": accept}
+	if err := c.Call(ctx, "p2p.respond", body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// P2PRequestState polls the state of an invitation.
+func (c *Client) P2PRequestState(ctx context.Context, device, request string) (map[string]any, error) {
+	var out map[string]any
+	body := map[string]any{"device": device, "request": request}
+	if err := c.Call(ctx, "p2p.requestState", body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// P2PCancel withdraws an invitation.
+func (c *Client) P2PCancel(ctx context.Context, device, request string) error {
+	return c.Call(ctx, "p2p.cancel", map[string]any{"device": device, "request": request}, nil)
+}

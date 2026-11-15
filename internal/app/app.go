@@ -68,6 +68,7 @@ type App struct {
 	notesSyncMu    sync.Mutex
 	notesSyncTimer *time.Timer
 	p2p            *p2pHub
+	invites        *inviteBox
 	sni            *sniState
 	sniMu          sync.Mutex
 	lastRelayKind  string
@@ -189,6 +190,7 @@ func New() (*App, error) {
 	}
 	a.media = newMediaRegistry()
 	a.p2p = newP2PHub()
+	a.invites = newInviteBox()
 	a.chainCfg, _ = a.loadChainFile()
 	a.rulesCfg, _ = a.loadRulesFile()
 	a.initTransfers()

@@ -228,6 +228,16 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.p2pPending(body)
 	case "p2p.drop":
 		return ctx.p2pDrop(body)
+	case "p2p.request":
+		return ctx.p2pRequest(body)
+	case "p2p.requests":
+		return ctx.p2pRequests(body)
+	case "p2p.respond":
+		return ctx.p2pRespond(body)
+	case "p2p.requestState":
+		return ctx.p2pRequestState(body)
+	case "p2p.cancel":
+		return ctx.p2pCancel(body)
 	// ---- server-published default SNI rules --------------------------------
 	case "sni.rules.get":
 		return ctx.sniRulesGet()
