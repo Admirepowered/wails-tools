@@ -79,6 +79,7 @@ export default function ServerPage(props: PageProps) {
   const [myDevices, setMyDevices] = useState<DeviceSummary | null>(null)
   const [invites, setInvites] = useState<P2PInvite[]>([])
   const [peerNumber, setPeerNumber] = useState('')
+  const [punching, setPunching] = useState(false)
   const [maps, setMaps] = useState<P2PMap[]>([])
   const [mapDevice, setMapDevice] = useState('')
   const [mapLocal, setMapLocal] = useState('')
@@ -1229,6 +1230,22 @@ export default function ServerPage(props: PageProps) {
           <p className="card-desc" style={{ marginBottom: 8 }}>
             输入对方 9 位设备号发起打洞；对方必须在「我的设备」里接受后才会建立直连。打洞成功后可以加端口映射：本地 TCP 端口 → 对端端口（数据走 UDP/QUIC，断开打洞即释放）。
           </p>
+          {(() => {
+            const mine = myDevices?.devices.find((d) => d.id === p2p?.localDevice)
+            if (!mine?.number) return null
+            return (
+              <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+                <span className="small faint">本机设备号</span>
+                <span className="mono" style={{ fontSize: 18, letterSpacing: 2 }}>
+                  #{mine.number}
+                </span>
+                <button className="btn btn-sm btn-ghost" onClick={() => void navigator.clipboard.writeText(mine.number ?? '')}>
+                  复制
+                </button>
+                <span className="small faint">把它告诉对方，由对方发起穿透</span>
+              </div>
+            )
+          })()}
           <div className="row" style={{ gap: 8 }}>
             <input
               className="input mono"
@@ -1239,8 +1256,10 @@ export default function ServerPage(props: PageProps) {
             />
             <button
               className="btn btn-primary"
-              disabled={peerNumber.length !== 9}
+              disabled={peerNumber.length !== 9 || punching}
               onClick={async () => {
+                setPunching(true)
+                toast.push('已发送穿透请求，等待对方在「我的设备」里接受…')
                 try {
                   const res = await api.P2PConnectByNumber(peerNumber)
                   toast.push(`已与设备 ${res.device.slice(0, 8)} 建立直连`)
@@ -1248,10 +1267,12 @@ export default function ServerPage(props: PageProps) {
                   setP2p(await api.P2PStatus())
                 } catch (err) {
                   toast.error(err)
+                } finally {
+                  setPunching(false)
                 }
               }}
             >
-              发起穿透
+              {punching ? '等待对方接受…' : '发起穿透'}
             </button>
           </div>
           {invites.length > 0 ? (
@@ -1727,6 +1748,7 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
 

@@ -146,6 +146,11 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
       }
       if (downloads.verifySupported) merged.verifyChecksums = downloads.verifyChecksums
       const cur = await api.GetSettings()
+      // Only persist real changes: the debounced auto-save effect re-runs after
+      // every reload, which used to save settings in an endless loop.
+      if (JSON.stringify(cur.downloads) === JSON.stringify(merged)) {
+        return
+      }
       await api.SaveSettings({ ...cur, downloads: merged })
       await reloadSettings()
       if (!silent) toast.push('下载设置已保存')
@@ -569,6 +574,7 @@ function SettingsBody({ settings, reloadSettings }: { settings: Settings; reload
     </div>
   )
 }
+
 
 
 

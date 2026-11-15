@@ -102,6 +102,7 @@ func (a *App) p2pConnectTarget(targetDevice, number, label string) (map[string]a
 	if id == "" {
 		return nil, errors.New("服务器没有返回邀请编号")
 	}
+	a.p2pLogf("p2p: invite %s sent to %s (device %s, number %q)", id, label, toDevice, number)
 	a.emit("p2p:invite-sent", map[string]any{"request": id, "number": number, "device": toDevice, "label": label})
 
 	// Wait for the target to answer (max 90s, matching the server TTL).
@@ -114,17 +115,21 @@ func (a *App) p2pConnectTarget(targetDevice, number, label string) (map[string]a
 			if info, ok := st["request"].(map[string]any); ok {
 				switch info["state"] {
 				case "accepted":
+					a.p2pLogf("p2p: invite %s accepted, punching to %s", id, toDevice)
 					_ = link.P2PCancel(context.Background(), me, id)
 					return a.p2pConnectDevice(toDevice, info)
 				case "declined":
+					a.p2pLogf("p2p: invite %s declined by %s", id, toDevice)
 					return nil, errors.New("对方拒绝了穿透请求")
 				case "expired":
+					a.p2pLogf("p2p: invite %s expired (no answer)", id)
 					return nil, errors.New("对方没有在规定时间内响应")
 				}
 			}
 		}
 		time.Sleep(2 * time.Second)
 	}
+	a.p2pLogf("p2p: invite %s timed out after 95s", id)
 	_ = link.P2PCancel(context.Background(), me, id)
 	return nil, errors.New("等待对方接受超时")
 }

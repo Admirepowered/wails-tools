@@ -560,3 +560,14 @@ n2n 的"打洞"本质是：两端都用**同一个 UDP socket** 持续向 supern
 - 发起方的设备号缺失时同样即时补齐，邀请里不会出现空的 `#`。
 - 前端修复：`设备号穿透` 卡片被 `Replace` 插入两次，删掉重复块（`tsc` 通过）。
 - 实测部署后 `wt-admin -devices admire` 三台设备全部有号（924240027 / 418047612 / 113514314）。
+
+---
+
+## 二十、2026-11-16 设置保存死循环 / 本机设备号 / 穿透反馈（v1.3.64）
+
+- **设置保存死循环**：`SettingsPage` 的 `debouncedDownloads` 自动保存 effect 在 `reloadSettings()` 后再次触发，导致每 ~800ms `SaveSettings` 一次（日志刷屏 + 反复写盘）。两层修复：
+  - 前端 `saveDownloads` 先比较 `cur.downloads` 与合并结果，相等直接返回；
+  - 后端 `App.SaveSettings` 增加 `sameSettings(prev, next)` JSON 比较，**无变化直接返回**，不写文件也不打日志。
+- **看不到自己的设备号**：`设备号穿透` 卡片顶部新增「本机设备号 #9位 + 复制」，取自 `p2p.localDevice` 对应设备行。
+- **穿透反馈**：`发起穿透` 按钮等待期间显示「等待对方接受…」，并 toast 提示；日志补全 `invite sent / accepted / declined / expired / timed out` 五种状态，不再是只有一条。
+- `p2p.request` 支持 `targetDevice`（按设备 ID 邀请）后，设备列表右键连接不再需要设备号；接受方仍必须点「接受」。

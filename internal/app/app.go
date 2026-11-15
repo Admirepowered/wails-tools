@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -438,6 +439,11 @@ func (a *App) GetSettings() settings.Settings { return a.settings.Get() }
 // SaveSettings replaces the configuration.
 func (a *App) SaveSettings(next settings.Settings) (settings.Settings, error) {
 	prev := a.settings.Get()
+	// Ignore no-op saves: a UI effect that reloads and saves again would
+	// otherwise rewrite the file (and log) in a loop.
+	if sameSettings(prev, next) {
+		return prev, nil
+	}
 	saved, err := a.settings.Save(next)
 	if a.log != nil {
 		a.log.Printf("settings saved chain=%s/%v (was %s/%v) useGeoIP=%v (was %v) startup.tray=%v",
@@ -656,4 +662,11 @@ func mustHome() string {
 		return ""
 	}
 	return h
+}
+
+// sameSettings compares two settings snapshots by JSON value.
+func sameSettings(a, b settings.Settings) bool {
+	x, err1 := json.Marshal(a)
+	y, err2 := json.Marshal(b)
+	return err1 == nil && err2 == nil && string(x) == string(y)
 }
