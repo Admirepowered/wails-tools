@@ -19,6 +19,7 @@ export default function DownloadsPage({ settings }: PageProps) {
   const [offline, setOffline] = useState<OfflineStatus | null>(null)
   const [offlineMagnet, setOfflineMagnet] = useState('')
   const [offlineBusy, setOfflineBusy] = useState(false)
+  const offlineTasks = offline?.tasks ?? []
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>('all')
   const dirTouched = useRef(false)
@@ -39,7 +40,8 @@ export default function DownloadsPage({ settings }: PageProps) {
 
   const reloadOffline = useCallback(async () => {
     try {
-      setOffline(await api.OfflineListDownloads())
+      const res = await api.OfflineListDownloads()
+      setOffline({ tasks: res?.tasks ?? [], usedBytes: res?.usedBytes ?? 0, quotaBytes: res?.quotaBytes ?? 0 })
     } catch {
       // The server may be offline; keep the previous snapshot.
     }
@@ -295,9 +297,9 @@ export default function DownloadsPage({ settings }: PageProps) {
             刷新
           </button>
         </div>
-        {offline && offline.tasks.length > 0 ? (
+        {offlineTasks.length > 0 ? (
           <div style={{ marginTop: 10 }}>
-            {offline.tasks.slice().reverse().map((t) => (
+            {offlineTasks.slice().reverse().map((t) => (
               <div key={t.id} className="row" style={{ gap: 10, padding: '6px 0', borderTop: '1px solid var(--border)' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="row" style={{ gap: 8 }}>
@@ -318,15 +320,30 @@ export default function DownloadsPage({ settings }: PageProps) {
                   className="btn btn-sm btn-ghost"
                   onClick={async () => {
                     try {
-                      setOffline(await api.OfflineDeleteDownload(t.id, t.status === 'completed'))
-                      toast.push('已删除离线任务')
+                      setOffline(await api.OfflineDeleteDownload(t.id, false))
+                      toast.push('已删除任务（文件保留在文件页）')
                     } catch (err) {
                       toast.error(err)
                     }
                   }}
                 >
-                  删除
+                  删除任务
                 </button>
+                {t.status === 'completed' ? (
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={async () => {
+                      try {
+                        setOffline(await api.OfflineDeleteDownload(t.id, true))
+                        toast.push('已删除任务和文件')
+                      } catch (err) {
+                        toast.error(err)
+                      }
+                    }}
+                  >
+                    连文件删除
+                  </button>
+                ) : null}
               </div>
             ))}
           </div>
@@ -484,6 +501,9 @@ function TaskRow({ task, onAction }: { task: DownloadTask; onAction: (fn: () => 
     </div>
   )
 }
+
+
+
 
 
 

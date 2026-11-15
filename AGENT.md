@@ -511,3 +511,10 @@ v1.3.56 只用 curl（只支持 HTTP/1.1）验证过，浏览器一上 HTTP/2 �
 - 配额在拿到 metadata 后立即校验：`used + total > quota` 直接失败并带 `quota_exceeded` 信息。
 - 运维：`wt-admin -offline-add <magnet>` / `-offline-list`。
 - 实测：129 MB 的 Sintel 完整下完，任务 `completed`，文件出现在 `/var/lib/wt-server/files/u-…/离线下载/Sintel/`，`usedBytes` 从 59 MB 增长到 188 MB（增量正是下载大小）。
+
+### 17.4 v1.3.60：空列表崩溃 + 删除语义
+- Go 的 nil slice 序列化成 JSON `null`，前端 `offline.tasks.length` 直接抛 `Cannot read properties of null (reading 'length')`，整个页面白屏。
+  - 服务端 `offlineStatus` 现在始终返回 `[]`（`if tasks == nil { tasks = []store.OfflineTask{} }`）；
+  - 前端统一 `const offlineTasks = offline?.tasks ?? []`，并对返回做归一化。
+- 删除语义调整：默认「删除任务」只删记录、**保留文件**（文件页可自行清理）；完成任务多一个「连文件删除」，显式 `purge=true` 才会 `os.RemoveAll`。
+

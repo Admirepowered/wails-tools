@@ -248,6 +248,9 @@ func (c *callCtx) offlineStatus(uid string) map[string]any {
 		quota = u.QuotaBytes
 	}
 	tasks := c.api.DB.ListOfflineTasks(uid)
+	if tasks == nil {
+		tasks = []store.OfflineTask{} // JSON arrays, never null
+	}
 	sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt < tasks[j].CreatedAt })
 	return map[string]any{
 		"tasks": tasks, "usedBytes": used, "quotaBytes": quota,
