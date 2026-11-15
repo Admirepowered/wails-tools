@@ -351,5 +351,7 @@ wails build
   - Wails CLI 固定 `v2.12.0`，Go 版本由 `go.mod`（`go-version-file`）决定。
   - Windows 客户端默认 `-webview2 download`，UPX 由 `upx` 输入控制。
 - 手动排查：GitHub Release 用 `softprops/action-gh-release@v2`，`generate_release_notes` 打开、`fail_on_unmatched_files` 打开，避免少资产却发成功。
+- **macOS 产物路径**：Wails 的 `.app` 目录名来自 `wails.json` 的 `name`（`wails-tools.app`），而里面的可执行文件才是 `outputfilename`（`WailsTools`）。workflow 里用 `find build/bin -maxdepth 1 -name '*.app'` 定位，再复制成 `dist/WailsTools.app` 压缩，压完删掉目录（否则 `files: dist/*` 会把目录当资产上传而失败）。
 - **macOS runner 兼容**：`runs-on: macos-14` 在部分账号会解析成 `macos-14-arm64-us-default` 并报 "configuration is not supported"（私有仓库/区域无 arm64 容量）。所以加了 `macos_runner` 输入（默认 `macos-latest`，可改 `macos-15`/`macos-14`/`macos-13`）和 `build_macos` 开关；release 任务用 `always() + !contains(needs.*.result,'failure')`，macOS 被跳过时其余产物照样发。
+
 

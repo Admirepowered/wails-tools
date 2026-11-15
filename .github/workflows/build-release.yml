@@ -287,11 +287,22 @@ jobs:
         run: |
           set -euo pipefail
           wails build -clean -platform darwin/arm64
+          # The bundle directory is named after wails.json "name" (wails-tools),
+          # not after outputfilename, so locate it instead of assuming a path.
+          APP=$(find build/bin -maxdepth 1 -name '*.app' -print -quit)
+          if [ -z "$APP" ]; then
+            echo "no .app bundle produced"; ls -R build/bin; exit 1
+          fi
+          echo "bundle: $APP"
           # Ad-hoc sign so Gatekeeper does not report a damaged bundle.
-          codesign --force --deep --sign - build/bin/WailsTools.app || true
+          codesign --force --deep --sign - "$APP" || true
           mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent build/bin/WailsTools.app \
+          rm -rf dist/WailsTools.app
+          cp -R "$APP" dist/WailsTools.app
+          ditto -c -k --sequesterRsrc --keepParent dist/WailsTools.app \
             "dist/WailsTools-macos-arm64-${{ needs.meta.outputs.version }}.zip"
+          # Only the zip may be released: a stray directory would break the upload.
+          rm -rf dist/WailsTools.app
           ls -lh dist
       - uses: actions/upload-artifact@v4
         with:
@@ -330,5 +341,6 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*
+
 
 
