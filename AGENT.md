@@ -302,7 +302,16 @@ wails build
   - 直连同 IP + `SNI=discord.com` → 被 RST。
   - 因此 SNI 代理已改成**所有出站握手一律不发送 SNI**，站点由 HTTP `Host` 头（HTTP/2 的 `:authority`）决定；服务器不接受无 SNI 握手就按失败处理，不重试带 SNI。
   - 实测（不挂任何上游代理）：`discord.com/` 200、`/api/v9/gateway` 200、`github.com` 200、`api.github.com/zen` 200。
-- 已把 Discord 系列（`discord.com` / `discordapp.com` / `discord.gg` / `discordapp.net`）加入默认规则，均验证在同一固定 IP 上可握手。
+- 已把 Discord 主站（`discord.com` / `.discord.com`）加入默认规则。
+
+### 10.5.1 CDN 域名必须带 SNI（2026-11-15 补充）
+- 反例：`https://stable.dl2.discordapp.net/distro/app/stable/win/x64/.../DiscordSetup.exe`
+  - 本机直连 CDN 真实 IP（104.16.251.55）→ TCP 超时；直连 Discord 通用 IP + **无 SNI** → RST。
+  - 经代理（带 SNI）→ **206 Partial Content**，说明 Cloudflare 并没有拦下载。
+  - 走 SNI 引擎（MITM + 无 SNI + 162.159.128.233）→ **403**（CF 回落到该 IP 的默认 zone：discord.com / 甚至 *.usgs.gov）。
+- 结论：Cloudflare 的 CDN 子域（`dl2.*`、`cdn.*`）按 **SNI 选 zone**，不发 SNI 就一定拿不到；这类域名应**留在规则外**，走代理链路（客户端的 SNI 在加密隧道里，本地网络看不到）。
+- 默认规则已移除 `discordapp.net` / `discordapp.com`，只保留 `discord.com`。
+- DoH 顺序调整：配置了代理链路时**优先穿代理**（目标改写成固定 IP 再 CONNECT），避免直连被墙时把解析总超时耗光。
 
 ### 10.6 验证
 - `TestParseAndMatchRules` / `TestDefaultRulesCoverGithub`：规则解析、别名、子域、`!` 透传。
@@ -353,5 +362,6 @@ wails build
 - 手动排查：GitHub Release 用 `softprops/action-gh-release@v2`，`generate_release_notes` 打开、`fail_on_unmatched_files` 打开，避免少资产却发成功。
 - **macOS 产物路径**：Wails 的 `.app` 目录名来自 `wails.json` 的 `name`（`wails-tools.app`），而里面的可执行文件才是 `outputfilename`（`WailsTools`）。workflow 里用 `find build/bin -maxdepth 1 -name '*.app'` 定位，再复制成 `dist/WailsTools.app` 压缩，压完删掉目录（否则 `files: dist/*` 会把目录当资产上传而失败）。
 - **macOS runner 兼容**：`runs-on: macos-14` 在部分账号会解析成 `macos-14-arm64-us-default` 并报 "configuration is not supported"（私有仓库/区域无 arm64 容量）。所以加了 `macos_runner` 输入（默认 `macos-latest`，可改 `macos-15`/`macos-14`/`macos-13`）和 `build_macos` 开关；release 任务用 `always() + !contains(needs.*.result,'failure')`，macOS 被跳过时其余产物照样发。
+
 
 

@@ -204,9 +204,14 @@ func (r *Resolver) lookupDoH(ctx context.Context, host string) (string, error) {
 		client    *http.Client
 		endpoints []dohEndpoint
 	}
+	// When an upstream proxy is configured it is tried first: plain DoH is
+	// blocked in exactly the networks where this feature is needed.
 	attempts := []attempt{{client: r.client, endpoints: dohEndpoints[:minInt(2, len(dohEndpoints))]}}
 	if r.proxyC != nil {
-		attempts = append(attempts, attempt{client: r.proxyC, endpoints: dohEndpoints})
+		attempts = []attempt{
+			{client: r.proxyC, endpoints: dohEndpoints},
+			{client: r.client, endpoints: dohEndpoints[:minInt(2, len(dohEndpoints))]},
+		}
 	}
 	for _, att := range attempts {
 		if ctx.Err() != nil {

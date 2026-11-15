@@ -248,12 +248,10 @@ pixiv.net=[pi]
 .pixiv.net=[pi]
 .pximg.net=[pi]
 # --- Discord ---
+# 只放"能靠无 SNI 直连"的站点；CDN 域名（dl2.discordapp.net / cdn.discordapp.com
+# 等）依赖 Cloudflare 按 SNI 选 zone，写进来会 403，交给代理链路即可。
 discord.com=162.159.128.233
 .discord.com=162.159.128.233
-discordapp.com=162.159.128.233
-.discordapp.com=162.159.128.233
-.discord.gg=162.159.128.233
-.discordapp.net=162.159.128.233
 
 # Others
 dropboxapi.com
