@@ -107,7 +107,11 @@ func parseVLESSLink(raw string) (Node, bool) {
 		Raw:      raw,
 	}
 	security := strings.ToLower(q.Get("security"))
+	node.Reality = security == "reality"
 	node.TLS = security == "tls" || security == "reality" || security == "xtls"
+	node.RealityPublicKey = firstNonEmpty(q.Get("pbk"), q.Get("publicKey"))
+	node.RealityShortID = firstNonEmpty(q.Get("sid"), q.Get("shortId"))
+	node.Fingerprint = firstNonEmpty(q.Get("fp"), q.Get("fingerprint"))
 	if node.Server == "" || node.UUID == "" {
 		return Node{}, false
 	}

@@ -447,3 +447,32 @@ wss://gateway.discord.gg/...                 101 Switching Protocols + x\xda 首
 - 选中它 = 激活本地引擎但上游直连：客户端流量进入本地 mixed inbound，再由引擎自己拨号（若链路模式是 server/nodes/device，则按链路绕一圈）。
 - UI：自定义节点列表里带「内置」标签，右键只有「测速」；地址列显示「本机出口」；代理链路的中转节点列表里已把它过滤掉（拿它当中转跳没有意义）。
 - 验证：`TestBuiltinDirectNodeIsPermanent`（存在性、不可删、不可改、重开不重复、损坏文件重建后仍在）与 app 层节点测试已更新。
+
+---
+
+## 十六、2026-11-16 VLESS REALITY + Vision（v1.3.56）
+
+### 16.1 之前为什么连不上
+订阅里的「🇺🇸美国凤凰城1号」是 `vless://…?security=reality&flow=xtls-rprx-vision&fp=ios&sni=tv.apple.com&pbk=…&sid=78f5a5a5`。
+旧实现只把 `security=reality` 当成普通 TLS（`tls.Client` + SNI），既没有 REALITY 认证，也没有 Vision 帧，服务端直接断开。
+
+### 16.2 实现（参照 E:\Project\Pulse\mihomo）
+- 依赖 `github.com/metacubex/utls v1.8.4`（与 mihomo 同款 uTLS 分支，`UConn.HandshakeState` 暴露了 REALITY 需要的 key share 私钥）。
+- `internal/miproxy/reality.go`：移植 `component/tls/reality.go` 的客户端逻辑
+  - 按 `fp=` 选择 ClientHello（ios/chrome/firefox/safari/edge/random 等）；
+  - 去掉 `X25519MLKEM768` key share（老 REALITY 服务端不认）；
+  - 用 `ECDHE(pbk)` + HKDF("REALITY") + AES-GCM 生成 session id 里的认证串；
+  - `VerifyConnection` 里用 ed25519 公钥做 HMAC-SHA512 校验服务端签名，校验不过再回退正常证书校验。
+- `internal/miproxy/vision.go`：`xtls-rprx-vision` 帧层
+  - 写：`[uuid(仅首帧)][cmd=0][contentLen][padLen][payload][padding]`，首帧长 padding（≥900）隐藏头部；
+  - 读：解帧，遇到 `end/direct` 命令后切回裸流。
+- VLESS 请求/响应头是**裸的**（这点和 mihomo 一致：Vision 只包 payload），请求头里的 addons 用 protobuf 编码 `flow`（`0a <len> flow`）。
+- `Node` 新增 `reality`、`realityPublicKey`、`realityShortId`、`fingerprint`；分享链接解析 `pbk/sid/fp`，Clash 配置解析 `reality-opts.public-key/short-id` 与 `client-fingerprint`。
+- 订阅页节点表加了 `reality` / `vision` 标签。
+
+### 16.3 实测（真实节点 142.202.242.179:443）
+```
+握手 492ms；HTTP(80) → 204 No Content
+内层 TLS 1.3 (0x304) 证书 *.gstatic.com；HTTPS → 204 No Content
+```
+单测：链接解析、reality 参数校验、Vision 写帧布局、Vision 读帧（含 direct 切换后裸流）、addons 编码。

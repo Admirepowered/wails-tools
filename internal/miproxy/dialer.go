@@ -121,7 +121,19 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 // layer applies TLS and WebSocket on top of an existing stream.
 func (d *Dialer) layer(ctx context.Context, conn net.Conn, n Node) (net.Conn, error) {
 	out := conn
-	if n.TLS {
+	if n.Reality {
+		opts, err := newRealityOptions(n)
+		if err != nil {
+			return nil, err
+		}
+		hsCtx, cancel := context.WithTimeout(ctx, d.Timeout)
+		defer cancel()
+		rc, err := realityHandshake(hsCtx, out, d.Timeout, opts)
+		if err != nil {
+			return nil, err
+		}
+		out = rc
+	} else if n.TLS {
 		tlsConn := tls.Client(out, buildTLSConfig(n, n.Server))
 		hsCtx, cancel := context.WithTimeout(ctx, d.Timeout)
 		defer cancel()

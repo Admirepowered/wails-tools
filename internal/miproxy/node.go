@@ -44,6 +44,12 @@ type Node struct {
 	AlterID  int    `json:"alterId,omitempty"`
 	Security string `json:"security,omitempty"`
 	Flow     string `json:"flow,omitempty"`
+	// Reality marks a VLESS node using the REALITY transport.
+	Reality bool `json:"reality,omitempty"`
+	// REALITY parameters (from pbk / sid / fp in share links).
+	RealityPublicKey string `json:"realityPublicKey,omitempty"`
+	RealityShortID   string `json:"realityShortId,omitempty"`
+	Fingerprint      string `json:"fingerprint,omitempty"`
 
 	// Transport
 	Network string `json:"network,omitempty"` // tcp | ws

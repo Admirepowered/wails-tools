@@ -100,6 +100,13 @@ func nodeFromClashMap(m map[string]string) (Node, bool) {
 		node.UUID = strings.TrimSpace(m["uuid"])
 		node.Flow = strings.TrimSpace(m["flow"])
 		node.TLS = boolish(m["tls"])
+		node.Fingerprint = strings.TrimSpace(m["client-fingerprint"])
+		if reality := parseClashInlineMap(m["reality-opts"]); len(reality) > 0 {
+			node.Reality = true
+			node.RealityPublicKey = strings.TrimSpace(reality["public-key"])
+			node.RealityShortID = strings.TrimSpace(reality["short-id"])
+			node.TLS = true
+		}
 	case "trojan":
 		node.Protocol = ProtoTrojan
 		node.Password = m["password"]
@@ -128,7 +135,10 @@ func nodeFromClashMap(m map[string]string) (Node, bool) {
 		host = strings.TrimSpace(m["host"])
 	}
 	node.Host = host
-	node.SNI = strings.TrimSpace(m["servername"])
+	node.SNI = firstNonEmpty(m["servername"], m["sni"])
+	if node.Fingerprint == "" {
+		node.Fingerprint = strings.TrimSpace(m["fingerprint"])
+	}
 	if node.Network == NetWS && node.Path == "" {
 		node.Path = "/"
 	}

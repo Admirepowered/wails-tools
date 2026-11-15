@@ -18,8 +18,11 @@ import (
 // ---- VLESS ---------------------------------------------------------------
 
 // vlessConn speaks VLESS (no payload encryption; the transport provides it).
+// The VLESS request/response headers are plain; only the payload is Vision
+// framed, matching Xray/mihomo.
 type vlessConn struct {
-	conn   net.Conn
+	raw    net.Conn // transport (TLS/REALITY) used for the response header
+	conn   net.Conn // payload stream (Vision wrapper when flow is set)
 	buf    []byte
 	header bool
 }
@@ -29,26 +32,44 @@ func newVLESSConn(node Node, conn net.Conn, target string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	flow := strings.TrimSpace(node.Flow)
+	addons := encodeVLESSAddons(flow)
+
 	buf := make([]byte, 0, 64)
 	buf = append(buf, 0x00) // version
 	buf = append(buf, uuid...)
-	buf = append(buf, 0x00) // addon length
+	buf = append(buf, byte(len(addons)))
+	buf = append(buf, addons...)
 	buf = append(buf, 0x01) // command: TCP
 	dest, err := encodeDestination(target)
 	if err != nil {
 		return nil, err
 	}
 	buf = append(buf, dest...)
+	// The request header is written unframed; Vision wraps only the payload.
 	if _, err := conn.Write(buf); err != nil {
 		return nil, err
 	}
-	return &vlessConn{conn: conn}, nil
+	stream := conn
+	if flow == "xtls-rprx-vision" && node.Network != NetWS {
+		stream = newVisionConn(conn, uuid)
+	}
+	return &vlessConn{raw: conn, conn: stream}, nil
+}
+
+// encodeVLESSAddons encodes the Addons protobuf (field 1 = flow string).
+func encodeVLESSAddons(flow string) []byte {
+	if flow == "" {
+		return nil
+	}
+	out := []byte{0x0a, byte(len(flow))}
+	return append(out, flow...)
 }
 
 func (c *vlessConn) Read(p []byte) (int, error) {
 	if !c.header {
 		var hdr [2]byte
-		if _, err := io.ReadFull(c.conn, hdr[:]); err != nil {
+		if _, err := io.ReadFull(c.raw, hdr[:]); err != nil {
 			return 0, err
 		}
 		if hdr[0] != 0x00 {
@@ -56,7 +77,7 @@ func (c *vlessConn) Read(p []byte) (int, error) {
 		}
 		if hdr[1] > 0 {
 			skip := make([]byte, hdr[1])
-			if _, err := io.ReadFull(c.conn, skip); err != nil {
+			if _, err := io.ReadFull(c.raw, skip); err != nil {
 				return 0, err
 			}
 		}
