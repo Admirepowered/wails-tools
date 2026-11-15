@@ -218,6 +218,11 @@ func (e *Engine) run(ctx context.Context, tr *taskRunner) {
 		return
 	}
 
+	if t.Kind == KindMagnet {
+		e.runMagnet(ctx, tr)
+		return
+	}
+
 	// Wait for a download slot.
 	select {
 	case e.sem <- struct{}{}:

@@ -49,7 +49,11 @@ try {
 
   if (-not $SkipBuild) {
     Write-Host '==> wails build' -ForegroundColor Cyan
+    # The BT engine (anacrolix/torrent) pulls cgo-only extras; build the desktop
+    # app without cgo so no MinGW toolchain is needed on Windows.
+    $env:CGO_ENABLED = '0'
     wails build
+    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -ne 0) { throw 'wails build failed' }
   }
 
@@ -95,6 +99,7 @@ try {
 } finally {
   Pop-Location
 }
+
 
 
 

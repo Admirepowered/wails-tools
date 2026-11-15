@@ -20,25 +20,27 @@ import (
 
 func main() {
 	var (
-		host      = flag.String("server", envOr("WT_SERVER", "s2.admirecn.de"), "sync server host")
-		port      = flag.Int("port", 8642, "sync server port")
-		user      = flag.String("user", envOr("WT_USER", ""), "admin username")
-		pass      = flag.String("pass", envOr("WT_PASS", ""), "admin password")
-		list      = flag.Bool("list", false, "list users (default action)")
-		create    = flag.String("create", "", "create user: name:password[:admin|user]")
-		del       = flag.String("delete", "", "delete user by name")
-		setRole   = flag.String("set-role", "", "change role: name:admin|user")
-		devices   = flag.String("devices", "", "list devices of a user")
-		rmDevice  = flag.String("remove-device", "", "remove device: user:deviceID")
-		allow     = flag.String("registration", "", "public registration: on|off")
-		noUDP     = flag.Bool("no-udp", false, "force TCP transport")
-		showAdmin = flag.Bool("settings", false, "show server admin settings")
-		vault     = flag.Bool("vault", false, "list the encrypted secret bundles stored for this account")
-		subs      = flag.Bool("subs", false, "show the stored subscription/proxy-node document summary")
-		sniRules  = flag.Bool("sni-rules", false, "show the server-published default SNI rules")
-		sniUpload = flag.String("sni-rules-upload", "", "publish an SNI rule file as the server default (admin)")
-		sniDefs   = flag.Bool("sni-rules-defaults", false, "publish the client's compiled-in default SNI rules")
-		deviceID  = flag.String("device-id", "wt-admin-cli", "device identity reported on login")
+		host        = flag.String("server", envOr("WT_SERVER", "s2.admirecn.de"), "sync server host")
+		port        = flag.Int("port", 8642, "sync server port")
+		user        = flag.String("user", envOr("WT_USER", ""), "admin username")
+		pass        = flag.String("pass", envOr("WT_PASS", ""), "admin password")
+		list        = flag.Bool("list", false, "list users (default action)")
+		create      = flag.String("create", "", "create user: name:password[:admin|user]")
+		del         = flag.String("delete", "", "delete user by name")
+		setRole     = flag.String("set-role", "", "change role: name:admin|user")
+		devices     = flag.String("devices", "", "list devices of a user")
+		rmDevice    = flag.String("remove-device", "", "remove device: user:deviceID")
+		allow       = flag.String("registration", "", "public registration: on|off")
+		noUDP       = flag.Bool("no-udp", false, "force TCP transport")
+		showAdmin   = flag.Bool("settings", false, "show server admin settings")
+		vault       = flag.Bool("vault", false, "list the encrypted secret bundles stored for this account")
+		subs        = flag.Bool("subs", false, "show the stored subscription/proxy-node document summary")
+		sniRules    = flag.Bool("sni-rules", false, "show the server-published default SNI rules")
+		sniUpload   = flag.String("sni-rules-upload", "", "publish an SNI rule file as the server default (admin)")
+		sniDefs     = flag.Bool("sni-rules-defaults", false, "publish the client's compiled-in default SNI rules")
+		offlineAdd  = flag.String("offline-add", "", "queue a magnet link for server-side offline download")
+		offlineList = flag.Bool("offline-list", false, "list server-side offline downloads")
+		deviceID    = flag.String("device-id", "wt-admin-cli", "device identity reported on login")
 	)
 	flag.Parse()
 
@@ -181,6 +183,32 @@ func main() {
 		for _, b := range out.Blobs {
 			fmt.Printf("%-12s %8d bytes  %s\n", b.Kind, b.Size, b.UpdatedAt)
 		}
+
+	case *offlineList:
+		var out struct {
+			Tasks []struct {
+				ID     string `json:"id"`
+				Name   string `json:"name"`
+				Status string `json:"status"`
+				Total  int64  `json:"total"`
+				Done   int64  `json:"done"`
+				Error  string `json:"error"`
+			} `json:"tasks"`
+			UsedBytes  int64 `json:"usedBytes"`
+			QuotaBytes int64 `json:"quotaBytes"`
+		}
+		call("offline.list", nil, &out)
+		fmt.Printf("quota %d/%d bytes, %d tasks\n", out.UsedBytes, out.QuotaBytes, len(out.Tasks))
+		for _, t := range out.Tasks {
+			fmt.Printf("  %s %-10s %s %d/%d %s\n", t.ID, t.Status, t.Name, t.Done, t.Total, t.Error)
+		}
+		return
+
+	case *offlineAdd != "":
+		var out map[string]any
+		call("offline.add", map[string]any{"magnet": *offlineAdd}, &out)
+		fmt.Println("queued offline download")
+		return
 
 	case *sniRules:
 		var out struct {

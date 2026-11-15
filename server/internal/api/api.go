@@ -55,6 +55,9 @@ type API struct {
 
 	mu     sync.RWMutex
 	online map[string]int
+
+	offlineOnce sync.Once
+	offlineMgr  *OfflineManager
 }
 
 // New creates an API.
@@ -230,6 +233,13 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.sniRulesGet()
 	case "sni.rules.put":
 		return ctx.sniRulesPut(body)
+	// ---- server-side offline downloads ------------------------------------
+	case "offline.add":
+		return ctx.offlineAdd(body)
+	case "offline.list":
+		return ctx.offlineList()
+	case "offline.delete":
+		return ctx.offlineDelete(body)
 	// ---- client update distribution (public reads, admin writes) ----------
 	case "update.list":
 		return ctx.updateList(body)

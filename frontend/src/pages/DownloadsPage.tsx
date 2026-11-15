@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, onEvent, type DownloadRequest, type DownloadTask } from '../lib/api'
+import { api, onEvent, type DownloadRequest, type DownloadTask, type OfflineStatus } from '../lib/api'
 import { Empty, Progress, Spinner, Tag, useToast } from '../components/ui'
 import { formatBytes, formatSpeed, formatTime, percent } from '../lib/format'
 import type { PageProps } from '../App'
@@ -16,6 +16,9 @@ export default function DownloadsPage({ settings }: PageProps) {
   const [cookie, setCookie] = useState(settings?.downloads?.cookie ?? '')
   const [proxyMode, setProxyMode] = useState<'inherit' | 'off' | 'on'>('inherit')
   const [probe, setProbe] = useState<{ ok: boolean; filename?: string; total?: number; error?: string } | null>(null)
+  const [offline, setOffline] = useState<OfflineStatus | null>(null)
+  const [offlineMagnet, setOfflineMagnet] = useState('')
+  const [offlineBusy, setOfflineBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>('all')
   const dirTouched = useRef(false)
@@ -33,6 +36,20 @@ export default function DownloadsPage({ settings }: PageProps) {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  const reloadOffline = useCallback(async () => {
+    try {
+      setOffline(await api.OfflineListDownloads())
+    } catch {
+      // The server may be offline; keep the previous snapshot.
+    }
+  }, [])
+
+  useEffect(() => {
+    void reloadOffline()
+    const timer = setInterval(() => void reloadOffline(), 5000)
+    return () => clearInterval(timer)
+  }, [reloadOffline])
 
   useEffect(() => {
     if (!dirTouched.current && settings?.downloads?.directory) {
@@ -67,7 +84,7 @@ export default function DownloadsPage({ settings }: PageProps) {
 
   const add = async (start: boolean) => {
     if (!url.trim()) {
-      toast.push('请输入下载地址', 'warn')
+      toast.push('请输入下载地址或磁力链', 'warn')
       return
     }
     const req: DownloadRequest = {
@@ -89,8 +106,13 @@ export default function DownloadsPage({ settings }: PageProps) {
     }
   }
 
+  const isMagnet = /^magnet:/i.test(url.trim())
   const runProbe = async () => {
     if (!url.trim()) return
+    if (isMagnet) {
+      toast.push('磁力链无需探测，直接开始下载')
+      return
+    }
     try {
       const res = await api.ProbeURL(url.trim())
       setProbe(res)
@@ -128,7 +150,7 @@ export default function DownloadsPage({ settings }: PageProps) {
     <div>
       <div className="card">
         <h3 className="card-title">新建下载</h3>
-        <p className="card-desc">支持 HTTP/HTTPS，多连接分段下载、断点续传，可按需走代理。</p>
+        <p className="card-desc">支持 HTTP/HTTPS 多连接分段下载、断点续传，也可直接粘贴磁力链（magnet:?xt=…）做 BT 下载。</p>
         <div className="row" style={{ gap: 8 }}>
           <input
             className="input mono"
@@ -138,7 +160,7 @@ export default function DownloadsPage({ settings }: PageProps) {
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && add(true)}
           />
-          <button className="btn" onClick={runProbe}>
+          <button className="btn" onClick={runProbe} disabled={isMagnet}>
             探测
           </button>
           <button className="btn" onClick={() => add(false)}>
@@ -227,6 +249,92 @@ export default function DownloadsPage({ settings }: PageProps) {
             </select>
           </div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <div className="row">
+          <h3 className="card-title" style={{ flex: 1 }}>
+            服务端离线下载（BT）
+          </h3>
+          {offline ? (
+            <span className="small faint mono">
+              {formatBytes(offline.usedBytes)} / {formatBytes(offline.quotaBytes)}
+            </span>
+          ) : null}
+        </div>
+        <p className="card-desc">
+          磁力链交给同步服务器下载，完成后进入「文件」页的 <span className="mono">离线下载/</span> 目录，可随时取回；占用与截图共用的 10 GiB 配额。
+        </p>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            className="input mono"
+            style={{ flex: 1 }}
+            placeholder="magnet:?xt=urn:btih:..."
+            value={offlineMagnet}
+            onChange={(e) => setOfflineMagnet(e.target.value)}
+          />
+          <button
+            className="btn btn-primary"
+            disabled={offlineBusy || !offlineMagnet.trim()}
+            onClick={async () => {
+              setOfflineBusy(true)
+              try {
+                setOffline(await api.OfflineAddDownload(offlineMagnet.trim()))
+                setOfflineMagnet('')
+                toast.push('已提交到服务器离线下载')
+              } catch (err) {
+                toast.error(err)
+              } finally {
+                setOfflineBusy(false)
+              }
+            }}
+          >
+            {offlineBusy ? '提交中…' : '离线下载'}
+          </button>
+          <button className="btn btn-ghost" onClick={() => void reloadOffline()}>
+            刷新
+          </button>
+        </div>
+        {offline && offline.tasks.length > 0 ? (
+          <div style={{ marginTop: 10 }}>
+            {offline.tasks.slice().reverse().map((t) => (
+              <div key={t.id} className="row" style={{ gap: 10, padding: '6px 0', borderTop: '1px solid var(--border)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="truncate" title={t.name}>
+                      {t.name || t.id}
+                    </span>
+                    <Tag kind={t.status === 'completed' ? 'ok' : t.status === 'failed' ? 'bad' : 'info'}>{t.status}</Tag>
+                    {t.total > 0 ? (
+                      <span className="small faint mono">
+                        {formatBytes(t.done)} / {formatBytes(t.total)}
+                      </span>
+                    ) : null}
+                  </div>
+                  {t.status === 'downloading' ? <Progress percent={percent(t.done, t.total)} /> : null}
+                  {t.error ? <div className="small" style={{ color: 'var(--danger)' }}>{t.error}</div> : null}
+                </div>
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={async () => {
+                    try {
+                      setOffline(await api.OfflineDeleteDownload(t.id, t.status === 'completed'))
+                      toast.push('已删除离线任务')
+                    } catch (err) {
+                      toast.error(err)
+                    }
+                  }}
+                >
+                  删除
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="small faint" style={{ marginTop: 8 }}>
+            服务器上还没有离线下载任务
+          </div>
+        )}
       </div>
 
       <div className="row" style={{ margin: '16px 0 10px' }}>
@@ -376,4 +484,8 @@ function TaskRow({ task, onAction }: { task: DownloadTask; onAction: (fn: () => 
     </div>
   )
 }
+
+
+
+
 

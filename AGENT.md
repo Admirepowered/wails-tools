@@ -487,3 +487,27 @@ v1.3.56 只用 curl（只支持 HTTP/1.1）验证过，浏览器一上 HTTP/2 �
 - 实现：`visionConn{tls, raw, inner}`；写：padding 块→外层 TLS，splice 后→raw；读：解 padding→`cmd=1` 转"裸 TLS 直读"→`cmd=2` 转 raw 并把 TLS 缓冲并入。
 - 验证：Go 的 h2 客户端与真实 headless Edge 都通过美国 REALITY 节点打开 example.com / google.com.hk / youtube.com / github.com（标题正确）。
 
+
+---
+
+## 十七、2026-11-16 BT 下载与离线下载（v1.3.58 / v1.3.59）
+
+### 17.1 下载增强（v1.3.58）
+- `DownloadSettings.Cookie`：全局 Cookie 请求头；下载页新增单任务 Cookie（留空用全局值）。`dlengine` 的 `buildRequest` 在没有显式 Cookie 时注入，探测/分段/续传都生效。
+- 线程/并发：沿用 `ConnectionsPer`（单任务线程，1–32）与 `MaxConcurrency`（同时下载数），下载页可直接改连接数。
+- SNI 分流**固定走代理链路**：`applySNIProxy` 不再看 `UseExistingProxy`，统一用 `sniChainDialer()`（= `buildChain()`）：`off` 直连、`server` 经同步服务器中转、`nodes` 经 1–2 个节点、`device` 经打洞设备。DoH 也走同一链路。
+
+### 17.2 BT 客户端（v1.3.59）
+- 依赖 `github.com/anacrolix/torrent v1.62.0`；**Windows/CI 用 `CGO_ENABLED=0` 构建**（torrent 的 uTP/sqlite 组件是 cgo-only，禁用 cgo 时自动排除；Wails Windows 本身不需要 cgo，已实测）。
+- `internal/torrentdl`：`Download(ctx, magnet, Options{Dir, Progress, OnMetadata})`，内存 piece completion（`storage.NewMMapWithCompletion` + `NewMapPieceCompletion`），不再往下载目录写 `.torrent.bolt.db`。
+- `dlengine`：`Task.Kind = http|magnet`；`Add` 识别 `magnet:`，文件名取 `dn=`；`run` 分支到 `runMagnet`（进度节流、暂停=ctx 取消、续传靠文件已存在+重哈希）。
+- 下载页：磁力链可直接粘贴（探测按钮对 magnet 禁用），任务卡显示进度与状态。
+- 实测（官方 Sintel 种子）：4 秒拿到 metadata（129,302,391 字节 / 11 文件），速度约 200 KB/s 正常下载。
+
+### 17.3 服务端离线下载
+- 存储：`store.OfflineTask`（meta 桶 `offline:<id>`）+ `Get/Put/List/DeleteOfflineTask`。
+- API：`offline.add`（magnet）/ `offline.list`（含 `usedBytes`/`quotaBytes`）/ `offline.delete`（`purge` 连文件一起删）。
+- 下载落盘到用户文件根下的 `离线下载/<torrent 名>/`，完成后递归 `PutFileMeta` 注册（跳过点文件），再 `RecalcUsage` —— **与截图共用一个 10 GiB 配额**，并在「文件」页可直接取回。
+- 配额在拿到 metadata 后立即校验：`used + total > quota` 直接失败并带 `quota_exceeded` 信息。
+- 运维：`wt-admin -offline-add <magnet>` / `-offline-list`。
+- 实测：129 MB 的 Sintel 完整下完，任务 `completed`，文件出现在 `/var/lib/wt-server/files/u-…/离线下载/Sintel/`，`usedBytes` 从 59 MB 增长到 188 MB（增量正是下载大小）。

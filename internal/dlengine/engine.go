@@ -37,7 +37,8 @@ type Request struct {
 	Headers     map[string]string `json:"headers"`
 	Referer     string            `json:"referer"`
 	Connections int               `json:"connections"`
-	ProxyMode   string            `json:"proxyMode"` // inherit|off|on
+	ProxyMode   string            `json:"proxyMode"`      // inherit|off|on
+	Kind        string            `json:"kind,omitempty"` // http|magnet
 }
 
 // Task is the persisted, UI-facing download record.
@@ -59,6 +60,7 @@ type Task struct {
 	Headers     map[string]string `json:"headers,omitempty"`
 	Referer     string            `json:"referer,omitempty"`
 	ProxyMode   string            `json:"proxyMode"`
+	Kind        string            `json:"kind,omitempty"`
 	ProxyUsed   string            `json:"proxyUsed,omitempty"`
 	CreatedAt   string            `json:"createdAt"`
 	UpdatedAt   string            `json:"updatedAt"`
@@ -350,8 +352,11 @@ func (e *Engine) Add(req Request) (Task, error) {
 	if url == "" {
 		return Task{}, errors.New("url is required")
 	}
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return Task{}, errors.New("only http(s) urls are supported")
+	kind := KindHTTP
+	if IsMagnet(url) {
+		kind = KindMagnet
+	} else if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return Task{}, errors.New("only http(s) urls or magnet links are supported")
 	}
 	cfg := e.store.Get()
 	dir := req.Directory
@@ -363,7 +368,11 @@ func (e *Engine) Add(req Request) (Task, error) {
 	}
 	name := sanitizeFilename(req.Filename)
 	if req.Filename == "" {
-		name = sanitizeFilename(guessFilename(url))
+		if kind == KindMagnet {
+			name = magnetName(url)
+		} else {
+			name = sanitizeFilename(guessFilename(url))
+		}
 	}
 	conns := req.Connections
 	if conns <= 0 {
@@ -386,6 +395,7 @@ func (e *Engine) Add(req Request) (Task, error) {
 		Headers:     req.Headers,
 		Referer:     req.Referer,
 		ProxyMode:   strings.ToLower(strings.TrimSpace(req.ProxyMode)),
+		Kind:        kind,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

@@ -228,6 +228,8 @@ jobs:
       - name: Build client
         shell: pwsh
         run: |
+          # anacrolix/torrent pulls cgo-only extras; Windows has no MinGW here.
+          $env:CGO_ENABLED = '0'
           wails build -clean -platform windows/amd64
           if ($LASTEXITCODE -ne 0) { throw 'wails build failed' }
       - name: UPX compress
@@ -341,6 +343,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*
+
 
 
 

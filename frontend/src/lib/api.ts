@@ -294,7 +294,27 @@ export type DownloadStatus =
   | 'failed'
   | 'canceled'
 
+export interface OfflineTask {
+  id: string
+  name: string
+  status: string
+  total: number
+  done: number
+  files: number
+  error?: string
+  dir?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OfflineStatus {
+  tasks: OfflineTask[]
+  usedBytes: number
+  quotaBytes: number
+}
+
 export interface DownloadTask {
+  kind?: string
   id: string
   url: string
   finalUrl?: string
@@ -872,6 +892,9 @@ const rawApi = {
   CancelDownload: (id: string) => call<void>('CancelDownload', id),
   RemoveDownload: (id: string, deleteFile: boolean) => call<void>('RemoveDownload', id, deleteFile),
   ListDownloads: () => call<DownloadTask[]>('ListDownloads'),
+  OfflineAddDownload: (magnet: string) => call<OfflineStatus>('OfflineAddDownload', magnet, undefined),
+  OfflineListDownloads: () => call<OfflineStatus>('OfflineListDownloads'),
+  OfflineDeleteDownload: (id: string, purge: boolean) => call<OfflineStatus>('OfflineDeleteDownload', id, purge),
   ClearFinishedDownloads: () => call<void>('ClearFinishedDownloads'),
   PauseAllDownloads: () => call<void>('PauseAllDownloads'),
   DownloadDefaults: () =>
@@ -1202,6 +1225,8 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
 
 
 

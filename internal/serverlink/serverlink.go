@@ -1011,3 +1011,33 @@ func (c *Client) PutSNIRules(ctx context.Context, rules string) (map[string]any,
 	}
 	return out, nil
 }
+
+// ---- server-side offline (BT) downloads --------------------------------
+
+// OfflineAdd queues a magnet download on the sync server.
+func (c *Client) OfflineAdd(ctx context.Context, magnet string) (map[string]any, error) {
+	var out map[string]any
+	if err := c.Call(ctx, "offline.add", map[string]any{"magnet": magnet}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// OfflineList returns the user's offline tasks plus quota numbers.
+func (c *Client) OfflineList(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	if err := c.Call(ctx, "offline.list", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// OfflineDelete removes a task (optionally purging its files).
+func (c *Client) OfflineDelete(ctx context.Context, id string, purge bool) (map[string]any, error) {
+	var out map[string]any
+	body := map[string]any{"id": id, "purge": purge}
+	if err := c.Call(ctx, "offline.delete", body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
