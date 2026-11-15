@@ -950,7 +950,7 @@ const rawApi = {
   InstallSNIProxyCA: () => call<{ caPath?: string; installed?: boolean }>('InstallSNIProxyCA'),
   SNIProxyCAPath: () => call<string>('SNIProxyCAPath'),
   OpenSNIProxyFolder: () => call<void>('OpenSNIProxyFolder'),
-  ResetSNIProxyRules: () => call<SNIProxySettings>('ResetSNIProxyRules'),
+  ResetSNIProxyRules: () => call<SNIProxySettings & { source?: string; updatedAt?: string }>('ResetSNIProxyRules'),
 
   P2PConnect: (deviceId: string) => call<P2PStatus>('P2PConnect', deviceId),
   P2PDisconnect: (deviceId: string) => call<P2PStatus>('P2PDisconnect', deviceId),
@@ -1201,6 +1201,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

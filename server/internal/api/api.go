@@ -225,6 +225,11 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.p2pPending(body)
 	case "p2p.drop":
 		return ctx.p2pDrop(body)
+	// ---- server-published default SNI rules --------------------------------
+	case "sni.rules.get":
+		return ctx.sniRulesGet()
+	case "sni.rules.put":
+		return ctx.sniRulesPut(body)
 	// ---- client update distribution (public reads, admin writes) ----------
 	case "update.list":
 		return ctx.updateList(body)

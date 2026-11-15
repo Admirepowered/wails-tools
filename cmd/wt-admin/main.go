@@ -15,6 +15,7 @@ import (
 
 	"wailstools/internal/serverlink"
 	"wailstools/internal/settings"
+	"wailstools/internal/sniproxy"
 )
 
 func main() {
@@ -34,6 +35,9 @@ func main() {
 		showAdmin = flag.Bool("settings", false, "show server admin settings")
 		vault     = flag.Bool("vault", false, "list the encrypted secret bundles stored for this account")
 		subs      = flag.Bool("subs", false, "show the stored subscription/proxy-node document summary")
+		sniRules  = flag.Bool("sni-rules", false, "show the server-published default SNI rules")
+		sniUpload = flag.String("sni-rules-upload", "", "publish an SNI rule file as the server default (admin)")
+		sniDefs   = flag.Bool("sni-rules-defaults", false, "publish the client's compiled-in default SNI rules")
 		deviceID  = flag.String("device-id", "wt-admin-cli", "device identity reported on login")
 	)
 	flag.Parse()
@@ -177,6 +181,38 @@ func main() {
 		for _, b := range out.Blobs {
 			fmt.Printf("%-12s %8d bytes  %s\n", b.Kind, b.Size, b.UpdatedAt)
 		}
+
+	case *sniRules:
+		var out struct {
+			Found     bool   `json:"found"`
+			Rules     string `json:"rules"`
+			UpdatedAt string `json:"updatedAt"`
+			UpdatedBy string `json:"updatedBy"`
+		}
+		call("sni.rules.get", nil, &out)
+		if !out.Found {
+			fmt.Println("no server-published SNI rules")
+			return
+		}
+		lines := strings.Count(out.Rules, "\n") + 1
+		fmt.Printf("published %s by %s: %d lines, %d bytes\n", out.UpdatedAt, out.UpdatedBy, lines, len(out.Rules))
+		return
+
+	case *sniUpload != "", *sniDefs:
+		var text string
+		if *sniDefs {
+			text = sniproxy.DefaultRules
+		} else {
+			data, err := os.ReadFile(*sniUpload)
+			if err != nil {
+				fatal(err)
+			}
+			text = string(data)
+		}
+		var out map[string]any
+		call("sni.rules.put", map[string]any{"rules": text}, &out)
+		fmt.Printf("published SNI rules (%d bytes) at %v\n", len(text), out["updatedAt"])
+		return
 
 	case *subs:
 		var out struct {

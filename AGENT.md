@@ -427,3 +427,23 @@ https://cdn.discordapp.com/attachments/...   404（fake 路径，zone 正确）
 DiscordSetup.exe (Range 1K)                  206 application/x-msdownload  MZ...
 wss://gateway.discord.gg/...                 101 Switching Protocols + x\xda 首帧
 ```
+
+---
+
+## 十五、2026-11-15 规则下发 + 内置直连节点（v1.3.55）
+
+### 15.1 SNI 默认规则优先从服务器拉取
+- 服务端新增 `sni.rules.get`（登录可读）/ `sni.rules.put`（仅 admin，存 `meta` 桶的 `sniRules` + `updatedAt/by`，上限 1 MiB）。
+- 客户端：
+  - 「恢复默认」按钮**仍是唯一入口**，但改为：先 `sni.rules.get`，拿到就用（toast 提示来自服务器），拿不到/为空才回退编译进二进制的 `sniproxy.DefaultRules`。
+  - `SNIProxy.Rules` 为空（新装/未自定义）时，开启 SNI 会在后台拉一次服务器规则并热重建引擎，不打断使用。
+  - 用户自定义过的规则（非空）**永远不会被服务器覆盖**，只影响"恢复默认"。
+- 运维：`cmd/wt-admin` 新增 `-sni-rules`（查看）/ `-sni-rules-upload file`（发布文件）/ `-sni-rules-defaults`（发布客户端内置默认）。本次已把 92 行、2721 字节的默认规则发布到服务器（`2026-11-15T15:44:23Z`）。
+
+### 15.2 内置直连节点（不可删除）
+- `proxysvc.BuiltinDirectNode()`：`ID=builtin-direct`，名称「直连（本机出口）」，`Protocol=direct`。
+  - `OpenNodes` / `OpenNodesFresh` 都会确保它存在（`ensureBuiltin`，插在最前）。
+  - `Delete` / `Save` 对它直接返回错误（内置直连节点不能删除/修改）。
+- 选中它 = 激活本地引擎但上游直连：客户端流量进入本地 mixed inbound，再由引擎自己拨号（若链路模式是 server/nodes/device，则按链路绕一圈）。
+- UI：自定义节点列表里带「内置」标签，右键只有「测速」；地址列显示「本机出口」；代理链路的中转节点列表里已把它过滤掉（拿它当中转跳没有意义）。
+- 验证：`TestBuiltinDirectNodeIsPermanent`（存在性、不可删、不可改、重开不重复、损坏文件重建后仍在）与 app 层节点测试已更新。

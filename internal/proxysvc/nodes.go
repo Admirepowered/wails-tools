@@ -14,6 +14,39 @@ import (
 	"wailstools/internal/miproxy"
 )
 
+// BuiltinDirectID is the permanent "direct" node. It cannot be deleted and
+// makes the local engine dial destinations itself (optionally through the
+// configured chain), i.e. traffic takes one extra local hop.
+const BuiltinDirectID = "builtin-direct"
+
+// BuiltinDirectNode returns the permanent direct-exit node.
+func BuiltinDirectNode() miproxy.Node {
+	return miproxy.Node{
+		ID:       BuiltinDirectID,
+		Name:     "直连（本机出口）",
+		Protocol: miproxy.ProtoDirect,
+		Server:   "local",
+		Port:     0,
+		Network:  miproxy.NetTCP,
+	}
+}
+
+// IsBuiltinDirect reports whether id belongs to the permanent node.
+func IsBuiltinDirect(id string) bool { return id == BuiltinDirectID }
+
+// ensureBuiltin inserts the permanent direct node when it is missing.
+func (s *NodeStore) ensureBuiltin() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, n := range s.items {
+		if n.ID == BuiltinDirectID {
+			return nil
+		}
+	}
+	s.items = append([]miproxy.Node{BuiltinDirectNode()}, s.items...)
+	return s.persist()
+}
+
 // NodeStore persists user-defined nodes.
 type NodeStore struct {
 	mu    sync.Mutex
@@ -27,6 +60,9 @@ func OpenNodes(dir string) (*NodeStore, error) {
 		return nil, err
 	}
 	s := &NodeStore{path: filepath.Join(dir, "custom-nodes.json")}
+	if err := s.ensureBuiltin(); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -49,6 +85,9 @@ func OpenNodesFresh(dir string) (*NodeStore, error) {
 	}
 	s := &NodeStore{path: filepath.Join(dir, "custom-nodes.json")}
 	_ = os.Remove(s.path)
+	if err := s.ensureBuiltin(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -73,8 +112,11 @@ func (s *NodeStore) List() []miproxy.Node {
 	return out
 }
 
-// Save inserts or updates a custom node.
+// Save inserts or updates a custom node. The builtin direct node is read-only.
 func (s *NodeStore) Save(n miproxy.Node) (miproxy.Node, error) {
+	if IsBuiltinDirect(n.ID) {
+		return BuiltinDirectNode(), errors.New("内置直连节点不能修改")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if strings.TrimSpace(n.Server) == "" || n.Port <= 0 {
@@ -127,8 +169,11 @@ func (s *NodeStore) Save(n miproxy.Node) (miproxy.Node, error) {
 	return n, nil
 }
 
-// Delete removes a custom node.
+// Delete removes a custom node. The builtin direct node is permanent.
 func (s *NodeStore) Delete(id string) error {
+	if IsBuiltinDirect(id) {
+		return errors.New("内置直连节点不能删除")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := s.items[:0]

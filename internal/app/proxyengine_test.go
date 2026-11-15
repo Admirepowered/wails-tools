@@ -132,7 +132,13 @@ func TestCustomNodeStoreViaApp(t *testing.T) {
 	if saved.ID == "" {
 		t.Fatal("id not assigned")
 	}
-	if list := a.ListCustomNodes(); len(list) != 1 || list[0].Name != "HK" {
+	// The permanent direct node is always present alongside the saved node.
+	list := a.ListCustomNodes()
+	ids := map[string]bool{}
+	for _, n := range list {
+		ids[n.ID] = true
+	}
+	if len(list) != 2 || !ids[proxysvc.BuiltinDirectID] || !ids[saved.ID] {
 		t.Fatalf("unexpected list: %+v", list)
 	}
 	// Invalid nodes are rejected.
@@ -142,7 +148,7 @@ func TestCustomNodeStoreViaApp(t *testing.T) {
 	if err := a.DeleteCustomNode(saved.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if len(a.ListCustomNodes()) != 0 {
+	if len(a.ListCustomNodes()) != 1 {
 		t.Fatal("node not deleted")
 	}
 }

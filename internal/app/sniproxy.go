@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"wailstools/internal/miproxy"
 	"wailstools/internal/settings"
@@ -49,9 +50,53 @@ func (a *App) sniChainDialer() *miproxy.Dialer {
 	return miproxy.NewChainDialer(hops, relay, a.buildDirectFunc(), 15e9)
 }
 
+// fetchServerSNIRules returns the rule list published on the sync server.
+func (a *App) fetchServerSNIRules() (string, string, bool) {
+	if a.link == nil || !a.link.Available() {
+		return "", "", false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	rules, at, found, err := a.link.GetSNIRules(ctx)
+	if err != nil || !found || len(strings.TrimSpace(rules)) < 20 {
+		return "", at, false
+	}
+	return rules, at, true
+}
+
+// refreshDefaultSNIRulesIfUnset adopts the server defaults on installs that
+// never customized the list.
+func (a *App) refreshDefaultSNIRulesIfUnset() {
+	rules, at, ok := a.fetchServerSNIRules()
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(a.settings.Get().SNIProxy.Rules) != "" {
+		return
+	}
+	if _, err := a.settings.Update(func(s *settings.Settings) error {
+		if strings.TrimSpace(s.SNIProxy.Rules) == "" {
+			s.SNIProxy.Rules = rules
+		}
+		return nil
+	}); err != nil {
+		return
+	}
+	if a.log != nil {
+		a.log.Printf("sniproxy: adopted server default rules (updated %s)", at)
+	}
+	_ = a.applySNIProxy()
+	a.emit("sniproxy:rules", map[string]any{"source": "server", "updatedAt": at})
+}
+
 // applySNIProxy rebuilds the SNI engine from settings (no listener).
 func (a *App) applySNIProxy() error {
 	cfg := a.settings.Get().SNIProxy
+	if cfg.Enabled && strings.TrimSpace(cfg.Rules) == "" {
+		// Pull the server defaults in the background; the built-in list is used
+		// until they arrive.
+		go a.refreshDefaultSNIRulesIfUnset()
+	}
 	if !cfg.Enabled {
 		a.setSNI(nil)
 		a.emit("sniproxy:state", a.SNIProxyStatus())
@@ -265,10 +310,17 @@ func (a *App) OpenSNIProxyFolder() error {
 	return reveal(dir)
 }
 
-// ResetSNIProxyRules restores the built-in default rule list.
+// ResetSNIProxyRules restores the defaults: the server-published list first,
+// the compiled-in list as a fallback.
 func (a *App) ResetSNIProxyRules() (map[string]any, error) {
+	rules, updatedAt, fromServer := a.fetchServerSNIRules()
+	source := "server"
+	if !fromServer {
+		rules = sniproxy.DefaultRules
+		source = "builtin"
+	}
 	if _, err := a.settings.Update(func(s *settings.Settings) error {
-		s.SNIProxy.Rules = sniproxy.DefaultRules
+		s.SNIProxy.Rules = rules
 		return nil
 	}); err != nil {
 		return nil, err
@@ -276,7 +328,10 @@ func (a *App) ResetSNIProxyRules() (map[string]any, error) {
 	if err := a.applySNIProxy(); err != nil {
 		return nil, err
 	}
-	return a.GetSNIProxySettings(), nil
+	out := a.GetSNIProxySettings()
+	out["source"] = source
+	out["updatedAt"] = updatedAt
+	return out, nil
 }
 
 // startSNIProxyOnBoot applies the saved state at startup.

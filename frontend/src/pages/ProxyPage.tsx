@@ -633,7 +633,7 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
           {nodes.length === 0 ? (
             <div className="small faint">还没有自定义节点，可先在「订阅」页导入。</div>
           ) : (
-            nodes.map((n) => {
+            nodes.filter((n) => n.id !== 'builtin-direct').map((n) => {
               const order = (cfg.nodeIds ?? []).indexOf(n.id ?? '')
               return (
                 <label key={n.id} className="row" style={{ gap: 8 }}>
@@ -642,7 +642,7 @@ function ChainCard({ onChanged }: { onChanged: () => void }) {
                     {n.name}
                   </span>
                   <span className="small faint mono">
-                    {n.server}:{n.port}
+                    {n.protocol === 'direct' ? '本机出口' : `${n.server}:${n.port}`}
                   </span>
                   {order >= 0 ? <Tag kind="info">第 {order + 1} 跳</Tag> : null}
                 </label>
@@ -772,6 +772,8 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
+
 
 
 

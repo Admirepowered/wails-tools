@@ -989,3 +989,25 @@ func (c *Client) deviceIdentity() (string, string, string) {
 	}
 	return c.store.DeviceID(), host, machine
 }
+
+// GetSNIRules fetches the server-published default SNI rule list.
+func (c *Client) GetSNIRules(ctx context.Context) (rules, updatedAt string, found bool, err error) {
+	var out struct {
+		Found     bool   `json:"found"`
+		Rules     string `json:"rules"`
+		UpdatedAt string `json:"updatedAt"`
+	}
+	if err := c.Call(ctx, "sni.rules.get", nil, &out); err != nil {
+		return "", "", false, err
+	}
+	return out.Rules, out.UpdatedAt, out.Found, nil
+}
+
+// PutSNIRules publishes the default SNI rule list (admin only).
+func (c *Client) PutSNIRules(ctx context.Context, rules string) (map[string]any, error) {
+	var out map[string]any
+	if err := c.Call(ctx, "sni.rules.put", map[string]any{"rules": rules}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

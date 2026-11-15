@@ -151,7 +151,7 @@ export default function SNICard() {
               const reset = await api.ResetSNIProxyRules()
               setRules(reset.rules)
               await load()
-              toast.push('已恢复默认规则')
+              toast.push(reset.source === 'server' ? '已从同步服务器拉取默认规则' : '已恢复内置默认规则（服务器没有发布规则）')
             } catch (err) {
               toast.error(err)
             }
