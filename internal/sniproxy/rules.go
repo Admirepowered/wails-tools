@@ -24,7 +24,8 @@ type Rule struct {
 	Via string
 	// Raw keeps the original host for the name/alias table.
 	Raw bool
-	// Passthrough forces a raw tunnel instead of MITM.
+	// Passthrough forces a raw tunnel instead of MITM. The client's own
+	// handshake (including its SNI) is forwarded unchanged.
 	Passthrough bool
 }
 

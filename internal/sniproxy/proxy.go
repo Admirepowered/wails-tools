@@ -371,8 +371,11 @@ func (s *Server) mitmTunnel(conn net.Conn, host, port string) bool {
 		s.fail("sniproxy: upstream %s: %v", ip, err)
 		return false
 	}
+	// Deliberately no SNI: the whole point of this mode is that the outbound
+	// ClientHello carries no destination name. Cloudflare and most vhosts still
+	// route by the Host header, so the decrypted request keeps working; if the
+	// server refuses a nameless handshake the connection just fails.
 	upstream := tls.Client(raw, &tls.Config{
-		ServerName:         host,
 		InsecureSkipVerify: true,
 		MinVersion:         tls.VersionTLS12,
 	})

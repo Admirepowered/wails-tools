@@ -92,7 +92,7 @@ export default function SNICard() {
             {stats && stats.mitm > 0 ? <Tag kind="info">MITM {stats.mitm}</Tag> : null}
           </h3>
           <p className="card-desc" style={{ margin: 0 }}>
-            规则内的域名重新握手到固定/解析出的 IP（保留真实 SNI 与 Host），其余流量继续走上面的代理。
+            规则内的域名重新握手到固定/解析出的 IP，且出站握手不携带 SNI（HTTP 层用 Host 头选站点），其余流量继续走上面的代理。
             开启 MITM 需要导入本机自动生成的根证书；不导入也能用，但只会做原始 TLS 转发（不解密）。
           </p>
         </div>
@@ -137,7 +137,7 @@ export default function SNICard() {
 
       <Field
         label="域名规则"
-        hint="格式：domain / domain=IP[,IP] / .sub.domain / alias=[alias] / !domain（不做 MITM）。不带 IP 的用 DoH 解析并缓存 3 天。"
+        hint="格式：domain / domain=IP[,IP] / .sub.domain / alias=[alias] / !domain（原始透传，不 MITM）。不带 IP 的用 DoH 解析并缓存 3 天。所有出站握手都不发送 SNI，站点由 Host 头决定。"
       >
         <textarea
           className="input mono"

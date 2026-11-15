@@ -296,10 +296,16 @@ wails build
 ### 10.5 `discord.com=162.159.128.233` 诊断结论（2026-11-15）
 - 同一 IP + SNI `example.com` → TLS 成功（证书 CN=example.com）；同一 IP + SNI `discord.com` 直连 → **握手阶段被 RST/EOF**。
 - 从境内服务器（s2）经 relay 发同样的 ClientHello 也被重置；把 ClientHello 从香港节点发出（`CONNECT 162.159.128.233:443`）→ **TLS 成功，证书 CN=discord.com**，`GET /` 200，`/api/v9/gateway` 返回 `wss://gateway.discord.gg`。
-- 结论：**不是 Cloudflare 拒绝**，而是链路上按 SNI 重置（固定 IP 只能解决 DNS 污染，不能解决 SNI 阻断）。使用 SNI 代理时必须保持「出站走已有代理」，让第二段 TLS 从境外发出。
+- 结论：**不是 Cloudflare 拒绝**，而是链路上按 SNI 重置（固定 IP 只能解决 DNS 污染，不能解决 SNI 阻断）。
+- **关键修正（用户指正）**：MITM 的目的不是"带真 SNI"，而是**把出站 ClientHello 的 SNI 抹掉**。实测：
+  - 直连 `162.159.128.233` + 无 SNI → TLS 成功（CF 默认证书就是 discord.com）；
+  - 直连同 IP + `SNI=discord.com` → 被 RST。
+  - 因此 SNI 代理已改成**所有出站握手一律不发送 SNI**，站点由 HTTP `Host` 头（HTTP/2 的 `:authority`）决定；服务器不接受无 SNI 握手就按失败处理，不重试带 SNI。
+  - 实测（不挂任何上游代理）：`discord.com/` 200、`/api/v9/gateway` 200、`github.com` 200、`api.github.com/zen` 200。
 - 已把 Discord 系列（`discord.com` / `discordapp.com` / `discord.gg` / `discordapp.net`）加入默认规则，均验证在同一固定 IP 上可握手。
 
 ### 10.6 验证
 - `TestParseAndMatchRules` / `TestDefaultRulesCoverGithub`：规则解析、别名、子域、`!` 透传。
 - `TestMitmTunnelThroughProxy`：本地起 TLS 源站（8443）→ SNI 代理 MITM（规则 `origin.test=127.0.0.1`）→ 客户端用根证书校验通过并回显 `ping-mitm`，且 `stats.mitm==1`。
+
 

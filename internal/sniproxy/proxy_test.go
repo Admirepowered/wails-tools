@@ -67,8 +67,19 @@ func TestDefaultRulesCoverGithub(t *testing.T) {
 func TestMitmTunnelThroughProxy(t *testing.T) {
 	// Real TLS echo server (the "internet" side).
 	cert := selfSignedForTest(t, "origin.test")
+	sniSeen := make(chan string, 1)
+	originCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			select {
+			case sniSeen <- hello.ServerName:
+			default:
+			}
+			return nil, nil
+		},
+	}
 	// MITM only applies to HTTPS ports, so the origin must listen on 8443.
-	origin, err := tls.Listen("tcp", "127.0.0.1:8443", &tls.Config{Certificates: []tls.Certificate{cert}})
+	origin, err := tls.Listen("tcp", "127.0.0.1:8443", originCfg)
 	if err != nil {
 		t.Skipf("port 8443 unavailable: %v", err)
 	}
@@ -149,6 +160,15 @@ func TestMitmTunnelThroughProxy(t *testing.T) {
 	}
 	if stats := proxy.Stats(); stats.Mitm != 1 {
 		t.Fatalf("mitm counter: %+v", stats)
+	}
+	// The outbound ClientHello must not carry the destination name.
+	select {
+	case seen := <-sniSeen:
+		if seen != "" {
+			t.Fatalf("outbound handshake leaked SNI %q", seen)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("origin never received the handshake")
 	}
 	_ = originPort
 }
