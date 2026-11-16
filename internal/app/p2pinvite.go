@@ -190,6 +190,9 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 	}
 	a.p2p.put(deviceID, channel)
 	a.p2p.markOutgoing(deviceID)
+	// Serve before verifying: the peer answers the liveness ping on its own
+	// Serve loop, which is started right after its punch completes.
+	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
 	if !a.verifyChannel(deviceID, channel) {
 		return nil, errors.New("打洞成功但链路无响应（NAT 映射可能已关闭）")
 	}
@@ -198,7 +201,6 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)
 		a.emit("p2p:disconnected", map[string]any{"device": dev})
 	})
-	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
 	a.emit("p2p:connected", map[string]any{"device": deviceID, "peer": channel.Peer()})
 	return map[string]any{"device": deviceID, "peer": channel.Peer()}, nil
 }

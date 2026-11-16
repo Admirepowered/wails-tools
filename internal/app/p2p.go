@@ -349,6 +349,9 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 	}
 	a.p2p.put(fromDevice, channel)
 	a.p2p.markIncoming(fromDevice)
+	// Serve first: the liveness check below is answered by the peer's Serve, so
+	// both sides must be serving before anyone pings.
+	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
 	if !a.verifyChannel(fromDevice, channel) {
 		return
 	}
@@ -357,7 +360,6 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)
 		a.emit("p2p:disconnected", map[string]any{"device": dev})
 	})
-	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
 	a.emit("p2p:connected", map[string]any{"device": fromDevice, "peer": channel.Peer(), "incoming": true})
 }
 

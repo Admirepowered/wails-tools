@@ -686,3 +686,32 @@ QUIC 握手成功（否则不会启动心跳），但之后所有新流（心跳
 ### 25.3 排查建议
 - 若日志出现 `link to … opened but does not answer`：NAT 映射在握手后立刻失效，属于链路问题（换 5G/家庭宽带对比）。
 - 若 `quic alive=false`：连接已被 QUIC 判定死亡（空闲超时或对端关闭）。
+
+---
+
+## 二十六、2026-11-16 打洞后必然超时的真因：verify 死锁（v1.3.70）
+
+### 26.1 现象（双方日志对照）
+两端都打印：
+```
+p2p: probe answered ... after 1 probes      ← 打洞成功
+p2p: direct path open ..., starting QUIC handshake
+p2p: link to … opened but does not answer (deadline exceeded)   ← 15s 后
+```
+即 QUIC 握手完成，但第一个 RPC（`p2p.ping`）就超时，两边都一样。
+
+### 26.2 根因
+v1.3.69 加的"打通后先校验链路"逻辑放在了 `go channel.Serve(...)` **之前**：
+
+```go
+a.p2p.put(...)
+if !a.verifyChannel(...) { return }        // 需要对方 Serve 才能应答 ping
+go channel.Serve(...)                      // 但自己的 Serve 还没起
+```
+于是**双方都在等对方先启动 Serve 才回应 ping**，而各自的 Serve 都在 ping 之后才启动 —— 互相等待 12 秒后同时判超时、同时断开。打洞本身没有任何问题，是被自己的校验逻辑锁死了。
+
+### 26.3 修复
+两端（`answerPunch` 与 `p2pConnectDevice`）都改为：**先 `go channel.Serve(...)`，再 `verifyChannel`**，最后才启动心跳与 watcher。
+
+### 26.4 顺带观察
+对端日志里我们的公网 IP 在 `218.201.253.88` / `218.201.253.98` 之间变化 —— 属于运营商 NAT 池，按流分配；不同尝试用不同源端口所以 IP 不同，属正常现象，不是本次故障原因（同一条流内映射是稳定的）。
