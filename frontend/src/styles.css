@@ -729,7 +729,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Bottom stats: host block + CPU / memory / disk bars always on one line. */
 .ssh-sysinfo-grid {
   display: grid;
-  grid-template-columns: minmax(170px, 1.1fr) repeat(3, minmax(110px, 1fr));
+  grid-template-columns: minmax(170px, 1.1fr) repeat(2, minmax(130px, 1fr));
   gap: 14px;
   align-items: end;
 }
@@ -738,3 +738,4 @@ button, input, select, textarea { font: inherit; color: inherit; }
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
+

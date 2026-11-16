@@ -1,3 +1,4 @@
+import MediaViewer, { isPreviewable, kindOf } from '../components/MediaViewer'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -1184,6 +1185,8 @@ function KeysModal({ onClose, onChanged }: { onClose: () => void; onChanged: () 
 /* ---------------- SFTP ---------------- */
 
 function SftpPane({ sessionId, cwd, onDir }: { sessionId: string; cwd?: string; onDir?: (dir: string) => void }) {
+  const [menu, setMenu] = useState<{ x: number; y: number; file: RemoteFile } | null>(null)
+  const [player, setPlayer] = useState<{ url: string; name: string } | null>(null)
   const toast = useToast()
   const [dir, setDir] = useState('')
   const [files, setFiles] = useState<RemoteFile[]>([])
@@ -1362,6 +1365,15 @@ function SftpPane({ sessionId, cwd, onDir }: { sessionId: string; cwd?: string; 
     }
   }
 
+  const previewMedia = async (file: RemoteFile) => {
+    try {
+      const url = await api.PreviewSFTPMedia(sessionId, file.path)
+      setPlayer({ url, name: file.name })
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
   const readFile = async (file: RemoteFile) => {
     try {
       const body = await api.SFTPReadFile(sessionId, file.path)
@@ -1493,7 +1505,22 @@ function SftpPane({ sessionId, cwd, onDir }: { sessionId: string; cwd?: string; 
               className={`file-row ${selected?.path === file.path ? 'selected' : ''}`}
               title={file.path}
               onClick={() => setSelected(file)}
-              onDoubleClick={() => (file.isDir ? void openDir(file.path) : void readFile(file))}
+              onDoubleClick={() => {
+                if (file.isDir) {
+                  void openDir(file.path)
+                  return
+                }
+                if (isPreviewable(file.name)) {
+                  void previewMedia(file)
+                  return
+                }
+                void readFile(file)
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setSelected(file)
+                setMenu({ x: e.clientX, y: e.clientY, file })
+              }}
             >
               <span className="file-icon">{file.isDir ? '📁' : file.isLink ? '🔗' : '📄'}</span>
               <span className="file-name">{file.name}</span>
@@ -1600,6 +1627,36 @@ function TerminalPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
         black: '#12141a',
         brightBlack: '#6b7488',
       },
+    })
+    // xterm.js has no built-in clipboard UI (docs: getSelection / paste /
+    // attachCustomKeyEventHandler). Wire the standard shortcuts ourselves.
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown') return true
+      const key = ev.key.toLowerCase()
+      const copyCombo = (ev.ctrlKey || ev.metaKey) && ev.shiftKey && key === 'c'
+      const copySel = (ev.ctrlKey || ev.metaKey) && key === 'c' && term.hasSelection()
+      const pasteCombo = (ev.ctrlKey || ev.metaKey) && (key === 'v' || (ev.shiftKey && key === 'v'))
+      if (copyCombo || copySel) {
+        const selected = term.getSelection()
+        if (selected) {
+          void api.ClipboardPut(selected).catch(() => {})
+          term.clearSelection()
+        }
+        return false
+      }
+      if (pasteCombo) {
+        void api
+          .ClipboardGet()
+          .then((text) => {
+            if (text) {
+              // paste() applies bracketed-paste mode and fires onData for us.
+              term.paste(text)
+            }
+          })
+          .catch(() => {})
+        return false
+      }
+      return true
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -2010,6 +2067,10 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
+
+
+
 
 
 

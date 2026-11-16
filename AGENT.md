@@ -1086,3 +1086,33 @@ disk=28692/50278 MB 57%  mem=796/1967 MB  load=0.04 cpu=1%
 - 右键复制/粘贴：菜单已在，选中后点「复制」。
 - 磁盘：后端有值，前端布局已修，四列一定同屏。
 - 拖拽：需要 `DragAndDrop.EnableFileDrop`（已在 main.go 打开），**必须重启客户端**才会注册原生拖放；之后 `window.runtime.OnFileDrop` 会把绝对路径交给上传。
+
+---
+
+## 五十四、2026-11-16 SSH 预览/右键 + xterm 剪贴板按官方 API 实现（v1.3.88）
+
+### 54.1 先查文档再动手（xterm.js）
+官方 API 文档（https://xtermjs.org/docs/api/terminal/classes/terminal/）明确：xterm.js **不提供任何内置剪贴板 UI**，只给出这些原语：
+
+| 方法 | 用途 |
+|---|---|
+| `getSelection()` / `hasSelection()` / `clearSelection()` | 取/判/清选区 |
+| `paste(data)` | 写入文本，**会做 bracketed-paste 变换并触发 onData** |
+| `attachCustomKeyEventHandler(fn)` | 在按键进入终端前拦截 |
+
+所以正确做法（已实现）：
+```ts
+term.attachCustomKeyEventHandler((ev) => {
+  if (ev.type !== 'keydown') return true
+  // Ctrl/Cmd+Shift+C 或（有选区时）Ctrl+C → getSelection() → 剪贴板
+  // Ctrl/Cmd+V、Ctrl+Shift+V → ClipboardGet() → term.paste(text)
+})
+```
+粘贴改走 `term.paste()`（之前直接 `WriteTerminal` 会绕过 bracketed-paste，多行粘贴会被 shell 误执行）。
+
+### 54.2 SSH 文件预览与右键
+- **双击**：目录进入；图片/视频 → `PreviewSFTPMedia`（下载到缓存 + 本地媒体通道）→ `MediaViewer` 播放；其他文本 → 文本预览。
+- **右键**：光标处菜单「预览 / 下载 / 重命名 / 删除」。
+
+### 54.3 磁盘
+按你的要求**删掉**了磁盘条（`df` 采样也一并从界面移除）。
