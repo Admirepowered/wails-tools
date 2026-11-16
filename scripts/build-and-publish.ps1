@@ -47,17 +47,39 @@ try {
     if ($match) { $Version = $match.Matches[0].Groups[1].Value } else { $Version = '0.0.0' }
   }
 
+  $BuildOutput = $null
   if (-not $SkipBuild) {
     Write-Host '==> wails build' -ForegroundColor Cyan
     # The BT engine (anacrolix/torrent) pulls cgo-only extras; build the desktop
     # app without cgo so no MinGW toolchain is needed on Windows.
     $env:CGO_ENABLED = '0'
-    wails build
+    # Never stop a running client: if build/bin/WailsTools.exe is locked by the
+    # app, build to a side file instead and publish that one.
+    $locked = $false
+    $target = Join-Path $root 'build\bin\WailsTools.exe'
+    if (Test-Path $target) {
+      try {
+        $fs = [System.IO.File]::Open($target, 'Open', 'ReadWrite', 'None')
+        $fs.Close()
+      } catch {
+        $locked = $true
+      }
+    }
+    if ($locked) {
+      $BuildOutput = 'WailsTools-next'
+      Write-Host '==> 客户端正在运行，构建到 WailsTools-next.exe（不打断你的进程）' -ForegroundColor Yellow
+      wails build -o $BuildOutput
+    } else {
+      wails build
+    }
     Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
     if ($LASTEXITCODE -ne 0) { throw 'wails build failed' }
   }
 
   $exe = Join-Path $root 'build\bin\WailsTools.exe'
+  if ($BuildOutput) {
+    $exe = Join-Path $root ("build\bin\{0}.exe" -f $BuildOutput)
+  }
   if (-not (Test-Path $exe)) { throw "missing build output: $exe" }
 
   # 用 UPX 打压缩壳（未安装时跳过）
@@ -99,6 +121,9 @@ try {
 } finally {
   Pop-Location
 }
+
+
+
 
 
 

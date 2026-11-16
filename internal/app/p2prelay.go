@@ -10,10 +10,15 @@ import (
 	"wailstools/internal/p2p"
 )
 
-// relaySecret derives a per-account secret for relayed sessions (the relayed
-// path never uses the punched session secret).
+// relaySecret derives a per-account secret for relayed sessions. Both devices of
+// the same account must derive the SAME value, otherwise the bridge answers with
+// "p2p: bad channel token" (using the device id broke that).
 func (a *App) relaySecret() string {
-	return "relay:" + a.localDeviceID()
+	who := strings.ToLower(strings.TrimSpace(a.sess.user))
+	if who == "" {
+		who = "anonymous"
+	}
+	return "relay:" + who
 }
 
 // startRelayServer parks a bridge stream on the sync server so other devices of
