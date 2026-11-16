@@ -784,3 +784,36 @@ go channel.Serve(...)                      // 但自己的 Serve 还没起
   - 订阅工具栏的全局 UA 下拉与「编辑订阅」里的 UA 选择同样没落地，现已补上（工具栏 `全局 UA：…`，编辑框内可选预设/自定义）。
 - 教训：批量 `Replace` 后必须 `tsc` + 在文件里 grep 关键字符串确认命中，否则界面无变化。
 
+
+---
+
+## 三十、2026-11-16 百度网盘 errno 113 修复（v1.3.75）
+
+### 30.1 真实报错
+用户提供了 BDUSS/STOKEN 做线上验证：
+```
+baidu download failed: 113
+```
+同时发现请求里的 `timestamp` 是 **`1.794823502e+09`** —— 模板时间戳被 `fmt.Sprint(float64)` 格式化成了科学计数法，百度 `/api/download` 判定参数非法，直接回 113。
+
+### 30.2 修复
+1. **时间戳按原样输出**：新增 `baiduTimestampString`，`string/float64/int64/json.Number` 都转成纯十进制整数文本（`1794823538`），不再出现科学计数法。
+2. **UA 分层**（此前一刀切改成 netdisk UA 会把列表接口搞坏）：
+   - `baiduAPIUserAgent`（Chrome）用于 `pan.baidu.com` 的 list/meta/template 等 Web 会话接口；
+   - `baiduNetdiskUA = netdisk;7.44.7.1;PC;PC-Windows;10.0.19045;WindowsBaiduYunGuanJia` 用于 `/api/download`（新增 `getJSONUA`）与 dlink 的 HEAD。
+   - 实测：把 list 也换成 netdisk UA 会得到 `errno 1`，所以必须分开。
+
+### 30.3 线上验证（真实账号）
+```
+tpl: sign1=72d6a889… sign3=d76e889b… timestamp=1794823538
+sign=dVIqFiuFsa8C7pdt0pfw93rYtTGqfMqMPlV+aZ1ltRJKUn5br161MQ==
+dlink=https://d.pcs.baidu.com/file/e97331688p75f3ac87327f13250da592?…
+final=https://bdbl-cm00.baidupcs.com/file/e97331688…（302 后的 CDN 直链）
+GET Range 0-65535 → 206, 65536 bytes, UA=netdisk;7.44.7.1;PC;PC-Windows;…
+```
+即：取 sign → 换 dlink → 跟随 302 → 带 netdisk UA + Cookie 成功取到数据。
+
+### 30.4 诊断用测试（env 开关，默认跳过）
+- `internal/netdisk/live_list_test.go`（`WT_BAIDU_COOKIE`）
+- `internal/netdisk/live_baidu_test.go`（+`WT_BAIDU_FILE_ID`）
+- `internal/netdisk/live_fetch_test.go`（完整取链 + 拉前 64 KB）
