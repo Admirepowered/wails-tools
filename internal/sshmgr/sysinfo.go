@@ -81,33 +81,51 @@ type GPUInfo struct {
 	TempC    float64 `json:"tempC"`
 }
 
-// staticScript returns values that never change: hostname, CPU model, cores, uptime.
-const staticScript = `sh -c 'hostname 2>/dev/null; grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2-; nproc 2>/dev/null; cut -d. -f1 /proc/uptime 2>/dev/null'`
+// staticScript runs once per session: identity, uptime and the root filesystem
+// size (all of which rarely change).
+const staticScript = `echo "HOST::$(hostname 2>/dev/null || uname -n 2>/dev/null)"
+echo "CPU::$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2-)"
+echo "CORES::$(nproc 2>/dev/null)"
+echo "UP::$(cut -d. -f1 /proc/uptime 2>/dev/null)"
+echo "DISK::$(df -P -k / 2>/dev/null | tail -n1)"`
 
-// dynamicScript returns the changing numbers: memory, load, CPU ticks, GPU, disk.
-const dynamicScript = `sh -c 'echo "MEM $(grep -E "^MemTotal:|^MemAvailable:" /proc/meminfo | tr "\n" " ")"; echo "LOAD $(cut -d" " -f1 /proc/loadavg)"; echo "STAT1 $(grep -m1 "^cpu " /proc/stat)"; sleep 0.4; echo "STAT2 $(grep -m1 "^cpu " /proc/stat)"; echo "DISK $(df -P -k / 2>/dev/null | tail -n1)"; echo "GPU $(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | tr "\n" ";")"'`
+// dynamicScript returns the changing numbers: memory, load, CPU ticks and GPU.
+const dynamicScript = `echo "MEM::$(grep -E '^MemTotal:|^MemAvailable:' /proc/meminfo 2>/dev/null | tr '\n' ' ')"
+echo "LOAD::$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)"
+echo "STAT1::$(grep -m1 '^cpu ' /proc/stat 2>/dev/null)"
+sleep 0.4
+echo "STAT2::$(grep -m1 '^cpu ' /proc/stat 2>/dev/null)"
+echo "GPU::$(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | tr '\n' ';')"`
 
 // GatherSystemInfo collects the static facts once and the dynamic ones per call.
 func (m *Manager) GatherSystemInfo(sessionID string) (SystemInfo, error) {
 	info := SystemInfo{}
-	if raw, err := m.Exec(sessionID, staticScript); err == nil {
-		lines := nonEmptyLines(raw)
-		if len(lines) > 0 {
-			info.Hostname = asciiOnly(lines[0])
+	rawStatic, staticErr := m.Exec(sessionID, staticScript)
+	if staticErr == nil {
+		for _, line := range strings.Split(rawStatic, "\n") {
+			line = strings.TrimSpace(line)
+			idx := strings.Index(line, "::")
+			if idx < 0 {
+				continue
+			}
+			key, value := line[:idx], strings.TrimSpace(line[idx+2:])
+			switch key {
+			case "HOST":
+				info.Hostname = asciiOnly(value)
+			case "CPU":
+				info.CPUModel = asciiOnly(strings.Join(strings.Fields(value), " "))
+			case "CORES":
+				fmt.Sscanf(value, "%d", &info.CPUCores)
+			case "UP":
+				var secs int64
+				fmt.Sscanf(value, "%d", &secs)
+				info.Uptime = formatUptime(secs)
+			case "DISK":
+				if total, used, pct, ok := parseDF(value); ok {
+					info.DiskTotalMB, info.DiskUsedMB, info.DiskPct = total, used, pct
+				}
+			}
 		}
-		if len(lines) > 1 {
-			info.CPUModel = asciiOnly(strings.Join(strings.Fields(lines[1]), " "))
-		}
-		if len(lines) > 2 {
-			fmt.Sscanf(strings.TrimSpace(lines[2]), "%d", &info.CPUCores)
-		}
-		if len(lines) > 3 {
-			var secs int64
-			fmt.Sscanf(strings.TrimSpace(lines[3]), "%d", &secs)
-			info.Uptime = formatUptime(secs)
-		}
-	} else {
-		return info, err
 	}
 	raw, err := m.Exec(sessionID, dynamicScript)
 	if err != nil {
@@ -116,11 +134,11 @@ func (m *Manager) GatherSystemInfo(sessionID string) (SystemInfo, error) {
 	var stat1, stat2 string
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
-		idx := strings.Index(line, " ")
+		idx := strings.Index(line, "::")
 		if idx < 0 {
 			continue
 		}
-		key, value := line[:idx], strings.TrimSpace(line[idx+1:])
+		key, value := line[:idx], strings.TrimSpace(line[idx+2:])
 		switch key {
 		case "MEM":
 			info.MemTotalMB, info.MemUsedMB, info.MemPct = parseMeminfo(value)

@@ -1005,3 +1005,38 @@ GPU  $(nvidia-smi --query-gpu=... | tr "\n" ";")
 - 每条 Exec 都做了 **ASCII 清洗**（`asciiOnly`），主机名/CPU 型号里混进的非 UTF-8 字节不会再变成 UI 上的"□□□"方块；
 - `parseDF` 放宽到最小 4 列，`df -P -k /` 输出即 `设备 总量 已用 可用 使用率 挂载点`；
 - 静态字段在 App 侧按会话缓存（47.1），成功一次就不再重复请求。
+
+---
+
+## 五十一、2026-11-16 采样脚本真正失败的原因（v1.3.85）
+
+你那行 `$(df -P -k / | tail -n1)` 直接在 bash 里执行会报 `/dev/vda2: Permission denied` —— 因为**命令替换的结果被当成命令执行了**。我们的脚本踩的是同一个坑：
+
+```sh
+sh -c 'echo "MEM $(grep -E "^MemTotal:|^MemAvailable:" /proc/meminfo | tr "\n" " ")"'
+```
+外层 `sh -c '…'` 单引号里嵌了**双引号**，`grep -E "` 提前把 `echo "…"` 的引号闭合，后面的 `$(…)` 就落到了命令位置 → 整段输出被当命令跑，`MEM`/`CPU`/`DISK` 全部空。
+
+修复：
+- **去掉 `sh -c '…'` 包裹**，脚本直接交给远端 shell 执行（`sess.Start(script)`）；
+- 内层一律用**单引号**（`grep -E '^MemTotal:|^MemAvailable:'`）；
+- 统一 `KEY::value` 输出格式，解析简单可靠。
+
+脚本分工（按你的要求，磁盘也只取一次）：
+
+| 脚本 | 频率 | 内容 |
+|---|---|---|
+| staticScript | 每会话一次 | `HOST` 主机名、`CPU` 型号、`CORES` 核数、`UP` uptime、**`DISK` 根分区** |
+| dynamicScript | 每秒 | `MEM`、`LOAD`、`STAT1/STAT2`（算 CPU 使用率）、`GPU` |
+
+真实主机（s2）实测输出：
+```
+HOST::VM-0-6-ubuntu
+CPU:: Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz
+CORES::2
+UP::15473195
+DISK::/dev/vda2  51485392 29465708 19801572  60% /
+MEM::MemTotal: 2014988 kB MemAvailable: 1210100 kB
+LOAD::0.03
+STAT1::cpu  262143761 ...
+```
