@@ -123,7 +123,13 @@ func (a *App) buildChain() ([]miproxy.Node, miproxy.RelayFunc) {
 			if device == "" {
 				return nil, errors.New("未选择打洞设备")
 			}
-			return a.p2pDialTCP(ctx, device, target)
+			conn, err := a.p2pDialTCP(ctx, device, target)
+			if err != nil {
+				a.p2pLogf("p2p relay: %s via %s failed: %v", target, device, err)
+				return nil, err
+			}
+			a.p2pLogf("p2p relay: %s via %s ok", target, device)
+			return conn, nil
 		}
 		relayKind = "device:" + device
 	}

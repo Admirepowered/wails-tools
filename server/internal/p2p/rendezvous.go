@@ -34,6 +34,11 @@ type Reply struct {
 	You   string `json:"you,omitempty"`
 	Peer  string `json:"peer,omitempty"`
 	Start int64  `json:"start,omitempty"`
+	// YouPublic/PeerPublic are true when the announced address matches the
+	// sender's own socket address, i.e. that side has no NAT (directly
+	// reachable). In that case the punch can skip all probing.
+	YouPublic  bool `json:"youPublic,omitempty"`
+	PeerPublic bool `json:"peerPublic,omitempty"`
 }
 
 // Session is one pending hole-punch attempt.
@@ -234,6 +239,13 @@ func (h *Hub) handle(req Announce, addr *net.UDPAddr) Reply {
 			s.punchAt = time.Now().Add(700 * time.Millisecond)
 		}
 		out.Start = s.punchAt.UnixMilli()
+	}
+	if role == "a" {
+		out.YouPublic = isPublicEndpoint(s.addrA)
+		out.PeerPublic = isPublicEndpoint(s.addrB)
+	} else {
+		out.YouPublic = isPublicEndpoint(s.addrB)
+		out.PeerPublic = isPublicEndpoint(s.addrA)
 	}
 	return out
 }
@@ -443,4 +455,36 @@ func (h *Hub) CancelRequest(userID, device, requestID string) {
 	if r, ok := h.requests[requestID]; ok && r.FromUser == userID && r.FromDevice == device {
 		r.State = "canceled"
 	}
+}
+
+// privateNetworks lists the address ranges treated as "behind NAT".
+var privateNetworks = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, cidr := range []string{
+		"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
+		"127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "fe80::/10",
+	} {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}()
+
+// isPublicEndpoint reports whether addr is a globally reachable address, i.e.
+// the peer announced its own socket address unchanged (no NAT in the path).
+func isPublicEndpoint(addr *net.UDPAddr) bool {
+	if addr == nil {
+		return false
+	}
+	ip := addr.IP
+	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return false
+	}
+	for _, n := range privateNetworks {
+		if n.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }

@@ -27,15 +27,33 @@ func (a *App) p2pFsRoot() string {
 	return dir
 }
 
-// p2pFsPath resolves a peer-supplied relative path inside the shared root.
-func (a *App) p2pFsPath(rel string) (string, error) {
+// p2pFsPath resolves a peer-supplied path. Absolute paths (including Windows
+// drive letters such as D:\Media) are accepted only for trusted devices, i.e.
+// the account's own machines; relative paths always resolve inside the shared
+// download directory.
+func (a *App) p2pFsPath(rel string, trusted bool) (string, error) {
+	rel = strings.TrimSpace(rel)
 	root := a.p2pFsRoot()
+	if rel == "" || rel == "/" || rel == "\\" {
+		return root, nil
+	}
+	if filepath.IsAbs(rel) || (len(rel) >= 2 && rel[1] == ':' && isDriveLetter(rel[0])) {
+		if !trusted {
+			return "", errors.New("对方设备不在本账号下，只能访问共享目录")
+		}
+		return filepath.Clean(rel), nil
+	}
 	clean := filepath.Clean("/" + strings.ReplaceAll(rel, "\\", "/"))
 	full := filepath.Join(root, filepath.FromSlash(clean))
 	if full != root && !strings.HasPrefix(full, root+string(os.PathSeparator)) {
 		return "", errors.New("路径越界")
 	}
 	return full, nil
+}
+
+// isDriveLetter reports whether c looks like a Windows drive letter.
+func isDriveLetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 type p2pFsEntry struct {
@@ -46,8 +64,8 @@ type p2pFsEntry struct {
 	Modified string `json:"modified"`
 }
 
-func (a *App) p2pFsList(rel string) ([]p2pFsEntry, error) {
-	full, err := a.p2pFsPath(rel)
+func (a *App) p2pFsList(rel string, trusted bool) ([]p2pFsEntry, error) {
+	full, err := a.p2pFsPath(rel, trusted)
 	if err != nil {
 		return nil, err
 	}
@@ -89,13 +107,13 @@ func (h *p2pWireHandler) handleFs(method string, body json.RawMessage) (any, err
 	}
 	switch method {
 	case "p2p.fs.list":
-		list, err := h.app.p2pFsList(req.Path)
+		list, err := h.app.p2pFsList(req.Path, h.trust)
 		if err != nil {
 			return nil, wire.Errorf("fs", "%v", err)
 		}
 		return map[string]any{"path": req.Path, "root": h.app.p2pFsRoot(), "entries": list}, nil
 	case "p2p.fs.mkdir":
-		full, err := h.app.p2pFsPath(req.Path)
+		full, err := h.app.p2pFsPath(req.Path, h.trust)
 		if err != nil {
 			return nil, wire.Errorf("fs", "%v", err)
 		}
@@ -104,7 +122,7 @@ func (h *p2pWireHandler) handleFs(method string, body json.RawMessage) (any, err
 		}
 		return map[string]any{"ok": true}, nil
 	case "p2p.fs.remove":
-		full, err := h.app.p2pFsPath(req.Path)
+		full, err := h.app.p2pFsPath(req.Path, h.trust)
 		if err != nil {
 			return nil, wire.Errorf("fs", "%v", err)
 		}
@@ -124,7 +142,7 @@ func (h *p2pWireHandler) pipeFs(method string, body json.RawMessage, conn net.Co
 	if err := wire.Decode(body, &req); err != nil {
 		return wire.Errorf("bad_request", "invalid body: %v", err)
 	}
-	full, err := h.app.p2pFsPath(req.Path)
+	full, err := h.app.p2pFsPath(req.Path, h.trust)
 	if err != nil {
 		return wire.Errorf("forbidden", "%v", err)
 	}

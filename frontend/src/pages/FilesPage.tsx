@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api, onEvent, type LocalListing, type RemoteEntry, type TransferTask } from '../lib/api'
+import { api, onEvent, type LocalListing, type P2PFilesEntry, type RemoteEntry, type TransferTask } from '../lib/api'
 import MediaViewer, { isPreviewable, kindOf, type MediaTarget } from '../components/MediaViewer'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Stat, Tabs, Tag, useToast } from '../components/ui'
 import { basename, formatBytes, formatSpeed, formatTime, percent } from '../lib/format'
 import type { PageProps } from '../App'
 
-type TabKey = 'local' | 'cloud' | 'transfers'
+type TabKey = 'local' | 'cloud' | 'devices' | 'transfers'
 
 const TABS: Array<{ id: TabKey; label: string }> = [
   { id: 'local', label: '本地文件' },
   { id: 'cloud', label: '云端文件' },
+  { id: 'devices', label: '其他设备' },
   { id: 'transfers', label: '传输记录' },
 ]
 
@@ -57,6 +58,12 @@ export default function FilesPage({ serverStatus }: PageProps) {
   const connected = serverStatus?.connected ?? false
 
   const [tab, setTab] = useState<TabKey>('local')
+  const [p2p, setP2p] = useState<{ connected?: string[] } | null>(null)
+  const [devDevice, setDevDevice] = useState('')
+  const [devPath, setDevPath] = useState('')
+  const [devRoot, setDevRoot] = useState('')
+  const [devEntries, setDevEntries] = useState<P2PFilesEntry[]>([])
+  const [devLoading, setDevLoading] = useState(false)
 
   /* ---- 本地 ---- */
   const [local, setLocal] = useState<LocalListing | null>(null)
@@ -236,6 +243,32 @@ export default function FilesPage({ serverStatus }: PageProps) {
       offDone()
     }
   }, [])
+
+  const loadDeviceDir = useCallback(
+    async (path: string) => {
+      if (!devDevice) return
+      setDevLoading(true)
+      try {
+        const res = await api.P2PFilesList(devDevice, path)
+        setDevEntries(res.entries ?? [])
+        setDevRoot(res.root ?? '')
+        setDevPath(path)
+      } catch (err) {
+        toast.error(err)
+      } finally {
+        setDevLoading(false)
+      }
+    },
+    [devDevice, toast],
+  )
+
+  useEffect(() => {
+    if (tab !== 'devices') return
+    api
+      .P2PStatus()
+      .then((st) => setP2p(st))
+      .catch(() => setP2p(null))
+  }, [tab])
 
   /* ---- 本地操作 ---- */
 
@@ -683,6 +716,127 @@ export default function FilesPage({ serverStatus }: PageProps) {
           </>
         ))}
 
+      {tab === 'devices' && (
+        <div className="card">
+          <h3 className="card-title">其他设备（打洞直连）</h3>
+          <p className="card-desc" style={{ marginBottom: 8 }}>
+            浏览、上传、下载已打洞设备的文件。数据走直连 QUIC，不经过同步服务器；路径可直接输入绝对路径（例如 <span className="mono">D:\Media</span>）切换盘符。
+          </p>
+          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+            <select
+              className="select"
+              value={devDevice}
+              onChange={(e) => {
+                setDevDevice(e.target.value)
+                setDevPath('')
+              }}
+              style={{ minWidth: 170 }}
+            >
+              <option value="">选择已直连设备</option>
+              {(p2p?.connected ?? []).map((d) => (
+                <option key={d} value={d}>
+                  {d.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+            <input
+              className="input mono"
+              style={{ flex: 1 }}
+              value={devPath}
+              onChange={(e) => setDevPath(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void loadDeviceDir(devPath)}
+              placeholder="留空＝对方的下载目录，也可输入 D:\Media"
+            />
+            <button className="btn btn-sm" disabled={!devDevice} onClick={() => void loadDeviceDir(devPath)}>
+              打开
+            </button>
+            <button
+              className="btn btn-sm btn-ghost"
+              disabled={!devDevice}
+              onClick={() => {
+                const parent = devPath.replace(/[\\/][^\\/]*$/, '')
+                const next = parent === devPath ? '' : parent
+                void loadDeviceDir(next)
+              }}
+            >
+              上级
+            </button>
+            <button className="btn btn-sm btn-ghost" disabled={!devDevice} onClick={() => void loadDeviceDir('')}>
+              默认目录
+            </button>
+          </div>
+          {devRoot ? (
+            <div className="small faint mono truncate" style={{ marginBottom: 6 }}>
+              对方当前目录：{devPath || devRoot}
+            </div>
+          ) : null}
+          {devLoading ? (
+            <Spinner label="读取中…" />
+          ) : devEntries.length === 0 ? (
+            <Empty title={devDevice ? '目录为空' : '先选择一个已直连设备'} hint={devDevice ? '' : '在「同步服务 → 我的设备」里打洞后即可浏览'} />
+          ) : (
+            <div className="list">
+              {devEntries.map((e) => (
+                <div key={e.path} className="file-row">
+                  <span className="file-icon">{e.dir ? '📁' : '📄'}</span>
+                  <span
+                    className="file-name truncate"
+                    style={{ cursor: e.dir ? 'pointer' : 'default' }}
+                    onClick={() => e.dir && void loadDeviceDir(e.path)}
+                  >
+                    {e.name}
+                  </span>
+                  <span className="file-size">{e.dir ? '' : formatBytes(e.size)}</span>
+                  {!e.dir ? (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={async () => {
+                        try {
+                          const dir = await api.PickDirectory('选择保存目录')
+                          if (!dir) return
+                          const local = `${dir}\\${e.name}`
+                          const res = await api.P2PFilesDownload(devDevice, e.path, local)
+                          toast.push(`已下载 ${formatBytes(res.bytes)} → ${res.path}`)
+                        } catch (err) {
+                          toast.error(err)
+                        }
+                      }}
+                    >
+                      下载
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="row" style={{ gap: 8, marginTop: 10 }}>
+            <button
+              className="btn btn-sm btn-primary"
+              disabled={!devDevice}
+              onClick={async () => {
+                try {
+                  const file = await api.PickFile('选择要上传的文件')
+                  if (!file) return
+                  const name = file.split(/[\\/]/).pop() ?? 'upload.bin'
+                  const base = devPath.replace(/[\\/]+$/, '')
+                  const target = base ? `${base}/${name}` : name
+                  const res = await api.P2PFilesUpload(devDevice, file, target)
+                  toast.push(`已上传 ${formatBytes(res.bytes)} → ${target}`)
+                  await loadDeviceDir(devPath)
+                } catch (err) {
+                  toast.error(err)
+                }
+              }}
+            >
+              上传文件到对方
+            </button>
+            <button className="btn btn-sm btn-ghost" disabled={!devDevice} onClick={() => void loadDeviceDir(devPath)}>
+              刷新
+            </button>
+          </div>
+        </div>
+      )}
+
       {tab === 'transfers' && (
         <div className="card">
           <div className="row">
@@ -1010,3 +1164,6 @@ function isArchive(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.endsWith('.zip') || lower.endsWith('.tar') || lower.endsWith('.tar.gz') || lower.endsWith('.tgz')
 }
+
+
+

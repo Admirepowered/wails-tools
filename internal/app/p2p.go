@@ -351,7 +351,7 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 	a.p2p.markIncoming(fromDevice)
 	// Serve first: the liveness check below is answered by the peer's Serve, so
 	// both sides must be serving before anyone pings.
-	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
+	go channel.Serve(context.Background(), &p2pWireHandler{app: a, trust: true})
 	if !a.verifyChannel(fromDevice, channel) {
 		return
 	}
@@ -366,7 +366,10 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 // ---- peer requests -------------------------------------------------------
 
 // p2pWireHandler serves requests that arrive over a punched channel.
-type p2pWireHandler struct{ app *App }
+type p2pWireHandler struct {
+	app   *App
+	trust bool // same-account device: absolute paths allowed
+}
 
 func (h *p2pWireHandler) Handle(method string, body json.RawMessage, sess *wire.ServerConn) (any, error) {
 	switch method {

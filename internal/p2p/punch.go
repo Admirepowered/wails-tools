@@ -57,11 +57,21 @@ type announce struct {
 }
 
 type announceReply struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"err"`
-	You   string `json:"you"`
-	Peer  string `json:"peer"`
-	Start int64  `json:"start"`
+	OK         bool   `json:"ok"`
+	Error      string `json:"err"`
+	You        string `json:"you"`
+	Peer       string `json:"peer"`
+	Start      int64  `json:"start"`
+	YouPublic  bool   `json:"youPublic"`
+	PeerPublic bool   `json:"peerPublic"`
+}
+
+// announceInfo is what the rendezvous tells us about the punch.
+type announceInfo struct {
+	Peer       string
+	Start      int64
+	YouPublic  bool
+	PeerPublic bool
 }
 
 var (
@@ -96,15 +106,36 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	}()
 
 	deadline := time.Now().Add(o.Timeout)
-	peerStr, startAt, err := announceEndpoint(ctx, conn, o, deadline)
+	info, err := announceEndpoint(ctx, conn, o, deadline)
 	if err != nil {
 		return nil, err
 	}
-	_ = startAt // both sides probe continuously; no synchronized gate is needed
-	o.Logf("p2p: punch socket %s -> peer %s", conn.LocalAddr(), peerStr)
-	peerAddr, err := net.ResolveUDPAddr("udp4", peerStr)
+	_ = info.Start
+	o.Logf("p2p: punch socket %s -> peer %s (peerPublic=%v youPublic=%v)", conn.LocalAddr(), info.Peer, info.PeerPublic, info.YouPublic)
+	peerAddr, err := net.ResolveUDPAddr("udp4", info.Peer)
 	if err != nil {
 		return nil, fmt.Errorf("解析对端地址失败: %w", err)
+	}
+
+	// Fast path: one side has a public address (no NAT), so the other side can
+	// simply dial it — no probing, no port prediction, no race.
+	fastRole := ""
+	switch {
+	case info.PeerPublic && !info.YouPublic:
+		fastRole = "a" // we dial the public peer
+	case info.YouPublic && !info.PeerPublic:
+		fastRole = "b" // we are the public host and listen
+	case info.YouPublic && info.PeerPublic:
+		fastRole = role // both public: keep the negotiation roles
+	}
+	if fastRole != "" {
+		o.Logf("p2p: public path detected, role=%s (peerPublic=%v youPublic=%v)", fastRole, info.PeerPublic, info.YouPublic)
+		quicConn, err := handshake(ctx, conn, peerAddr, fastRole, o.Secret)
+		if err != nil {
+			return nil, fmt.Errorf("直连建立失败: %w", err)
+		}
+		success = true
+		return NewChannel(quicConn, o.Secret, info.Peer), nil
 	}
 
 	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
@@ -126,25 +157,25 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 		return nil, fmt.Errorf("直连建立失败: %w", err)
 	}
 	success = true
-	return NewChannel(quicConn, o.Secret, peerStr), nil
+	return NewChannel(quicConn, o.Secret, info.Peer), nil
 }
 
 // announceEndpoint keeps announcing until the server reports the peer's public
-// endpoint.
-func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadline time.Time) (string, int64, error) {
+// endpoint (and whether either side is directly reachable).
+func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadline time.Time) (announceInfo, error) {
 	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
 	if err != nil {
-		return "", 0, fmt.Errorf("rendezvous 地址无效: %w", err)
+		return announceInfo{}, fmt.Errorf("rendezvous 地址无效: %w", err)
 	}
 	payload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role})
 	buf := make([]byte, 2048)
 	lastErr := ""
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
-			return "", 0, ctx.Err()
+			return announceInfo{}, ctx.Err()
 		}
 		if _, err := conn.WriteToUDP(payload, raddr); err != nil {
-			return "", 0, err
+			return announceInfo{}, err
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(annInterval))
 		n, from, err := conn.ReadFromUDP(buf)
@@ -162,13 +193,13 @@ func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadlin
 			lastErr = rep.Error
 		}
 		if rep.OK && rep.Peer != "" {
-			return rep.Peer, rep.Start, nil
+			return announceInfo{Peer: rep.Peer, Start: rep.Start, YouPublic: rep.YouPublic, PeerPublic: rep.PeerPublic}, nil
 		}
 	}
 	if lastErr != "" {
-		return "", 0, fmt.Errorf("打洞会话无效: %s", lastErr)
+		return announceInfo{}, fmt.Errorf("打洞会话无效: %s", lastErr)
 	}
-	return "", 0, ErrPeerOffline
+	return announceInfo{}, ErrPeerOffline
 }
 
 // listenPunchSocket binds the punch socket, preferring a stable local port so
