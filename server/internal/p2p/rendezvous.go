@@ -8,8 +8,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,9 @@ const sessionTTL = 2 * time.Minute
 type Announce struct {
 	Session string `json:"s"`
 	Role    string `json:"r"` // "a" = initiator/dialer, "b" = responder/listener
+	// Local is the sender's own socket address (ip:port). Comparing it with the
+	// source address the server sees tells us whether that side is behind NAT.
+	Local string `json:"l,omitempty"`
 }
 
 // Reply tells the client its own public endpoint and, once known, the peer's.
@@ -39,6 +44,10 @@ type Reply struct {
 	// reachable). In that case the punch can skip all probing.
 	YouPublic  bool `json:"youPublic,omitempty"`
 	PeerPublic bool `json:"peerPublic,omitempty"`
+	// Ports lists the source ports observed for a NAT-type probe (two sockets
+	// announcing the same probe id). Equal ports mean endpoint-independent
+	// mapping (cone NAT); different ports mean symmetric NAT.
+	Ports []int `json:"ports,omitempty"`
 }
 
 // Session is one pending hole-punch attempt.
@@ -51,6 +60,8 @@ type Session struct {
 	Created time.Time
 	addrA   *net.UDPAddr
 	addrB   *net.UDPAddr
+	localA  string
+	localB  string
 	punchAt time.Time
 }
 
@@ -68,10 +79,12 @@ type Hub struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	requests map[string]*Request
-	conn     *net.UDPConn
-	logf     func(string, ...any)
-	closed   chan struct{}
-	wg       sync.WaitGroup
+	// nat holds in-flight NAT-type probes: session id -> role -> observed addr.
+	nat    map[string]map[string]string
+	conn   *net.UDPConn
+	logf   func(string, ...any)
+	closed chan struct{}
+	wg     sync.WaitGroup
 }
 
 // NewHub creates an idle hub.
@@ -79,7 +92,7 @@ func NewHub(logf func(string, ...any)) *Hub {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Hub{sessions: map[string]*Session{}, requests: map[string]*Request{}, logf: logf, closed: make(chan struct{})}
+	return &Hub{sessions: map[string]*Session{}, requests: map[string]*Request{}, nat: map[string]map[string]string{}, logf: logf, closed: make(chan struct{})}
 }
 
 // Listen binds the rendezvous socket and starts serving.
@@ -212,6 +225,31 @@ func (h *Hub) readLoop(conn *net.UDPConn) {
 func (h *Hub) handle(req Announce, addr *net.UDPAddr) Reply {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// NAT-type probe: the client announces from two sockets with the same id and
+	// asks which source ports the server observes.
+	if strings.HasPrefix(req.Session, "nat:") {
+		if h.nat == nil {
+			h.nat = map[string]map[string]string{}
+		}
+		entry := h.nat[req.Session]
+		if entry == nil {
+			entry = map[string]string{}
+			h.nat[req.Session] = entry
+		}
+		entry[req.Role] = addr.String()
+		out := Reply{OK: true, You: addr.String()}
+		if len(entry) > 1 {
+			ports := make([]int, 0, len(entry))
+			for _, a := range entry {
+				if u, err := net.ResolveUDPAddr("udp4", a); err == nil {
+					ports = append(ports, u.Port)
+				}
+			}
+			sort.Ints(ports)
+			out.Ports = ports
+		}
+		return out
+	}
 	s, ok := h.sessions[req.Session]
 	if !ok || time.Since(s.Created) > sessionTTL {
 		return Reply{Error: "unknown_or_expired_session"}
@@ -220,8 +258,10 @@ func (h *Hub) handle(req Announce, addr *net.UDPAddr) Reply {
 	switch role {
 	case "a":
 		s.addrA = addr
+		s.localA = strings.TrimSpace(req.Local)
 	case "b":
 		s.addrB = addr
+		s.localB = strings.TrimSpace(req.Local)
 	default:
 		return Reply{Error: "role must be a or b"}
 	}
@@ -241,11 +281,11 @@ func (h *Hub) handle(req Announce, addr *net.UDPAddr) Reply {
 		out.Start = s.punchAt.UnixMilli()
 	}
 	if role == "a" {
-		out.YouPublic = isPublicEndpoint(s.addrA)
-		out.PeerPublic = isPublicEndpoint(s.addrB)
+		out.YouPublic = directlyReachable(s.addrA, s.localA)
+		out.PeerPublic = directlyReachable(s.addrB, s.localB)
 	} else {
-		out.YouPublic = isPublicEndpoint(s.addrB)
-		out.PeerPublic = isPublicEndpoint(s.addrA)
+		out.YouPublic = directlyReachable(s.addrB, s.localB)
+		out.PeerPublic = directlyReachable(s.addrA, s.localA)
 	}
 	return out
 }
@@ -485,6 +525,32 @@ func isPublicEndpoint(addr *net.UDPAddr) bool {
 		if n.Contains(ip) {
 			return false
 		}
+	}
+	return true
+}
+
+// directlyReachable reports whether a peer is on the open internet with no NAT:
+// the address the server observes must be identical to the socket address the
+// peer itself reports. A NATed host always looks "public" from the outside, so
+// the private-range check alone is not enough.
+func directlyReachable(seen *net.UDPAddr, local string) bool {
+	if seen == nil || !isPublicEndpoint(seen) {
+		return false
+	}
+	local = strings.TrimSpace(local)
+	if local == "" {
+		return false
+	}
+	host, port, err := net.SplitHostPort(local)
+	if err != nil {
+		return false
+	}
+	if port != fmt.Sprint(seen.Port) {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.Equal(seen.IP) {
+		return false
 	}
 	return true
 }

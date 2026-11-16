@@ -1007,6 +1007,7 @@ const rawApi = {
   // NAT hole punching (device-to-device direct link)
   P2PStatus: () => call<P2PStatus>('P2PStatus'),
   P2PProbe: () => call<{ ok: boolean; rendezvous?: string; error?: string; reply?: string }>('P2PProbe'),
+  P2PNATDetect: () => call<{ kind: string; local?: string; public?: string; ports?: number[]; message?: string }>('P2PNATDetect'),
 
   // local SNI proxy (pinned-IP TLS with optional MITM)
   GetSNIProxySettings: () => call<SNIProxySettings>('GetSNIProxySettings'),
@@ -1275,6 +1276,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -54,6 +55,9 @@ type Options struct {
 type announce struct {
 	Session string `json:"s"`
 	Role    string `json:"r"`
+	// Local is our own socket address; the server compares it with the source
+	// address it observes to decide whether we are behind NAT.
+	Local string `json:"l,omitempty"`
 }
 
 type announceReply struct {
@@ -68,6 +72,7 @@ type announceReply struct {
 
 // announceInfo is what the rendezvous tells us about the punch.
 type announceInfo struct {
+	You        string
 	Peer       string
 	Start      int64
 	YouPublic  bool
@@ -111,7 +116,11 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 		return nil, err
 	}
 	_ = info.Start
-	o.Logf("p2p: punch socket %s -> peer %s (peerPublic=%v youPublic=%v)", conn.LocalAddr(), info.Peer, info.PeerPublic, info.YouPublic)
+	// Our own reachability is decided locally: the server's observed address for
+	// this very socket either matches our local socket (no NAT) or not.
+	youPublic := info.YouPublic && sameEndpoint(info.You, conn.LocalAddr().String())
+	o.Logf("p2p: punch socket %s -> peer %s (peerPublic=%v youPublic=%v observed=%s)",
+		conn.LocalAddr(), info.Peer, info.PeerPublic, youPublic, info.You)
 	peerAddr, err := net.ResolveUDPAddr("udp4", info.Peer)
 	if err != nil {
 		return nil, fmt.Errorf("解析对端地址失败: %w", err)
@@ -121,28 +130,30 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	// simply dial it — no probing, no port prediction, no race.
 	fastRole := ""
 	switch {
-	case info.PeerPublic && !info.YouPublic:
+	case info.PeerPublic && !youPublic:
 		fastRole = "a" // we dial the public peer
-	case info.YouPublic && !info.PeerPublic:
+	case youPublic && !info.PeerPublic:
 		fastRole = "b" // we are the public host and listen
-	case info.YouPublic && info.PeerPublic:
+	case youPublic && info.PeerPublic:
 		fastRole = role // both public: keep the negotiation roles
 	}
 	if fastRole != "" {
-		o.Logf("p2p: public path detected, role=%s (peerPublic=%v youPublic=%v)", fastRole, info.PeerPublic, info.YouPublic)
-		quicConn, err := handshake(ctx, conn, peerAddr, fastRole, o.Secret)
-		if err != nil {
-			return nil, fmt.Errorf("直连建立失败: %w", err)
+		o.Logf("p2p: public path detected, role=%s (peerPublic=%v youPublic=%v)", fastRole, info.PeerPublic, youPublic)
+		quicConn, ferr := handshake(ctx, conn, peerAddr, fastRole, o.Secret)
+		if ferr == nil {
+			success = true
+			return NewChannel(quicConn, o.Secret, info.Peer), nil
 		}
-		success = true
-		return NewChannel(quicConn, o.Secret, info.Peer), nil
+		// The fast path is an optimisation only: fall back to real punching so a
+		// wrong verdict never makes the connection fail outright.
+		o.Logf("p2p: public path failed (%v), falling back to punching", ferr)
 	}
 
 	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
 	if err != nil {
 		return nil, fmt.Errorf("rendezvous 地址无效: %w", err)
 	}
-	annPayload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role})
+	annPayload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role, Local: conn.LocalAddr().String()})
 	verified, err := punchProbe(ctx, conn, peerAddr, o.Secret, deadline, raddr, annPayload, o.Logf)
 	if err != nil {
 		return nil, err
@@ -167,7 +178,7 @@ func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadlin
 	if err != nil {
 		return announceInfo{}, fmt.Errorf("rendezvous 地址无效: %w", err)
 	}
-	payload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role})
+	payload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role, Local: conn.LocalAddr().String()})
 	buf := make([]byte, 2048)
 	lastErr := ""
 	for time.Now().Before(deadline) {
@@ -193,7 +204,7 @@ func announceEndpoint(ctx context.Context, conn *net.UDPConn, o Options, deadlin
 			lastErr = rep.Error
 		}
 		if rep.OK && rep.Peer != "" {
-			return announceInfo{Peer: rep.Peer, Start: rep.Start, YouPublic: rep.YouPublic, PeerPublic: rep.PeerPublic}, nil
+			return announceInfo{You: rep.You, Peer: rep.Peer, Start: rep.Start, YouPublic: rep.YouPublic, PeerPublic: rep.PeerPublic}, nil
 		}
 	}
 	if lastErr != "" {
@@ -390,4 +401,14 @@ func selfSignedCert() (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
+}
+
+// sameEndpoint reports whether two host:port strings describe the same endpoint.
+func sameEndpoint(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || strings.TrimSuffix(a, ":0") == strings.TrimSuffix(b, ":0")
 }

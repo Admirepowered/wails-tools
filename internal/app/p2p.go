@@ -592,3 +592,25 @@ func (a *App) verifyChannel(deviceID string, ch *p2p.Channel) bool {
 	a.p2pLogf("p2p: link to %s verified", deviceID)
 	return true
 }
+
+// P2PNATDetect classifies this network's NAT by probing the rendezvous from two
+// different UDP sockets (same public port = cone, different = symmetric).
+func (a *App) P2PNATDetect() map[string]any {
+	out := map[string]any{"kind": "unknown"}
+	addr, err := a.rendezvousAddr()
+	if err != nil {
+		out["message"] = err.Error()
+		return out
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	info := p2p.DetectNAT(ctx, addr, 8*time.Second, a.p2pLogf)
+	a.p2pLogf("p2p: nat type %s (%s)", info.Kind, info.Message)
+	return map[string]any{
+		"kind":    string(info.Kind),
+		"local":   info.Local,
+		"public":  info.Public,
+		"ports":   info.Ports,
+		"message": info.Message,
+	}
+}

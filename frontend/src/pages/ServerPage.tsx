@@ -80,6 +80,8 @@ export default function ServerPage(props: PageProps) {
   const [invites, setInvites] = useState<P2PInvite[]>([])
   const [peerNumber, setPeerNumber] = useState('')
   const [myNumber, setMyNumber] = useState('')
+  const [natBusy, setNatBusy] = useState(false)
+  const [nat, setNat] = useState<{ kind: string; local?: string; public?: string; ports?: number[]; message?: string } | null>(null)
   const [fsDevice, setFsDevice] = useState('')
   const [punching, setPunching] = useState(false)
   const [maps, setMaps] = useState<P2PMap[]>([])
@@ -1784,6 +1786,8 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
+
 
 
 
