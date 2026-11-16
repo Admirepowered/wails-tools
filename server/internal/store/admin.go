@@ -322,3 +322,39 @@ func (d *DB) FindDeviceByID(id string) (userID string, dev Device, ok bool) {
 	})
 	return userID, dev, ok
 }
+
+// FindDeviceNumberByMachine returns the 9-digit number of a device registered
+// for the given machine fingerprint (empty when none).
+func (d *DB) FindDeviceNumberByMachine(userID, machine string) string {
+	if machine == "" {
+		return ""
+	}
+	number := ""
+	_ = d.db.View(func(tx *bolt.Tx) error {
+		for _, dev := range readDevices(tx, userID) {
+			if dev.Machine == machine && dev.Number != "" {
+				number = dev.Number
+				return nil
+			}
+		}
+		return nil
+	})
+	return number
+}
+
+// SetDeviceNumber pins a device's public number.
+func (d *DB) SetDeviceNumber(userID, deviceID, number string) error {
+	if userID == "" || deviceID == "" || number == "" {
+		return nil
+	}
+	return d.db.Update(func(tx *bolt.Tx) error {
+		devices := readDevices(tx, userID)
+		for i := range devices {
+			if devices[i].ID == deviceID {
+				devices[i].Number = number
+				return putDevices(tx, userID, devices)
+			}
+		}
+		return nil
+	})
+}

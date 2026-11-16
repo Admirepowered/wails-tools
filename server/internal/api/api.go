@@ -200,7 +200,7 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 	case "admin.devices.remove":
 		return ctx.adminDevicesRemove(body)
 	case "admin.devices.self":
-		return ctx.adminDevicesSelf()
+		return ctx.adminDevicesSelf(body)
 	case "admin.devices.selfRemove":
 		return ctx.adminDevicesSelfRemove(body)
 	case "subs.get":

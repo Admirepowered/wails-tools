@@ -217,10 +217,32 @@ func (c *callCtx) adminDevicesRemove(body json.RawMessage) (any, error) {
 
 // ---- own devices (any authenticated user) --------------------------------
 
-func (c *callCtx) adminDevicesSelf() (any, error) {
+func (c *callCtx) adminDevicesSelf(body json.RawMessage) (any, error) {
 	uid, err := c.userID()
 	if err != nil {
 		return nil, err
+	}
+	// Optional body: the caller identifies itself so a device row that was
+	// replaced (e.g. by a CLI login from the same machine) is re-registered.
+	var req struct {
+		DeviceID   string `json:"deviceId"`
+		DeviceName string `json:"deviceName"`
+		MachineID  string `json:"machineId"`
+	}
+	if len(body) > 0 {
+		_ = wire.Decode(body, &req)
+	}
+	if id := strings.TrimSpace(req.DeviceID); id != "" {
+		known := false
+		for _, d := range c.api.DB.ListDevices(uid) {
+			if d.ID == id {
+				known = true
+				break
+			}
+		}
+		if !known {
+			_ = c.registerDevice(uid, id, req.DeviceName, req.MachineID)
+		}
 	}
 	return map[string]any{
 		"devices":    c.api.DB.ListDevices(uid),
@@ -276,6 +298,9 @@ func (c *callCtx) registerDevice(userID, deviceID, deviceName, machineID string)
 		}
 	}
 
+	// A login with the same machine fingerprint replaces the previous row; keep
+	// its 9-digit number stable so a shared number does not change.
+	reuseNumber := c.api.DB.FindDeviceNumberByMachine(userID, machineID)
 	if machineID != "" {
 		// Same machine, different id: keep only the current registration.
 		if removed, _ := c.api.DB.DeleteDevicesByMachine(userID, machineID); len(removed) > 0 {
@@ -297,6 +322,9 @@ func (c *callCtx) registerDevice(userID, deviceID, deviceName, machineID string)
 	}
 	if err := c.api.DB.AddDevice(userID, deviceID, deviceName, machineID); err != nil {
 		return err
+	}
+	if reuseNumber != "" {
+		_ = c.api.DB.SetDeviceNumber(userID, deviceID, reuseNumber)
 	}
 	// Make sure every device of this account has a 9-digit number; legacy rows
 	// were created before the feature existed.

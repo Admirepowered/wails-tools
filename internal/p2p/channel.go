@@ -37,6 +37,10 @@ func NewChannel(conn *quic.Conn, secret, peer string) *Channel {
 // Peer reports the peer's public endpoint.
 func (c *Channel) Peer() string { return c.peer }
 
+// Done closes when the underlying QUIC connection goes away (network change,
+// peer restart, idle timeout).
+func (c *Channel) Done() <-chan struct{} { return c.conn.Context().Done() }
+
 // Close tears the direct path down.
 func (c *Channel) Close() error {
 	c.mu.Lock()

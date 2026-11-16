@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"wailstools/internal/machineid"
 	"wailstools/internal/p2p"
 	"wailstools/internal/settings"
 	"wailstools/internal/wire"
@@ -60,9 +61,31 @@ func (h *p2pHub) get(deviceID string) (*p2p.Channel, bool) {
 
 func (h *p2pHub) put(deviceID string, c *p2p.Channel) {
 	h.mu.Lock()
+	if old := h.channels[deviceID]; old != nil && old != c {
+		_ = old.Close()
+	}
 	h.channels[deviceID] = c
 	delete(h.errors, deviceID)
 	h.mu.Unlock()
+}
+
+// watch closes the hub entry when the QUIC connection dies, so mappings bound
+// to a dead path are released instead of silently black-holing traffic.
+func (h *p2pHub) watch(deviceID string, c *p2p.Channel, onClose func(string)) {
+	go func() {
+		<-c.Done()
+		h.mu.Lock()
+		cur, ok := h.channels[deviceID]
+		if !ok || cur != c {
+			h.mu.Unlock()
+			return
+		}
+		h.mu.Unlock()
+		h.drop(deviceID)
+		if onClose != nil {
+			onClose(deviceID)
+		}
+	}()
 }
 
 // markIncoming records that this device answers punches from deviceID.
@@ -307,6 +330,10 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 	}
 	a.p2p.put(fromDevice, channel)
 	a.p2p.markIncoming(fromDevice)
+	a.p2p.watch(fromDevice, channel, func(dev string) {
+		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)
+		a.emit("p2p:disconnected", map[string]any{"device": dev})
+	})
 	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
 	a.emit("p2p:connected", map[string]any{"device": fromDevice, "peer": channel.Peer(), "incoming": true})
 }
@@ -435,12 +462,17 @@ func (a *App) P2PLocalNumber() map[string]any {
 			LastSeen string `json:"lastSeen"`
 		} `json:"devices"`
 	}
-	if err := a.link.Call(ctx, "admin.devices.self", nil, &res); err != nil {
+	host, _ := os.Hostname()
+	body := map[string]any{
+		"deviceId":   a.localDeviceID(),
+		"deviceName": host,
+		"machineId":  machineid.ID(),
+	}
+	if err := a.link.Call(ctx, "admin.devices.self", body, &res); err != nil {
 		out["error"] = err.Error()
 		return out
 	}
 	want := a.localDeviceID()
-	host, _ := os.Hostname()
 	ids := make([]string, 0, len(res.Devices))
 	for _, d := range res.Devices {
 		ids = append(ids, d.ID+"#"+d.Number)

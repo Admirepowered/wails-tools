@@ -606,3 +606,34 @@ n2n 的"打洞"本质是：两端都用**同一个 UDP socket** 持续向 supern
 - 新增 `ProxyRuntimeSettings.P2PAutoAccept`（默认 `true`）；`Default()` 里置真，旧配置文件缺该键时 `json.Unmarshal` 到 Default 结构上仍是 `true`。
 - watcher 收到邀请即 `emit` 并**自动接受**，同时打印 `p2p: auto-accepting invite …`；界面「自动接受穿透」开关可关闭，关闭后必须手动点接受。
 - 发起侧加并发保护：同一目标正在打洞时不会重复发起（避免日志里一串 invite）；轮询间隔 2s → 1s。
+
+---
+
+## 二十三、2026-11-16 设备号自愈 + 打洞保活（v1.3.67）
+
+### 23.1 为什么"本机设备号"仍然空着
+排查发现服务端 `admin.devices.self` 返回的两行设备里**没有本机那条**：
+命令行工具（wt-admin / wt-publish / 临时探针）与桌面端在**同一台机器**上登录时会带上相同的 `machineId`，服务端 `DeleteDevicesByMachine` 把桌面端那行**删掉并替换**成 CLI 的行 —— 桌面端的设备 id 从此在表里不存在，自然没有号。
+
+三处修复：
+1. **号不再丢**：`registerDevice` 在按机器指纹替换前，先 `FindDeviceNumberByMachine` 记住原号，注册后 `SetDeviceNumber` 写回 —— 同机器重登号码稳定，不会因为换行而变。
+2. **行会自愈**：`admin.devices.self` 接受可选 body `{deviceId, deviceName, machineId}`，若该设备不在表里就当场重新登记。客户端 `P2PLocalNumber()` 每次都带上本机身份，所以打开设备页即可恢复，无需手动重登。
+3. **前端持续刷新**：`P2PLocalNumber` 从"进页面取一次"改为**每 5 秒随邀请轮询一起刷新**，取到号立刻显示。
+
+排查日志：`p2p: local device id …, host …, account devices [id#号 …]`，可据此确认匹配结果。
+
+### 23.2 打洞成功之后
+- **心跳**：QUIC `KeepAlivePeriod = 10s`，`MaxIdleTimeout` 由 3 分钟放宽到 **10 分钟**，长期空闲也不会被悄悄断开。
+- **不依赖同步服务器**：打洞成功后数据走直连 QUIC，只有 `P2PDisconnect`/退出登录才会拆链；服务器断链、重登都不影响已建立的通道（本次实测 `p2p:connected` 后服务器重连，通道保持）。
+- **断链自愈**：新增 `Channel.Done()` + `p2pHub.watch`，QUIC 连接一旦消失（换网、对端退出、空闲超时）立即 `drop` 并**释放该设备的全部端口映射**，同时 `emit("p2p:disconnected")`，不会再出现"映射还在但流量黑洞"。
+
+### 23.3 打洞日志（本次实测片段）
+```
+p2p: invite pr-uzbpcLQm accepted, punching to 6241cc75…
+p2p: punch socket 0.0.0.0:52588 -> peer 47.108.84.112:54242
+p2p: probe #1 to 47.108.84.112:54242 from 0.0.0.0:52588
+p2p: probe answered by 47.108.84.112:54242 after 1 probes
+p2p: direct path open via 47.108.84.112:54242, starting QUIC handshake
+event p2p:connected
+```
+同一对设备上一次失败、这次 1 个包就打通 —— 说明之前的"发送一次就停/等同步时刻"确实是主因。

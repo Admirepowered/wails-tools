@@ -252,7 +252,7 @@ func handshake(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, role, 
 	}
 	quicCfg := &quic.Config{
 		HandshakeIdleTimeout: 15 * time.Second,
-		MaxIdleTimeout:       3 * time.Minute,
+		MaxIdleTimeout:       10 * time.Minute,
 		KeepAlivePeriod:      10 * time.Second,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)

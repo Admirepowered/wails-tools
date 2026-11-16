@@ -190,6 +190,10 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 	}
 	a.p2p.put(deviceID, channel)
 	a.p2p.markOutgoing(deviceID)
+	a.p2p.watch(deviceID, channel, func(dev string) {
+		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)
+		a.emit("p2p:disconnected", map[string]any{"device": dev})
+	})
 	go channel.Serve(context.Background(), &p2pWireHandler{app: a})
 	a.emit("p2p:connected", map[string]any{"device": deviceID, "peer": channel.Peer()})
 	return map[string]any{"device": deviceID, "peer": channel.Peer()}, nil
