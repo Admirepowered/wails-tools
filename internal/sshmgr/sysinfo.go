@@ -95,6 +95,7 @@ echo "LOAD::$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)"
 echo "STAT1::$(grep -m1 '^cpu ' /proc/stat 2>/dev/null)"
 sleep 0.4
 echo "STAT2::$(grep -m1 '^cpu ' /proc/stat 2>/dev/null)"
+echo "DISK::$(df -P -k / 2>/dev/null | tail -n1)"
 echo "GPU::$(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | tr '\n' ';')"`
 
 // GatherSystemInfo collects the static facts once and the dynamic ones per call.

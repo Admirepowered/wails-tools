@@ -725,3 +725,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-top: 1px solid var(--border);
 }
 
+
+/* Bottom stats: host block + CPU / memory / disk bars always on one line. */
+.ssh-sysinfo-grid {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.1fr) repeat(3, minmax(110px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+@media (max-width: 900px) {
+  .ssh-sysinfo-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

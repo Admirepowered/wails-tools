@@ -1774,6 +1774,37 @@ function TerminalPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
         }}
       />
       <div className="small faint">提示：如终端无响应，可关闭后重新打开；断开连接时终端会自动关闭。</div>
+      {termMenu ? (
+        <div
+          className="ctx-menu"
+          style={{ left: termMenu.x, top: termMenu.y, position: 'fixed', zIndex: 60 }}
+          onMouseLeave={() => setTermMenu(null)}
+        >
+          <div
+            className="ctx-item"
+            onClick={() => {
+              const selected = termMenu.selection
+              setTermMenu(null)
+              if (!selected) {
+                toast.push('先在终端里选中要复制的文字', 'warn')
+                return
+              }
+              void copyFromTerminal(selected)
+            }}
+          >
+            复制{termMenu.selection ? `（${termMenu.selection.length} 字）` : '（未选中）'}
+          </div>
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setTermMenu(null)
+              void pasteIntoTerminal()
+            }}
+          >
+            粘贴
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1924,8 +1955,8 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="card" style={{ padding: '10px 12px' }}>
-      <div className="row row-wrap" style={{ gap: 16, alignItems: 'flex-end' }}>
-        <div className="col" style={{ gap: 2, minWidth: 200 }}>
+      <div className="ssh-sysinfo-grid">
+        <div className="col" style={{ gap: 2, minWidth: 0 }}>
           <span className="small">
             <span className="faint">主机</span> <b>{info.hostname || '—'}</b>
             {failed ? <span className="small faint"> · 更新中断，显示上一次数据</span> : null}
@@ -1979,6 +2010,9 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
+
+
 
 
 

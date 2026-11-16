@@ -1062,3 +1062,27 @@ WebView2 不会给 `DataTransfer` 里的 File 暴露真实路径，所以之前 
 DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
 ```
 前端用 `window.runtime.OnFileDrop(cb)` 拿到**绝对路径数组**，直接逐个 `SFTPUpload`。浏览器层面的 `onDrop` 仍然保留作为兜底。
+
+---
+
+## 五十三、2026-11-16 磁盘条其实一直有值（v1.3.87）
+
+用真实主机输出跑了一遍**发布版同一条解析链路**（`applyKV`）：
+```
+host="VM-0-6-ubuntu" cpu="Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz" cores=2 up="179天2小时"
+disk=28692/50278 MB 57%  mem=796/1967 MB  load=0.04 cpu=1%
+```
+说明 **后端一直是对的**，磁盘条没出现是**前端布局**问题：底部是 `flex` 行 + `flex: 1 1 220px`，前三块把宽度吃满，第四块（磁盘）被挤到可视区外。
+
+修复：底部改成四列网格
+```css
+.ssh-sysinfo-grid { grid-template-columns: minmax(170px,1.1fr) repeat(3, minmax(110px,1fr)); }
+```
+窄屏（<900px）两列换行。磁盘无数据时显示 `—` 而不是整块消失。
+
+另外把终端右键菜单补回来了（之前一次"移动代码块"的编辑把菜单 JSX 删掉了，只剩 `pasteIntoTerminal` 调用），现在右键弹出「复制（N 字）／粘贴」，选中内容在**按下右键的瞬间**快照。
+
+### 结论
+- 右键复制/粘贴：菜单已在，选中后点「复制」。
+- 磁盘：后端有值，前端布局已修，四列一定同屏。
+- 拖拽：需要 `DragAndDrop.EnableFileDrop`（已在 main.go 打开），**必须重启客户端**才会注册原生拖放；之后 `window.runtime.OnFileDrop` 会把绝对路径交给上传。
