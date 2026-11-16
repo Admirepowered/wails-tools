@@ -1,3 +1,4 @@
+import DeviceFilesCard from './DeviceFilesCard'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, onEvent, type LocalListing, type RemoteEntry, type TransferTask } from '../lib/api'
 import MediaViewer, { isPreviewable, kindOf, type MediaTarget } from '../components/MediaViewer'
@@ -5,11 +6,12 @@ import { Confirm, Empty, Field, Modal, Progress, Spinner, Stat, Tabs, Tag, useTo
 import { basename, formatBytes, formatSpeed, formatTime, percent } from '../lib/format'
 import type { PageProps } from '../App'
 
-type TabKey = 'local' | 'cloud' | 'transfers'
+type TabKey = 'local' | 'cloud' | 'devices' | 'transfers'
 
 const TABS: Array<{ id: TabKey; label: string }> = [
   { id: 'local', label: '本地文件' },
   { id: 'cloud', label: '云端文件' },
+  { id: 'devices', label: '设备文件' },
   { id: 'transfers', label: '传输记录' },
 ]
 
@@ -683,6 +685,8 @@ export default function FilesPage({ serverStatus }: PageProps) {
           </>
         ))}
 
+      {tab === 'devices' && <DeviceFilesCard />}
+
       {tab === 'transfers' && (
         <div className="card">
           <div className="row">
@@ -1010,3 +1014,5 @@ function isArchive(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.endsWith('.zip') || lower.endsWith('.tar') || lower.endsWith('.tar.gz') || lower.endsWith('.tgz')
 }
+
+

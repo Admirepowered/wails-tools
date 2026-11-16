@@ -1051,6 +1051,7 @@ const rawApi = {
     call<void>('NetdiskMkdir', req),
   NetdiskRename: (req: { account_id: string; file_id: string; path?: string; new_name: string }) =>
     call<void>('NetdiskRename', req),
+  NetdiskPlayURL: (req: { account_id: string; file_id: string; path?: string; name?: string; size?: number }) => call<{ url: string; filename: string; contentType?: string; size?: number; format?: string }>('NetdiskPlayURL', req),
   NetdiskDelete: (req: { account_id: string; file_ids?: string[]; paths?: string[] }) =>
     call<void>('NetdiskDelete', req),
   NetdiskUpload: (req: {
@@ -1276,6 +1277,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

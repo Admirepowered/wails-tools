@@ -1,3 +1,4 @@
+import MediaViewer from '../components/MediaViewer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
@@ -196,6 +197,7 @@ export default function NetdiskPage(_props: PageProps) {
   const [accounts, setAccounts] = useState<NetdiskAccount[]>([])
   const [accountsLoading, setAccountsLoading] = useState(true)
   const [activeId, setActiveId] = useState('')
+  const [player, setPlayer] = useState<{ url: string; name: string } | null>(null)
   const [tab, setTab] = useState<NdTab>('files')
   const [refreshingId, setRefreshingId] = useState('')
 
@@ -677,7 +679,7 @@ export default function NetdiskPage(_props: PageProps) {
     const targets = deleteTargets
     setDeleteTargets(null)
     try {
-      await api.NetdiskDelete({ account_id: activeId, file_ids: targets.map((f) => f.id) })
+      await api.NetdiskDelete({ account_id: activeId, file_ids: targets.map((f) => f.id), paths: targets.map((f) => f.path) })
       setSelected([])
       toast.push('已删除到回收站')
       refreshFiles()
@@ -758,6 +760,12 @@ export default function NetdiskPage(_props: PageProps) {
 
   return (
     <div>
+      {player ? (
+        <MediaViewer
+          target={{ path: player.name, name: player.name, kind: 'video', source: 'cloud', playUrl: player.url }}
+          onClose={() => setPlayer(null)}
+        />
+      ) : null}
       <div className="card">
         <div className="row">
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -968,7 +976,8 @@ export default function NetdiskPage(_props: PageProps) {
                                       .catch((err) => toast.error(err)),
                                 },
                               ]),
-                          { label: '删除', danger: true, action: () => void api.NetdiskDelete({ account_id: activeId, file_ids: [file.id] }).then(() => { toast.push('已删除'); refreshFiles() }).catch((err) => toast.error(err)) },
+                          { label: '播放', action: () => void api.NetdiskPlayURL({ account_id: activeId, file_id: file.id, path: file.path, name: file.name, size: file.size }).then((res) => setPlayer({ url: res.url, name: file.name })).catch((err) => toast.error(err)) },
+                          { label: '删除', danger: true, action: () => void api.NetdiskDelete({ account_id: activeId, file_ids: [file.id], paths: [file.path] }).then(() => { toast.push('已删除'); refreshFiles() }).catch((err) => toast.error(err)) },
                         ],
                       })
                     }}
@@ -1505,6 +1514,10 @@ function AccountCard({
     </div>
   )
 }
+
+
+
+
 
 
 

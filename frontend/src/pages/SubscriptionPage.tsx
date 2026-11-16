@@ -52,7 +52,7 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const [runtime, setRuntime] = useState<ProxyRuntimeStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
-  const [selected, setSelected] = useState('')
+  const [selected, setSelected] = useState<string>(() => localStorage.getItem('wt.subs.selected') ?? '')
   const [editing, setEditing] = useState<SubscriptionSource | null>(null)
   const [deleting, setDeleting] = useState<SubscriptionSource | null>(null)
   const [nodeModal, setNodeModal] = useState<MiproxyNode | null>(null)
@@ -81,9 +81,13 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
         api.ProxyRuntimeStatus(),
       ])
       setList(items)
-      setCustomNodes(custom)
+      setSelected((prev) => {
+        const saved = localStorage.getItem('wt.subs.selected') ?? ''
+        if (prev && items.some((i) => i.id === prev)) return prev
+        if (saved && items.some((i) => i.id === saved)) return saved
+        return items[0]?.id ?? ''
+      })
       setRuntime(status)
-      setSelected((prev) => (prev && items.some((i) => i.id === prev) ? prev : items[0]?.id ?? ''))
     } catch (err) {
       toast.error(err)
     } finally {
@@ -376,7 +380,10 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
                 key={src.id}
                 className={`scope-card ${selected === src.id ? 'selected' : ''}`}
                 onClick={() => {
-                  if (selected !== src.id) setSelected(src.id)
+                  if (selected !== src.id) {
+                    setSelected(src.id)
+                    localStorage.setItem('wt.subs.selected', src.id)
+                  }
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault()
@@ -935,6 +942,8 @@ function NodeEditor({
     </Modal>
   )
 }
+
+
 
 
 

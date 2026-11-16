@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type P2PFilesEntry, type P2PInvite, type P2PMap, type P2PStatus, type SecretSyncStatus, type ServerStatus, type Settings } from '../lib/api'
+import { api, onEvent, type AdminDevice, type AdminUser, type DeviceSummary, type RemoteEntry, type P2PInvite, type P2PMap, type P2PStatus, type SecretSyncStatus, type ServerStatus, type Settings } from '../lib/api'
 import { Confirm, Empty, Field, Modal, Progress, Spinner, Switch, Tabs, Tag, useToast } from '../components/ui'
 import { formatBytes, formatTime, percent, relativeTime } from '../lib/format'
 import type { PageProps } from '../App'
@@ -80,11 +80,6 @@ export default function ServerPage(props: PageProps) {
   const [invites, setInvites] = useState<P2PInvite[]>([])
   const [peerNumber, setPeerNumber] = useState('')
   const [myNumber, setMyNumber] = useState('')
-  const [fsDevice, setFsDevice] = useState('')
-  const [fsPath, setFsPath] = useState('/')
-  const [fsRoot, setFsRoot] = useState('')
-  const [fsEntries, setFsEntries] = useState<P2PFilesEntry[]>([])
-  const [fsLoading, setFsLoading] = useState(false)
   const [punching, setPunching] = useState(false)
   const [maps, setMaps] = useState<P2PMap[]>([])
   const [mapDevice, setMapDevice] = useState('')
@@ -169,24 +164,6 @@ export default function ServerPage(props: PageProps) {
       setMyDevices(null)
     }
   }, [])
-
-  const loadFs = useCallback(
-    async (path: string) => {
-      if (!fsDevice) return
-      setFsLoading(true)
-      try {
-        const res = await api.P2PFilesList(fsDevice, path)
-        setFsEntries(res.entries ?? [])
-        setFsRoot(res.root ?? '')
-        setFsPath(path || '/')
-      } catch (err) {
-        toast.error(err)
-      } finally {
-        setFsLoading(false)
-      }
-    },
-    [fsDevice, toast],
-  )
 
   const loadP2P = useCallback(async () => {
     try {
@@ -1432,96 +1409,6 @@ export default function ServerPage(props: PageProps) {
         </div>
       ) : null}
 
-      {authed ? (
-        <div className="card">
-          <h3 className="card-title">设备文件（打洞直连）</h3>
-          <p className="card-desc" style={{ marginBottom: 8 }}>
-            打洞成功后可以直接读写对方的「下载目录」：数据走直连 QUIC，不经过同步服务器。
-          </p>
-          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            <select className="select" value={fsDevice} onChange={(e) => { setFsDevice(e.target.value); setFsPath(''); }} style={{ minWidth: 170 }}>
-              <option value="">选择已直连设备</option>
-              {(p2p?.connected ?? []).map((d) => (
-                <option key={d} value={d}>{d.slice(0, 8)}</option>
-              ))}
-            </select>
-            <input className="input mono" style={{ flex: 1 }} value={fsPath} onChange={(e) => setFsPath(e.target.value)} placeholder="/" />
-            <button className="btn btn-sm" disabled={!fsDevice} onClick={() => void loadFs(fsPath)}>打开</button>
-            <button className="btn btn-sm btn-ghost" disabled={!fsDevice} onClick={() => void loadFs('/')}>根目录</button>
-          </div>
-          {fsRoot ? <div className="small faint mono truncate" style={{ marginBottom: 6 }}>对方共享目录：{fsRoot}</div> : null}
-          {fsLoading ? (
-            <Spinner label="读取中…" />
-          ) : fsEntries.length === 0 ? (
-            <div className="small faint">{fsDevice ? '目录为空' : '先选择一个已直连设备'}</div>
-          ) : (
-            <div className="list">
-              {fsEntries.map((e) => (
-                <div key={e.path} className="file-row">
-                  <span className="file-icon">{e.dir ? '📁' : '📄'}</span>
-                  <span className="file-name truncate" style={{ cursor: e.dir ? 'pointer' : 'default' }} onClick={() => e.dir && void loadFs(e.path)}>
-                    {e.name}
-                  </span>
-                  <span className="file-size">{e.dir ? '' : formatBytes(e.size)}</span>
-                  {!e.dir ? (
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={async () => {
-                        try {
-                          const dir = await api.PickDirectory('选择保存目录')
-                          if (!dir) return
-                          const local = `${dir}\\${e.name}`
-                          const res = await api.P2PFilesDownload(fsDevice, e.path, local)
-                          toast.push(`已下载 ${formatBytes(res.bytes)} 到 ${res.path}`)
-                        } catch (err) {
-                          toast.error(err)
-                        }
-                      }}
-                    >
-                      下载
-                    </button>
-                  ) : null}
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={async () => {
-                      try {
-                        await api.P2PFilesRemove(fsDevice, e.path)
-                        await loadFs(fsPath)
-                      } catch (err) {
-                        toast.error(err)
-                      }
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="row" style={{ gap: 8, marginTop: 10 }}>
-            <button
-              className="btn btn-sm"
-              disabled={!fsDevice}
-              onClick={async () => {
-                try {
-                  const file = await api.PickFile('选择要上传的文件')
-                  if (!file) return
-                  const name = file.split(/[\\/]/).pop() ?? 'upload.bin'
-                  const target = (fsPath === '/' ? '' : fsPath).replace(/\/$/, '') + '/' + name
-                  const res = await api.P2PFilesUpload(fsDevice, file, target)
-                  toast.push(`已上传 ${formatBytes(res.bytes)}`)
-                  await loadFs(fsPath)
-                } catch (err) {
-                  toast.error(err)
-                }
-              }}
-            >
-              上传到对方
-            </button>
-            <button className="btn btn-sm btn-ghost" disabled={!fsDevice} onClick={() => void loadFs(fsPath)}>刷新</button>
-          </div>
-        </div>
-      ) : null}
 
       {authed ? (
         <div className="card">
@@ -1902,6 +1789,7 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
 

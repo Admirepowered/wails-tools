@@ -9,6 +9,8 @@ export interface MediaTarget {
   kind: 'image' | 'video' | 'audio' | 'text'
   source: 'local' | 'cloud' | 'sftp'
   sessionId?: string
+  /** Pre-resolved local stream URL (netdisk playback). */
+  playUrl?: string
 }
 
 function kindOf(name: string): MediaTarget['kind'] | '' {
@@ -38,8 +40,10 @@ export default function MediaViewer({ target, onClose }: { target: MediaTarget; 
     setText('')
     void (async () => {
       try {
-        let src = ''
-        if (target.source === 'local') {
+        let src = target.playUrl ?? ''
+        if (src) {
+          // already resolved (netdisk): use as-is
+        } else if (target.source === 'local') {
           src = await api.RegisterMedia(target.path)
         } else if (target.source === 'cloud') {
           src = await api.PreviewCloudMedia(target.path)
@@ -104,3 +108,4 @@ export default function MediaViewer({ target, onClose }: { target: MediaTarget; 
 }
 
 export { kindOf }
+

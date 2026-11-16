@@ -18,8 +18,9 @@ import (
 // mediaRegistry maps opaque tokens to absolute file paths so the WebView can
 // stream local/cloud/SFTP files without exposing the filesystem.
 type mediaRegistry struct {
-	mu    sync.Mutex
-	items map[string]string
+	mu      sync.Mutex
+	items   map[string]string
+	streams map[string]mediaStream
 }
 
 func newMediaRegistry() *mediaRegistry {
@@ -46,6 +47,7 @@ func (m *mediaRegistry) get(token string) (string, bool) {
 // MediaHandler serves /media/<token> for registered files with Range support.
 func (a *App) MediaHandler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/stream/", a.handleStream)
 	mux.HandleFunc("/media/", func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.URL.Path, "/media/")
 		if token == "" {
