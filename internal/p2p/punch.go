@@ -134,38 +134,11 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 
 	// Fast path: one side has a public address (no NAT), so the other side can
 	// simply dial it — no probing, no port prediction, no race.
-	// 1) Assume the peer is directly reachable (a device with a public address is
-	//    the common case). A short attempt only, so a wrong guess costs little.
-	if !youPublic {
-		dialCtx, dialCancel := context.WithTimeout(ctx, o.DirectTimeout)
-		quicConn, derr := handshake(dialCtx, conn, peerAddr, "a", o.Secret)
-		dialCancel()
-		if derr == nil {
-			o.Logf("p2p: direct dial to %s succeeded", peerAddr)
-			success = true
-			return NewChannel(quicConn, o.Secret, info.Peer), nil
-		}
-		if o.Quick {
-			o.Logf("p2p: quick attempt to %s failed (%v)", peerAddr, derr)
-			return nil, fmt.Errorf("快速尝试失败：对方可能不可直连（%v）", derr)
-		}
-		o.Logf("p2p: direct dial to %s failed (%v), switching to mutual punching", peerAddr, derr)
-		_ = conn.SetReadDeadline(time.Time{})
-		// Drain whatever the failed handshake left behind.
-		drainUDP(conn)
-	} else {
-		// We are the reachable side: listen for the peer instead of dialing.
-		listenCtx, listenCancel := context.WithTimeout(ctx, o.Timeout)
-		quicConn, lerr := handshake(listenCtx, conn, peerAddr, "b", o.Secret)
-		listenCancel()
-		if lerr == nil {
-			success = true
-			return NewChannel(quicConn, o.Secret, info.Peer), nil
-		}
-		o.Logf("p2p: listening on a public address did not work (%v), switching to mutual punching", lerr)
-		_ = conn.SetReadDeadline(time.Time{})
-		drainUDP(conn)
-	}
+	// Always use the proven simultaneous-punch flow (v1.3.70): both sides blast
+	// authenticated probes at each other from the moment the peer endpoint is
+	// known. No pre-dial, no public-address guesswork — those made the success
+	// rate worse.
+	_ = youPublic
 	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
 	if err != nil {
 		return nil, fmt.Errorf("rendezvous 地址无效: %w", err)

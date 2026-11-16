@@ -1429,7 +1429,7 @@ export default function ServerPage(props: PageProps) {
               </p>
               <p className="card-desc" style={{ margin: '4px 0 0' }}>
                 右键任意设备可「连接到此设备」：打洞成功后该设备即可作为 SSH 跳板与代理出口（必须双方都在线且 NAT 允许直连）。
-                右键任意设备：先「连接到此设备」（先假设对方有公网直拨 5 秒，失败再互相打洞，最多 15 秒）；只想快速判断可选「快速尝试（5 秒）」；都不通再选「经服务器中转」，延迟更高。
+                右键任意设备：「连接到此设备」双方同时打洞，最多 15 秒；「快速尝试」只给 5 秒预算；都不通再选「经服务器中转」，延迟更高。
               </p>
             </div>
             <button
@@ -1822,6 +1822,7 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
 

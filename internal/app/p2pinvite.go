@@ -200,10 +200,13 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 	// The punch itself tries "assume the peer is public" (8s) and then mutual
 	// punching (rest of the budget). Relay is never automatic — it is a separate,
 	// explicitly chosen path.
+	budget := 15 * time.Second
+	if quickMode.Load() {
+		budget = 5 * time.Second
+	}
 	channel, err := p2p.Punch(ctx, p2p.Options{
 		Rendezvous: rendezvous, Session: session, Secret: secret,
-		Role: "a", Timeout: 15 * time.Second, DirectTimeout: 5 * time.Second,
-		Quick:     quickMode.Load(),
+		Role: "a", Timeout: budget,
 		LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
 		Logf:      a.p2pLogf,
 	})
