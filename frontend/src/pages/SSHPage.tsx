@@ -1674,7 +1674,11 @@ function TerminalPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
   // Right-click copies when text is selected, otherwise pastes.
   const copyFromTerminal = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text)
+      try {
+        await api.ClipboardPut(text)
+      } catch {
+        await navigator.clipboard.writeText(text)
+      }
       termRef.current?.clearSelection()
       toast.push('已复制')
     } catch (err) {
@@ -1951,6 +1955,7 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
 
 
 

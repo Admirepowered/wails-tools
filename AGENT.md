@@ -958,3 +958,23 @@ df -P -k / | tail -n1
 - CPU：`lscpu | sed -n 's/^Model name:[[:space:]]*//p'`
 
 再加上会话级缓存（47.1），成功取到一次后就不会再显示"主机 —、CPU 未知"。
+
+---
+
+## 四十九、2026-11-16 剪贴板走 Wails 绑定 + 采样回退修正（v1.3.83）
+
+### 49.1 剪贴板读不到
+WebView2 在这个环境里拒绝 `navigator.clipboard.readText()`（权限被拒 → 空字符串），所以"右键粘贴"总是提示失败。
+新增 Go 绑定（`internal/app/clipboard.go`）：
+```go
+func (a *App) ClipboardGet() (string, error) { return runtime.ClipboardGetText(a.ctx) }
+func (a *App) ClipboardPut(text string) error { runtime.ClipboardSetText(a.ctx, text); return nil }
+```
+前端复制/粘贴优先用这两个绑定，`navigator.clipboard` 只作兜底。
+
+### 49.2 信息条变成 0 / 0 MiB
+上一版我把 `hostname`/`lscpu` 的兜底**塞进了那条 `sh -c '...'` 脚本**里（`$( { ...; } || { ...; } )` 这种嵌套），导致整段脚本在 dash 下语法失效 —— 结果主机名/CPU 靠独立兜底还能出来，但 `MEM`、`CPU%` 全丢。
+修复：脚本恢复成之前验证过的简单版本（HOST/CPU/CORES/LOAD/MEM/UP/STAT1/STAT2），**磁盘、主机名、CPU、GPU 各自用独立的一次 Exec**，互不影响。
+
+### 49.3 教训
+一条 `sh -c` 里塞太多 `$()` 嵌套，只要有一处引号/括号不兼容就整段静默失败。宁可多跑两次 Exec。

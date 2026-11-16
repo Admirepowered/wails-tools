@@ -10,7 +10,7 @@ declare global {
     runtime?: {
       EventsOn?: (name: string, cb: (...data: any[]) => void) => () => void
       EventsOff?: (name: string) => void
-      ClipboardSetText?: (text: string) => Promise<boolean>
+  ClipboardSetText?: (text: string) => Promise<boolean>
     }
   }
 }
@@ -1019,6 +1019,8 @@ const rawApi = {
   OpenSNIProxyFolder: () => call<void>('OpenSNIProxyFolder'),
   ResetSNIProxyRules: () => call<SNIProxySettings & { source?: string; updatedAt?: string }>('ResetSNIProxyRules'),
 
+  ClipboardGet: () => call<string>('ClipboardGet'),
+  ClipboardPut: (text: string) => call<void>('ClipboardPut', text),
   P2PConnect: (deviceId: string) => call<P2PStatus>('P2PConnect', deviceId),
   P2PRelayConnect: (deviceId: string) => call<{ device: string; relayed?: boolean; already?: boolean }>('P2PRelayConnect', deviceId),
   P2PDisconnect: (deviceId: string) => call<P2PStatus>('P2PDisconnect', deviceId),
@@ -1279,6 +1281,9 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
+
 
 
 
