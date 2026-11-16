@@ -730,7 +730,7 @@ export default function FilesPage({ serverStatus }: PageProps) {
                 setDevDevice(e.target.value)
                 setDevPath('')
               }}
-              style={{ minWidth: 170 }}
+              style={{ width: 200, flex: '0 0 auto' }}
             >
               <option value="">选择已直连设备</option>
               {(p2p?.connected ?? []).map((d) => (
@@ -741,7 +741,7 @@ export default function FilesPage({ serverStatus }: PageProps) {
             </select>
             <input
               className="input mono"
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 320 }}
               value={devPath}
               onChange={(e) => setDevPath(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void loadDeviceDir(devPath)}

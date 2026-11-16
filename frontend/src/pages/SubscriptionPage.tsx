@@ -311,6 +311,30 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
             />
             <span className="small">订阅走代理</span>
           </label>
+          <select
+            className="select"
+            style={{ width: 200 }}
+            title="拉取订阅时使用的 User-Agent（全局默认）"
+            value={subUA}
+            onChange={async (e) => {
+              const value = e.target.value
+              setSubUA(value)
+              try {
+                const cur = await api.GetSettings()
+                await api.SaveSettings({ ...cur, subscriptions: { ...(cur.subscriptions ?? {}), userAgent: value } })
+                toast.push('订阅 UA 已更新')
+              } catch (err) {
+                toast.error(err)
+              }
+            }}
+          >
+            <option value="">全局 UA：浏览器（默认）</option>
+            <option value="quantumultx">全局 UA：Quantumult X</option>
+            <option value="clash">全局 UA：Clash</option>
+            <option value="v2rayn">全局 UA：v2rayN</option>
+            <option value="surge">全局 UA：Surge</option>
+            <option value="shadowrocket">全局 UA：Shadowrocket</option>
+          </select>
           <button className="btn" onClick={refreshAll} disabled={busy !== '' || list.length === 0}>
             全部更新
           </button>
@@ -765,6 +789,30 @@ function SubscriptionEditor({
           <Switch checked={draft.enabled} onChange={(v) => patch({ enabled: v })} />
         </Field>
       </div>
+      <Field label="User-Agent" hint="部分机场按 UA 返回不同格式；留空表示跟随全局设置（默认浏览器 UA）">
+        <select
+          className="select"
+          value={UA_PRESETS.some((p) => p.value === (draft.userAgent ?? '')) ? (draft.userAgent ?? '') : '__custom'}
+          onChange={(e) => {
+            const v = e.target.value
+            patch({ userAgent: v === '__custom' ? (draft.userAgent || 'Mozilla/5.0 ') : v })
+          }}
+        >
+          {UA_PRESETS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+          <option value="__custom">自定义…</option>
+        </select>
+        <input
+          className="input mono"
+          style={{ marginTop: 6 }}
+          value={draft.userAgent ?? ''}
+          onChange={(e) => patch({ userAgent: e.target.value })}
+          placeholder="留空＝默认浏览器 UA；也可填 quantumultx 或完整 UA 字符串"
+        />
+      </Field>
     </Modal>
   )
 }
