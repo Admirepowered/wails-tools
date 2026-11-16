@@ -955,7 +955,19 @@ export default function NetdiskPage(_props: PageProps) {
                         x: e.clientX,
                         y: e.clientY,
                         items: [
-                          ...(file.is_dir ? [] : [{ label: '下载', action: () => void api.NetdiskEnqueueDownload({ account_id: activeId, file_id: file.id, name: file.name, path: file.path, size: file.size }).then(() => toast.push('已加入下载队列')).catch((err) => toast.error(err)) }]),
+                          ...(file.is_dir
+                            ? []
+                            : [
+                                { label: '下载', action: () => void api.NetdiskEnqueueDownload({ account_id: activeId, file_id: file.id, name: file.name, path: file.path, size: file.size }).then(() => toast.push('已加入下载队列')).catch((err) => toast.error(err)) },
+                                {
+                                  label: '推送到服务器离线下载',
+                                  action: () =>
+                                    void api
+                                      .NetdiskPushOffline({ account_id: activeId, file_id: file.id, name: file.name, path: file.path, size: file.size })
+                                      .then(() => toast.push('已推送到服务器离线下载'))
+                                      .catch((err) => toast.error(err)),
+                                },
+                              ]),
                           { label: '删除', danger: true, action: () => void api.NetdiskDelete({ account_id: activeId, file_ids: [file.id] }).then(() => { toast.push('已删除'); refreshFiles() }).catch((err) => toast.error(err)) },
                         ],
                       })
@@ -1493,5 +1505,6 @@ function AccountCard({
     </div>
   )
 }
+
 
 

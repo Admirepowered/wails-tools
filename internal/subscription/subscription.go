@@ -59,7 +59,9 @@ type Source struct {
 	URL     string `json:"url"`
 	Enabled bool   `json:"enabled"`
 	// UseProxy fetches this subscription through the proxy.
-	UseProxy      bool   `json:"useProxy"`
+	UseProxy bool `json:"useProxy"`
+	// UserAgent overrides the subscription User-Agent for this source.
+	UserAgent     string `json:"userAgent,omitempty"`
 	IntervalHours int    `json:"intervalHours"`
 	LastFetch     string `json:"lastFetch,omitempty"`
 	LastError     string `json:"lastError,omitempty"`
@@ -330,6 +332,19 @@ func (m *Manager) RefreshAll(ctx context.Context) []UpdateResult {
 	return out
 }
 
+// userAgentFor resolves the User-Agent for one subscription: per-source
+// override, then the global preset (browser by default).
+func (m *Manager) userAgentFor(src Source) string {
+	if ua := strings.TrimSpace(src.UserAgent); ua != "" {
+		return settings.ResolveSubscriptionUserAgent(ua)
+	}
+	global := ""
+	if m.settings != nil {
+		global = m.settings.Get().Subscriptions.UserAgent
+	}
+	return settings.ResolveSubscriptionUserAgent(global)
+}
+
 func (m *Manager) httpClientFor(src Source) (*http.Client, error) {
 	rule := settings.ProxyRule{Mode: "off"}
 	useProxy := src.UseProxy
@@ -358,7 +373,7 @@ func (m *Manager) fetch(ctx context.Context, src Source) UpdateResult {
 		res.Error = err.Error()
 		return res
 	}
-	req.Header.Set("User-Agent", "WailsTools/1.0 (subscription)")
+	req.Header.Set("User-Agent", m.userAgentFor(src))
 	req.Header.Set("Accept", "*/*")
 	resp, err := client.Do(req)
 	if err != nil {

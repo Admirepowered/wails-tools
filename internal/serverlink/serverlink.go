@@ -1102,3 +1102,14 @@ func (c *Client) P2PRequestState(ctx context.Context, device, request string) (m
 func (c *Client) P2PCancel(ctx context.Context, device, request string) error {
 	return c.Call(ctx, "p2p.cancel", map[string]any{"device": device, "request": request}, nil)
 }
+
+
+// OfflineAddURL queues a plain HTTP(S) download (URL + headers) on the server.
+func (c *Client) OfflineAddURL(ctx context.Context, rawURL, name string, headers map[string]string) (map[string]any, error) {
+	var out map[string]any
+	body := map[string]any{"url": rawURL, "name": name, "headers": headers}
+	if err := c.Call(ctx, "offline.add", body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

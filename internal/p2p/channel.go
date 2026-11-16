@@ -19,11 +19,14 @@ const (
 	MethodDialTCP = "p2p.tcp"
 )
 
-// Channel is one authenticated direct connection to another device.
+// Channel is one authenticated connection to another device (punched QUIC, or
+// a yamux session bridged through the sync server).
 type Channel struct {
-	conn   *quic.Conn
-	secret string
-	peer   string
+	conn    Session
+	secret  string
+	peer    string
+	relay   bool
+	release func()
 
 	mu     sync.Mutex
 	closed bool
@@ -31,15 +34,23 @@ type Channel struct {
 
 // NewChannel wraps an authenticated QUIC connection.
 func NewChannel(conn *quic.Conn, secret, peer string) *Channel {
-	return &Channel{conn: conn, secret: secret, peer: peer}
+	return &Channel{conn: WrapQuic(conn), secret: secret, peer: peer}
 }
+
+// NewRelayChannel wraps a relayed (server-bridged) session.
+func NewRelayChannel(sess Session, secret, peer string) *Channel {
+	return &Channel{conn: sess, secret: secret, peer: peer, relay: true}
+}
+
+// Relayed reports whether this channel goes through the sync server.
+func (c *Channel) Relayed() bool { return c.relay }
 
 // Peer reports the peer's public endpoint.
 func (c *Channel) Peer() string { return c.peer }
 
 // Done closes when the underlying QUIC connection goes away (network change,
 // peer restart, idle timeout).
-func (c *Channel) Done() <-chan struct{} { return c.conn.Context().Done() }
+func (c *Channel) Done() <-chan struct{} { return c.conn.Done() }
 
 // Close tears the direct path down.
 func (c *Channel) Close() error {
@@ -50,7 +61,11 @@ func (c *Channel) Close() error {
 	}
 	c.closed = true
 	c.mu.Unlock()
-	return c.conn.CloseWithError(0, "closed")
+	err := c.conn.CloseWithError(0, "closed")
+	if c.release != nil {
+		c.release()
+	}
+	return err
 }
 
 // Serve accepts every stream the peer opens and dispatches it through the wire
@@ -61,15 +76,14 @@ func (c *Channel) Serve(ctx context.Context, handler wire.Handler) {
 		if err != nil {
 			return
 		}
-		go func(s *quic.Stream) {
-			conn := wrapStream(c.conn, s)
+		go func(s net.Conn) {
 			auth := func(h wire.Hello) (string, error) {
 				if h.Token != token(c.secret, "wire") {
 					return "", errors.New("p2p: bad channel token")
 				}
 				return "p2p", nil
 			}
-			_ = wire.Serve(conn, auth, handler)
+			_ = wire.Serve(s, auth, handler)
 			_ = s.Close()
 		}(stream)
 	}
@@ -79,11 +93,11 @@ func (c *Channel) Serve(ctx context.Context, handler wire.Handler) {
 func (c *Channel) DialTCP(ctx context.Context, target string) (net.Conn, error) {
 	openCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	stream, err := c.conn.OpenStreamSync(openCtx)
+	stream, err := c.conn.OpenStream(openCtx)
 	if err != nil {
 		return nil, err
 	}
-	conn := wrapStream(c.conn, stream)
+	conn := stream
 	client, err := wire.NewClient(conn, wire.Hello{
 		Token:   token(c.secret, "wire"),
 		App:     "wails-tools",
@@ -104,12 +118,12 @@ func (c *Channel) DialTCP(ctx context.Context, target string) (net.Conn, error) 
 func (c *Channel) Call(ctx context.Context, method string, body any, out any) error {
 	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	stream, err := c.conn.OpenStreamSync(callCtx)
+	stream, err := c.conn.OpenStream(callCtx)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	conn := wrapStream(c.conn, stream)
+	conn := stream
 	client, err := wire.NewClient(conn, wire.Hello{
 		Token: token(c.secret, "wire"), App: "wails-tools", Purpose: "p2p",
 	})
@@ -123,11 +137,11 @@ func (c *Channel) Call(ctx context.Context, method string, body any, out any) er
 func (c *Channel) OpenStream(ctx context.Context, method string, body any) (net.Conn, error) {
 	openCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	stream, err := c.conn.OpenStreamSync(openCtx)
+	stream, err := c.conn.OpenStream(openCtx)
 	if err != nil {
 		return nil, err
 	}
-	conn := wrapStream(c.conn, stream)
+	conn := stream
 	client, err := wire.NewClient(conn, wire.Hello{
 		Token: token(c.secret, "wire"), App: "wails-tools", Purpose: "p2p",
 	})
@@ -146,12 +160,12 @@ func (c *Channel) OpenStream(ctx context.Context, method string, body any) (net.
 func (c *Channel) Ping(ctx context.Context) error {
 	pingCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	stream, err := c.conn.OpenStreamSync(pingCtx)
+	stream, err := c.conn.OpenStream(pingCtx)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
-	client, err := wire.NewClient(wrapStream(c.conn, stream), wire.Hello{
+	client, err := wire.NewClient(stream, wire.Hello{
 		Token: token(c.secret, "wire"), Purpose: "p2p",
 	})
 	if err != nil {
@@ -164,7 +178,7 @@ func (c *Channel) Ping(ctx context.Context) error {
 // Alive reports whether the underlying QUIC connection is still usable.
 func (c *Channel) Alive() bool {
 	select {
-	case <-c.conn.Context().Done():
+	case <-c.conn.Done():
 		return false
 	default:
 		return true

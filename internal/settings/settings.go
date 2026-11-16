@@ -179,6 +179,32 @@ type SecretSyncSettings struct {
 type SubscriptionSettings struct {
 	// UseProxy fetches subscription URLs through the active proxy.
 	UseProxy bool `json:"useProxy"`
+	// UserAgent selects the client identity used when refreshing: "" (browser),
+	// "quantumultx", "clash", ... or a literal User-Agent string.
+	UserAgent string `json:"userAgent,omitempty"`
+}
+
+// SubscriptionUserAgents lists the built-in User-Agent presets.
+var SubscriptionUserAgents = map[string]string{
+	"browser":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	"quantumultx":  "Quantumult%20X/1.4.1 (iPhone15,2; iOS 17.1.2; Scale/3.00)",
+	"clash":        "Clash/v1.18.0",
+	"v2rayn":       "v2rayN/6.23",
+	"surge":        "Surge/5.7.0 (iPhone; iOS 17.1.2; Scale/3.00)",
+	"shadowrocket": "Shadowrocket/2.2.31 (iPhone; iOS 17.1.2; Scale/3.00)",
+}
+
+// ResolveSubscriptionUserAgent maps a preset name (or literal UA) to the value
+// sent on subscription requests.
+func ResolveSubscriptionUserAgent(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return SubscriptionUserAgents["browser"]
+	}
+	if ua, ok := SubscriptionUserAgents[strings.ToLower(name)]; ok {
+		return ua
+	}
+	return name
 }
 
 type UISettings struct {
@@ -518,3 +544,4 @@ func (s *Store) DeviceID() string {
 	})
 	return id
 }
+

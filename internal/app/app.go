@@ -70,6 +70,8 @@ type App struct {
 	notesSyncTimer *time.Timer
 	p2p            *p2pHub
 	invites        *inviteBox
+	relayOnce      sync.Once
+	relayCancel    context.CancelFunc
 	sni            *sniState
 	sniMu          sync.Mutex
 	lastRelayKind  string

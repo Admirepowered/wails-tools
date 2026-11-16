@@ -143,7 +143,7 @@ export interface StartupSettings {
 }
 
 export interface Settings {
-  subscriptions?: { useProxy?: boolean }
+  subscriptions?: { useProxy?: boolean; userAgent?: string }
   proxy: { mode?: string; default: ProxyRule; scopes?: Record<string, ProxyRule>; followSystem: boolean }
   downloads: DownloadSettings
   server: ServerSettings
@@ -613,6 +613,7 @@ export interface SubscriptionSource {
   url: string
   enabled: boolean
   useProxy?: boolean
+  userAgent?: string
   intervalHours: number
   lastFetch?: string
   lastError?: string
@@ -1017,6 +1018,7 @@ const rawApi = {
   ResetSNIProxyRules: () => call<SNIProxySettings & { source?: string; updatedAt?: string }>('ResetSNIProxyRules'),
 
   P2PConnect: (deviceId: string) => call<P2PStatus>('P2PConnect', deviceId),
+  P2PRelayConnect: (deviceId: string) => call<{ device: string; relayed?: boolean; already?: boolean }>('P2PRelayConnect', deviceId),
   P2PDisconnect: (deviceId: string) => call<P2PStatus>('P2PDisconnect', deviceId),
   P2PConnectByNumber: (number: string) => call<{ device: string; peer: string }>('P2PConnectByNumber', number),
   P2PLocalNumber: () => call<{ deviceId: string; number: string; name: string; error?: string }>('P2PLocalNumber'),
@@ -1073,6 +1075,7 @@ const rawApi = {
   ),
   NetdiskEnqueueFolder: (accountId: string, folder: string) =>
     call<{ queued: number; folder: string }>('NetdiskEnqueueFolder', accountId, folder),
+  NetdiskPushOffline: (req: { account_id: string; file_id: string; path?: string; name?: string; size?: number }) => call<OfflineStatus>('NetdiskPushOffline', req),
   NetdiskEnqueueDownload: (req: {
     account_id: string
     file_id: string
@@ -1273,6 +1276,9 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
+
 
 
 

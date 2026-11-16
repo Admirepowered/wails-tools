@@ -715,3 +715,32 @@ go channel.Serve(...)                      // 但自己的 Serve 还没起
 
 ### 26.4 顺带观察
 对端日志里我们的公网 IP 在 `218.201.253.88` / `218.201.253.98` 之间变化 —— 属于运营商 NAT 池，按流分配；不同尝试用不同源端口所以 IP 不同，属正常现象，不是本次故障原因（同一条流内映射是稳定的）。
+
+---
+
+## 三十九、2026-11-16 基于 v1.3.70 重做（v1.3.71）
+
+### 39.1 基线
+`git reset --hard 4b4dc58`（v1.3.70）。此前所有实验性改动保存在分支 `keep/v1.3.81-relay` 与标签 `v1.3.83-relay`。
+
+### 39.2 打洞：恢复"热身 + 互相打洞"
+成功日志（20:22）显示：
+```
+direct dial to 47.108.84.112:53937 failed (context deadline exceeded), switching to mutual punching
+probe #1 ... → probe answered after 1 probes            ← 第一个包就通了
+```
+原因：那次"假设对方有公网"的 QUIC 尝试**在双方 NAT 上都开了映射**，所以接下来第一个探测包就能互换。这是一次有效的**热身**，不是浪费。
+因此 `Punch` = 热身直拨（`DirectTimeout`，默认 5 秒）→ `drainUDP` 清残留 → 同时探测 + ±20 端口预测（总预算 15 秒）→ QUIC 握手（KeepAlive 3 秒）。
+
+### 39.3 中转重写
+- 服务端 `p2p.bridge`（`server/internal/api/bridge.go`）重写：目标设备 park 一条流，发起方取走后**由发起方独占双向拷贝**，结束即关闭双方；`0x01/0x00` 单字节握手；park TTL 10 分钟，重复注册替换旧流。
+- 客户端 `internal/p2p/relay.go` 重写：`RelayDial` / `RelayServe`，握手字节单独校验；yamux `LogOutput=io.Discard`（必须设置，否则启动报错）；`BridgeSecret(account)` 按**账号**派生，两端一致（用设备号会 bad channel token）。
+- 通道抽象：`internal/p2p/session.go`（`QuicSession` / `YamuxSession`），`Channel` 不再绑定 quic，打洞与中转共用同一套 `DialTCP/Call/OpenStream/Serve`。
+
+### 39.4 右键菜单重做
+设备行只保留 `✕`（移除）；右键菜单顺序：**打洞直连 / 断开直连 → 经服务器中转（延迟更高） → 复制设备号 → 复制设备 ID → 移除该设备**（移除标红）。
+
+### 39.5 从后续版本 cherry-pick 的功能
+- 百度网盘盘内下载：桌面 UA `netdisk;7.44.7.1;PC;PC-Windows;10.0.19045;WindowsBaiduYunGuanJia`、dlink 302 跟随、**timestamp 不再被格式化成科学计数法**（errno 113 的根因）、列表类接口用浏览器 UA（两者必须分开）。
+- 服务端离线下载支持 **URL + 任意 Header**（`offline.add` 接受 `url`/`headers`），落 `离线下载/` 并计入 10 GiB 配额；网盘右键「推送到服务器离线下载」。
+- 订阅 UA 可选（浏览器默认 / Quantumult X / Clash / v2rayN / Surge / Shadowrocket / 自定义），支持单订阅覆盖。

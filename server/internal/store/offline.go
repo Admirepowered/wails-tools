@@ -11,18 +11,23 @@ import (
 
 // OfflineTask is a server-side magnet download.
 type OfflineTask struct {
-	ID        string `json:"id"`
-	UserID    string `json:"userId"`
-	Magnet    string `json:"magnet"`
-	Name      string `json:"name"`
-	Status    string `json:"status"` // queued|downloading|completed|failed|canceled
-	Total     int64  `json:"total"`
-	Done      int64  `json:"done"`
-	Files     int    `json:"files"`
-	Error     string `json:"error,omitempty"`
-	Dir       string `json:"dir,omitempty"` // relative to the user's files root
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	ID     string `json:"id"`
+	UserID string `json:"userId"`
+	// Kind is "magnet" or "url".
+	Kind   string `json:"kind"`
+	Magnet string `json:"magnet,omitempty"`
+	URL    string `json:"url,omitempty"`
+	// Headers are sent with an HTTP download (Cookie/User-Agent/Referer/...).
+	Headers   map[string]string `json:"headers,omitempty"`
+	Name      string            `json:"name"`
+	Status    string            `json:"status"` // queued|downloading|completed|failed|canceled
+	Total     int64             `json:"total"`
+	Done      int64             `json:"done"`
+	Files     int               `json:"files"`
+	Error     string            `json:"error,omitempty"`
+	Dir       string            `json:"dir,omitempty"` // relative to the user's files root
+	CreatedAt string            `json:"createdAt"`
+	UpdatedAt string            `json:"updatedAt"`
 }
 
 func offlineKey(id string) []byte { return []byte("offline:" + id) }

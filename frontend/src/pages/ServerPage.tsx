@@ -1583,13 +1583,28 @@ export default function ServerPage(props: PageProps) {
                         items: [
                           online
                             ? { label: '断开直连', action: () => void disconnectDevice(d.id) }
-                            : { label: '连接到此设备（打洞）', action: () => void connectDevice(d.id) },
+                            : { label: '打洞直连', action: () => void connectDevice(d.id) },
+                          {
+                            label: '经服务器中转（延迟更高）',
+                            action: async () => {
+                              try {
+                                await api.P2PRelayConnect(d.id)
+                                toast.push('已通过服务器中转连接，延迟明显高于直连')
+                                setP2p(await api.P2PStatus())
+                              } catch (err) {
+                                toast.error(err)
+                              }
+                            },
+                          },
+                          ...(d.number
+                            ? [{ label: `复制设备号 ${d.number}`, action: () => void navigator.clipboard.writeText(d.number ?? '') }]
+                            : []),
                           { label: '复制设备 ID', action: () => void copyDeviceId(d.id) },
-                          ...(d.number ? [{ label: `复制设备号 ${d.number}`, action: () => void navigator.clipboard.writeText(d.number ?? '') }] : []),
+                          { label: '移除该设备', danger: true, action: () => void removeMyDevice(d.id) },
                         ],
                       })
                     }}
-                    title={p2pError ? `上次打洞失败：${p2pError}` : '右键连接到此设备'}
+                    title={p2pError ? `上次打洞失败：${p2pError}` : '右键：打洞直连 / 中转 / 复制设备号'}
                   >
                     <span className="file-icon">🖥</span>
                     <span className="file-name">
@@ -1600,16 +1615,6 @@ export default function ServerPage(props: PageProps) {
                     {online ? <Tag kind="ok">直连中</Tag> : null}
                     <span className="file-size">{d.lastSeen ? relativeTime(d.lastSeen) : '—'}</span>
                     {p2pError && !online ? <Tag kind="warn">打洞失败</Tag> : null}
-                    {!isSelf ? (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        title={online ? '断开直连' : '连接到此设备'}
-                        disabled={p2pBusy === d.id}
-                        onClick={() => (online ? void disconnectDevice(d.id) : void connectDevice(d.id))}
-                      >
-                        {p2pBusy === d.id ? '…' : online ? '断开' : '连接'}
-                      </button>
-                    ) : null}
                     <button className="btn btn-ghost btn-sm" title="移除该设备" onClick={() => void removeMyDevice(d.id)}>
                       ✕
                     </button>

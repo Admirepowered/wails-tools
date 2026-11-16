@@ -345,16 +345,52 @@ func (c *BaiduClient) ResolveDownload(ctx context.Context, account Account, cook
 	if err != nil {
 		return DownloadLink{}, err
 	}
+	// The dlink answers 302 to the CDN; resolving it here means the offline
+	// download (or the local engine) only needs the final URL.
+	ua := baiduNetdiskUA
+	if final, ferr := baiduFollowRedirect(ctx, dlink, cookie, ua); ferr == nil && final != "" {
+		dlink = final
+	}
 	filename := path.Base(req.Path)
 	return DownloadLink{
 		URL:       dlink,
 		Filename:  filename,
 		Size:      req.Size,
-		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+		UserAgent: ua,
 		Cookie:    cookie,
 		Referer:   "https://pan.baidu.com/",
 		Policy:    "line3",
 	}, nil
+}
+
+// baiduNetdiskUA is the desktop client identity Baidu expects for pan links.
+const baiduNetdiskUA = "netdisk;7.44.7.1;PC;PC-Windows;10.0.19045;WindowsBaiduYunGuanJia"
+
+// baiduFollowRedirect issues a HEAD and returns the Location (the CDN URL).
+func baiduFollowRedirect(ctx context.Context, dlink, cookie, ua string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, dlink, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", ua)
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if loc := resp.Header.Get("Location"); loc != "" {
+		return loc, nil
+	}
+	return dlink, nil
 }
 
 type baiduAccountTpl struct {
@@ -389,7 +425,7 @@ func (c *BaiduClient) fetchAccountTpl(ctx context.Context, cookie string) (baidu
 	tpl := baiduAccountTpl{
 		Sign1:     strings.TrimSpace(payload.Result.Sign1),
 		Sign3:     strings.TrimSpace(payload.Result.Sign3),
-		Timestamp: strings.TrimSpace(fmt.Sprint(payload.Result.Timestamp)),
+		Timestamp: baiduTimestampString(payload.Result.Timestamp),
 	}
 	if tpl.Sign1 == "" || tpl.Sign3 == "" || tpl.Timestamp == "" || tpl.Timestamp == "<nil>" {
 		return baiduAccountTpl{}, errors.New("baidu gettemplatevariable 未返回 sign 数据")
@@ -426,7 +462,7 @@ func (c *BaiduClient) fetchAccountDLink(ctx context.Context, cookie, fileID stri
 			DLink string      `json:"dlink"`
 		} `json:"dlink"`
 	}
-	if err := c.getJSON(ctx, endpoint, cookie, &payload); err != nil {
+	if err := c.getJSONUA(ctx, endpoint, cookie, baiduNetdiskUA, &payload); err != nil {
 		return "", err
 	}
 	if payload.Errno != 0 {
@@ -1217,6 +1253,46 @@ func (c *BaiduClient) baiduFileManager(ctx context.Context, cookie, opera, onnes
 	return nil
 }
 
+// baiduAPIUserAgent is used for pan.baidu.com API calls (list/meta/template):
+// Baidu validates the web session with a browser identity here.
+const baiduAPIUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
+// getJSONUA is getJSON with an explicit User-Agent (download endpoints expect
+// the netdisk client identity).
+func (c *BaiduClient) getJSONUA(ctx context.Context, endpoint, cookie, ua string, out any) error {
+	done := applog.Begin("netdisk.baidu", "http_get", map[string]any{"url": endpoint})
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		done(err, nil)
+		return err
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Cookie", cookie)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		done(err, nil)
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err = fmt.Errorf("baidu http %d", resp.StatusCode)
+		done(err, nil)
+		return err
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		done(err, nil)
+		return err
+	}
+	if err = json.Unmarshal(body, out); err != nil {
+		done(err, map[string]any{"body": string(body[:min(len(body), 300)])})
+		return err
+	}
+	done(nil, map[string]any{"status": resp.StatusCode})
+	return nil
+}
+
 func (c *BaiduClient) getJSON(ctx context.Context, endpoint, cookie string, out any) error {
 	done := applog.Begin("netdisk.baidu", "http_get", map[string]any{"url": endpoint})
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -1224,7 +1300,7 @@ func (c *BaiduClient) getJSON(ctx context.Context, endpoint, cookie string, out 
 		done(err, nil)
 		return err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", baiduAPIUserAgent)
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Cookie", cookie)
 	resp, err := c.http.Do(req)
@@ -4304,4 +4380,28 @@ func netdiskBaseName(path string) string {
 		return path[index+1:]
 	}
 	return path
+}
+
+// baiduTimestampString renders the template timestamp exactly as the API gave
+// it. Encoding it through a float (fmt.Sprint of a float64) yields values like
+// "1.794823502e+09", which Baidu rejects with errno 113.
+func baiduTimestampString(v interface{}) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(t)
+	case float64:
+		return strconv.FormatInt(int64(t), 10)
+	case float32:
+		return strconv.FormatInt(int64(t), 10)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case int:
+		return strconv.Itoa(t)
+	case json.Number:
+		return t.String()
+	default:
+		return strings.TrimSpace(fmt.Sprint(t))
+	}
 }

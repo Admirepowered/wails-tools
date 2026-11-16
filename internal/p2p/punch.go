@@ -44,6 +44,8 @@ type Options struct {
 	Role string
 	// Timeout bounds the whole attempt; defaults to 45s.
 	Timeout time.Duration
+	// DirectTimeout bounds the warm-up dial; defaults to 5s.
+	DirectTimeout time.Duration
 	// LocalPort pins the punch socket (0 = random). A stable port keeps the NAT
 	// mapping predictable and makes simultaneous punching much more reliable.
 	LocalPort int
@@ -80,6 +82,9 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 45 * time.Second
 	}
+	if o.DirectTimeout <= 0 {
+		o.DirectTimeout = 5 * time.Second
+	}
 	role := "a"
 	if o.Role == "b" || o.Role == "B" {
 		role = "b"
@@ -107,6 +112,20 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 		return nil, fmt.Errorf("解析对端地址失败: %w", err)
 	}
 
+	// Warm-up: try to reach the peer as if it were directly reachable. Even when
+	// this fails it opens the NAT mapping in both directions, which is exactly
+	// what makes the very next probe succeed (see the 20:22 success log).
+	dialCtx, dialCancel := context.WithTimeout(ctx, o.DirectTimeout)
+	quicConn, derr := handshake(dialCtx, conn, peerAddr, "a", o.Secret)
+	dialCancel()
+	if derr == nil {
+		o.Logf("p2p: direct dial to %s succeeded", peerAddr)
+		success = true
+		return NewChannel(quicConn, o.Secret, peerStr), nil
+	}
+	o.Logf("p2p: direct dial to %s failed (%v), switching to mutual punching", peerAddr, derr)
+	_ = conn.SetReadDeadline(time.Time{})
+	drainUDP(conn)
 	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
 	if err != nil {
 		return nil, fmt.Errorf("rendezvous 地址无效: %w", err)
@@ -121,12 +140,12 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	}
 	o.Logf("p2p: direct path open via %s, starting QUIC handshake", peerAddr)
 
-	quicConn, err := handshake(ctx, conn, peerAddr, role, o.Secret)
+	quicConn2, err := handshake(ctx, conn, peerAddr, role, o.Secret)
 	if err != nil {
 		return nil, fmt.Errorf("直连建立失败: %w", err)
 	}
 	success = true
-	return NewChannel(quicConn, o.Secret, peerStr), nil
+	return NewChannel(quicConn2, o.Secret, peerStr), nil
 }
 
 // announceEndpoint keeps announcing until the server reports the peer's public
@@ -359,4 +378,15 @@ func selfSignedCert() (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
+}
+
+// drainUDP discards datagrams a failed warm-up handshake left in the socket.
+func drainUDP(conn *net.UDPConn) {
+	buf := make([]byte, 2048)
+	_ = conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	for {
+		if _, _, err := conn.ReadFromUDP(buf); err != nil {
+			return
+		}
+	}
 }
