@@ -887,7 +887,7 @@ const rawApi = {
     ),
   RunSSHCommand: (sessionId: string, command: string, timeoutSec: number) =>
     call<{ stdout: string; stderr: string; exitCode: number }>('RunSSHCommand', sessionId, command, timeoutSec),
-  SSHSystemInfo: (sessionId: string) => call<{ cpuModel: string; cpuCores: number; cpuPct: number; memTotalMb: number; memUsedMb: number; memPct: number; load1: number; uptime: string; hostname: string; gpus?: Array<{ name: string; utilPct: number; memUsedMb: number; memTotalMb: number; tempC: number }> }>('SSHSystemInfo', sessionId),
+  SSHSystemInfo: (sessionId: string) => call<{ cpuModel: string; cpuCores: number; cpuPct: number; memTotalMb: number; memUsedMb: number; memPct: number; load1: number; uptime: string; hostname: string; diskTotalMb: number; diskUsedMb: number; diskPct: number; gpus?: Array<{ name: string; utilPct: number; memUsedMb: number; memTotalMb: number; tempC: number }> }>('SSHSystemInfo', sessionId),
   SSHCwd: (sessionId: string) => call<string>('SSHCwd', sessionId),
   SFTPList: (sessionId: string, dir: string) => call<RemoteFile[]>('SFTPList', sessionId, dir),
   SFTPHome: (sessionId: string) => call<string>('SFTPHome', sessionId),
@@ -1279,6 +1279,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

@@ -39,17 +39,20 @@ func (m *Manager) Exec(sessionID, command string) (string, error) {
 
 // SystemInfo is the remote host snapshot shown above the SSH terminal.
 type SystemInfo struct {
-	CPUModel   string    `json:"cpuModel"`
-	CPUCores   int       `json:"cpuCores"`
-	CPUPct     float64   `json:"cpuPct"`
-	MemTotalMB int64     `json:"memTotalMb"`
-	MemUsedMB  int64     `json:"memUsedMb"`
-	MemPct     float64   `json:"memPct"`
-	Load1      float64   `json:"load1"`
-	Uptime     string    `json:"uptime"`
-	Hostname   string    `json:"hostname"`
-	GPUs       []GPUInfo `json:"gpus"`
-	GPUSource  string    `json:"gpuSource,omitempty"`
+	CPUModel    string    `json:"cpuModel"`
+	CPUCores    int       `json:"cpuCores"`
+	CPUPct      float64   `json:"cpuPct"`
+	MemTotalMB  int64     `json:"memTotalMb"`
+	MemUsedMB   int64     `json:"memUsedMb"`
+	MemPct      float64   `json:"memPct"`
+	Load1       float64   `json:"load1"`
+	Uptime      string    `json:"uptime"`
+	Hostname    string    `json:"hostname"`
+	GPUs        []GPUInfo `json:"gpus"`
+	GPUSource   string    `json:"gpuSource,omitempty"`
+	DiskTotalMB int64     `json:"diskTotalMb"`
+	DiskUsedMB  int64     `json:"diskUsedMb"`
+	DiskPct     float64   `json:"diskPct"`
 }
 
 // GPUInfo is one NVIDIA device.
@@ -70,6 +73,7 @@ echo "CORES::$(grep -c ^processor /proc/cpuinfo 2>/dev/null)"
 echo "LOAD::$(cut -d" " -f1-3 /proc/loadavg 2>/dev/null)"
 echo "MEM::$(grep -E "^(MemTotal|MemAvailable):" /proc/meminfo 2>/dev/null | tr "\n" " ")"
 echo "UP::$(cut -d. -f1 /proc/uptime 2>/dev/null)"
+echo "DISK::$(df -P -k / 2>/dev/null | awk "NR==2{print \$2\" \"\$3\" \"\$5}")"
 echo "STAT1::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
 sleep 0.4
 echo "STAT2::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
@@ -113,6 +117,18 @@ func parseSystemInfo(raw string) SystemInfo {
 			stat1 = value
 		case "STAT2":
 			stat2 = value
+		case "DISK":
+			fields := strings.Fields(value)
+			if len(fields) >= 3 {
+				var totalKB, usedKB int64
+				fmt.Sscanf(fields[0], "%d", &totalKB)
+				fmt.Sscanf(fields[1], "%d", &usedKB)
+				info.DiskTotalMB = totalKB / 1024
+				info.DiskUsedMB = usedKB / 1024
+				if totalKB > 0 {
+					info.DiskPct = float64(usedKB) / float64(totalKB) * 100
+				}
+			}
 		case "GPU":
 			info.GPUs = parseNvidiaSMI(value)
 			if len(info.GPUs) > 0 {

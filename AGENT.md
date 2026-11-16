@@ -878,3 +878,31 @@ if to-from+1 > maxRangeBytes { to = from + maxRangeBytes - 1 }   // maxRangeByte
 
 ### 45.4 顺手清掉一个 bug
 上一版为了让文件面板跟随终端目录，往 shell 里注入了 `PROMPT_COMMAND`，但转义没处理好，命令**原样漏进了终端**（截图里那行 `export PROMPT_COMMAND='printf "\033]7;...`）。已删除该注入：现在只依赖 5 秒一次的 `SSHCwd` 轮询 + 若 shell 自己发 OSC 7 也能解析。
+
+---
+
+## 四十六、2026-11-16 SSH 再修一轮（v1.3.80）
+
+### 46.1 收缩没生效的原因
+上一版只改了子元素 `width`，但父级是 `grid-template-columns: 320px 1fr`，**列宽由父级决定**，子元素怎么改都没用。
+改用 Pulse 的做法（`frontend/src/App.css` 里 `--sidebar-width` + `:has()`）：
+```css
+.ssh-root.session-open { grid-template-columns: 64px minmax(0,1fr); transition: grid-template-columns .2s; }
+.ssh-root.session-open:has(.ssh-hosts:hover),
+.ssh-root.session-open:has(.ssh-hosts:focus-within) { grid-template-columns: 340px minmax(0,1fr); }
+```
+
+### 46.2 占用信息到底部
+上一版替换锚点没命中，`<SystemInfoBar/>` 实际还在工作区上方。这次直接改结构：split 之后才是 `<SystemInfoBar/>`，并加 `.ssh-sysinfo { position: sticky; bottom: 0 }`。
+
+### 46.3 目录同步方向反过来
+以**文件浏览器为准**：`SftpPane` 的 `dir` 变化时通过 `onDir` 通知父级，`TerminalPane` 收到 `cwd` 就向 shell 发 `cd '<path>'`（单引号转义，空格安全）。之前是终端驱动文件，容易因为轮询延迟打架。
+
+### 46.4 静态信息不闪
+主机名、CPU 型号、核数永不变化：采样返回空值时**沿用上一次的值**（`setInfo(prev => ({...next, hostname: next.hostname || prev.hostname, ...}))`）。
+
+### 46.5 磁盘占用
+只取根分区：`df -P -k / | awk 'NR==2{print $2" "$3" "$5}'`，解析成 `diskTotalMb/diskUsedMb/diskPct`，前端多一条「磁盘 /」进度条（不逐盘列出）。
+
+### 46.6 终端右键粘贴
+xterm.js 默认不处理右键。给 `.term-xterm` 加 `onContextMenu` → `navigator.clipboard.readText()` → 走 `WriteTerminal`（与输入同一通道）；WebView 拒绝剪贴板权限时提示改用 `Ctrl+Shift+V`。

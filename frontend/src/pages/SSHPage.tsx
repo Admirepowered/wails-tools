@@ -364,8 +364,11 @@ export default function SSHPage({}: PageProps) {
   }
 
   return (
-    <div className="split split-wide" style={{ height: 'calc(100vh - 122px)' }}>
-      <div className="pane col" style={{ gap: 8, paddingRight: 4 }}>
+    <div
+      className={`split split-wide ssh-root${sessionId ? ' session-open' : ''}`}
+      style={{ height: 'calc(100vh - 122px)' }}
+    >
+      <div className="pane col ssh-hosts" style={{ gap: 8, paddingRight: 4 }}>
         <input
           className="input"
           placeholder="搜索名称 / 地址 / 标签"
@@ -484,16 +487,16 @@ export default function SSHPage({}: PageProps) {
               </div>
             </div>
 
-            <SystemInfoBar sessionId={sessionId} />
-
             <div className="ssh-split">
               <div className="ssh-split-files">
-                <SftpPane sessionId={sessionId} cwd={shellCwd} />
+                <SftpPane sessionId={sessionId} cwd={shellCwd} onDir={setShellCwd} />
               </div>
               <div className="ssh-split-term">
-                <TerminalPane sessionId={sessionId} onCwd={setShellCwd} />
+                <TerminalPane sessionId={sessionId} cwd={shellCwd} />
               </div>
             </div>
+
+            <SystemInfoBar sessionId={sessionId} />
           </>
         )}
       </div>
@@ -1180,7 +1183,7 @@ function KeysModal({ onClose, onChanged }: { onClose: () => void; onChanged: () 
 
 /* ---------------- SFTP ---------------- */
 
-function SftpPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
+function SftpPane({ sessionId, cwd, onDir }: { sessionId: string; cwd?: string; onDir?: (dir: string) => void }) {
   const toast = useToast()
   const [dir, setDir] = useState('')
   const [files, setFiles] = useState<RemoteFile[]>([])
@@ -1543,7 +1546,7 @@ function SftpPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
 
 /* ---------------- terminal (xterm.js) ---------------- */
 
-function TerminalPane({ sessionId, onCwd }: { sessionId: string; onCwd?: (dir: string) => void }) {
+function TerminalPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
   const toast = useToast()
   const [termId, setTermId] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
@@ -1627,11 +1630,6 @@ function TerminalPane({ sessionId, onCwd }: { sessionId: string; onCwd?: (dir: s
         termRef.current?.reset()
         termRef.current?.focus()
         dataSubRef.current?.dispose()
-            termRef.current?.parser.registerOscHandler(7, (payload) => {
-          const idx = payload.indexOf('/')
-          if (idx > 0) onCwd?.(decodeURIComponent(payload.slice(idx)))
-          return true
-        })
         dataSubRef.current = termRef.current?.onData((data) => {
           const current = idRef.current
           if (!current) return
@@ -1672,24 +1670,30 @@ function TerminalPane({ sessionId, onCwd }: { sessionId: string; onCwd?: (dir: s
     }
   }, [toast])
 
-  useEffect(() => {
-    if (!onCwd) return
-    let stopped = false
-    const tick = async () => {
-      if (stopped || !idRef.current) return
-      try {
-        const dir = await api.SSHCwd(sessionId)
-        if (!stopped && dir) onCwd(dir)
-      } catch {
-        /* ignore: the shell may be busy */
+  // xterm.js does not paste on right-click; read the clipboard ourselves and
+  // feed it through the same path as typed input.
+  const pasteIntoTerminal = async () => {
+    const id = idRef.current
+    if (!id) return
+    try {
+      let text = ''
+      if (navigator.clipboard?.readText) {
+        try {
+          text = await navigator.clipboard.readText()
+        } catch {
+          text = ''
+        }
       }
+      if (!text) {
+        toast.push('无法读取剪贴板，请用 Ctrl+Shift+V', 'warn')
+        return
+      }
+      await api.WriteTerminal(id, text)
+      termRef.current?.focus()
+    } catch (err) {
+      toast.error(err)
     }
-    const timer = window.setInterval(() => void tick(), 5000)
-    return () => {
-      stopped = true
-      window.clearInterval(timer)
-    }
-  }, [sessionId, onCwd])
+  }
 
   const closeTerm = () => {
     const id = idRef.current
@@ -1720,7 +1724,15 @@ function TerminalPane({ sessionId, onCwd }: { sessionId: string; onCwd?: (dir: s
           </button>
         ) : null}
       </div>
-      <div className="term-xterm" ref={hostRef} onClick={() => termRef.current?.focus()} />
+      <div
+        className="term-xterm"
+        ref={hostRef}
+        onClick={() => termRef.current?.focus()}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          void pasteIntoTerminal()
+        }}
+      />
       <div className="small faint">提示：如终端无响应，可关闭后重新打开；断开连接时终端会自动关闭。</div>
     </div>
   )
@@ -1806,6 +1818,9 @@ type SysInfo = {
   memTotalMb: number
   memUsedMb: number
   memPct: number
+  diskTotalMb: number
+  diskUsedMb: number
+  diskPct: number
   load1: number
   uptime: string
   hostname: string
@@ -1924,6 +1939,11 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
+
+
+
+
 
 
 
