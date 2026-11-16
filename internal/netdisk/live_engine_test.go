@@ -45,7 +45,7 @@ func TestLiveBaiduEnginePath(t *testing.T) {
 	}
 	task, err := engine.Add(dlengine.Request{
 		URL: link.URL, Filename: "x.7z", Headers: headers, Referer: link.Referer,
-		Connections: 8, ChunkSize: 4 << 20, ProxyMode: "off",
+		Connections: 8, ChunkSize: 32 << 20, ProxyMode: "off",
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
@@ -64,4 +64,5 @@ func TestLiveBaiduEnginePath(t *testing.T) {
 		t.Fatalf("engine download failed: %s", got.Error)
 	}
 }
+
 

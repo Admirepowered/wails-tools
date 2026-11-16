@@ -71,7 +71,7 @@ echo "LOAD::$(cut -d" " -f1-3 /proc/loadavg 2>/dev/null)"
 echo "MEM::$(grep -E "^(MemTotal|MemAvailable):" /proc/meminfo 2>/dev/null | tr "\n" " ")"
 echo "UP::$(cut -d. -f1 /proc/uptime 2>/dev/null)"
 echo "STAT1::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
-sleep 1
+sleep 0.4
 echo "STAT2::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
 echo "GPU::$(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | tr "\n" ";")"
 '`)

@@ -832,3 +832,30 @@ probe #1 ... → probe answered after 1 probes            ← 第一个包就通
 现象：自定义节点页显示 0，实际 `%LOCALAPPDATA%\WailsTools\nodes\custom-nodes.json` 里 3 个节点（1 内置 + 2 自定义）。
 复现：用 `wt-nodecheck` 读同一个文件，`OpenNodes` 只返回 1 个 —— 文件在应用运行期间被**重写成只剩内置节点**。
 修复：`NodeStore.persist()` 加安全网 —— 如果内存里已没有自定义节点、而磁盘上还有，就沿用磁盘内容，避免一次空列表同步把用户节点抹掉。用户的 2 个节点（trojan `134.175.90.14:4443`、vmess `111:443`）已按原样写回。
+
+---
+
+## 四十四、2026-11-16 下载引擎单请求硬上限 4 MiB（v1.3.78）
+
+### 44.1 为什么 v1.3.73 之后还报 403
+v1.3.73 只给**新任务**设置了 4 MiB 分片；已经存在的任务（旧的 32 MiB 分片计划）继续续传，仍然发 32 MiB 的 Range → 依旧 403（日志里 `chunk 7 failed ... 403`）。
+
+### 44.2 修复
+在 `fetchChunkOnce` 里加了**与分片计划无关的硬上限**：
+
+```go
+to := c.End
+if to-from+1 > maxRangeBytes { to = from + maxRangeBytes - 1 }   // maxRangeBytes = 4 MiB
+```
+每个 HTTP 请求最多 4 MiB，超过的部分由下一次调用继续取（`deadlineBytes` 控制本次只读到 `to`）。这样：
+- 新任务、旧任务、断点续传，**任何**情况下单个 Range 都不会超 4 MiB；
+- 分片大小只影响单文件并发度和状态粒度，不再影响 403。
+
+### 44.3 验证
+把测试分片故意设成 32 MiB（模拟旧任务）：
+
+| 分片 | 结果 |
+|---|---|
+| 32 MiB（v1.3.73 会 403） | `retries=0, downloaded=2.9 MB / 9s` ✅ |
+
+真实 804 MB 文件、8 连接、netdisk UA、Cookie/Referer 全部照旧。

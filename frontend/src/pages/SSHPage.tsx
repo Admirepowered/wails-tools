@@ -1827,10 +1827,15 @@ type SysInfo = {
 function SystemInfoBar({ sessionId }: { sessionId: string }) {
   const [info, setInfo] = useState<SysInfo | null>(null)
   const [failed, setFailed] = useState(false)
+  const busyRef = useRef(false)
 
   useEffect(() => {
     let stopped = false
+    // 1 s cadence; skip the tick while the previous sample is still running so a
+    // slow host never queues requests.
     const tick = async () => {
+      if (busyRef.current) return
+      busyRef.current = true
       try {
         const next = await api.SSHSystemInfo(sessionId)
         if (!stopped) {
@@ -1839,10 +1844,12 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
         }
       } catch {
         if (!stopped) setFailed(true)
+      } finally {
+        busyRef.current = false
       }
     }
     void tick()
-    const timer = window.setInterval(() => void tick(), 5000)
+    const timer = window.setInterval(() => void tick(), 1000)
     return () => {
       stopped = true
       window.clearInterval(timer)
@@ -1857,48 +1864,74 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     )
   }
 
-  const gpuText = (g: NonNullable<SysInfo['gpus']>[number]) =>
-    `${g.name} ${g.utilPct.toFixed(0)}% · 显存 ${g.memUsedMb}/${g.memTotalMb} MiB${g.tempC > 0 ? ` · ${g.tempC.toFixed(0)}°C` : ''}`
+  const bar = (label: string, pct: number, text: string) => (
+    <div className="stat-block">
+      <div className="stat-head">
+        <span className="faint">{label}</span>
+        <span className="mono">{text}</span>
+      </div>
+      <div className="stat-track">
+        <div
+          className={`stat-fill ${pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : ''}`}
+          style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+        />
+      </div>
+    </div>
+  )
 
   return (
-    <div className="card" style={{ padding: '8px 12px' }}>
-      <div className="row row-wrap" style={{ gap: 14 }}>
-        <span className="small">
-          <span className="faint">主机</span> <b>{info.hostname || '—'}</b>
-        </span>
-        <span className="small">
-          <span className="faint">CPU</span> {info.cpuModel || '—'}
-          {info.cpuCores ? ` · ${info.cpuCores} 核` : ''}
-        </span>
-        <span className="small">
-          <span className="faint">使用率</span>{' '}
-          <b style={{ color: info.cpuPct > 85 ? 'var(--danger)' : undefined }}>{info.cpuPct.toFixed(0)}%</b>
-        </span>
-        <span className="small">
-          <span className="faint">内存</span> {info.memUsedMb} / {info.memTotalMb} MiB{' '}
-          <b style={{ color: info.memPct > 90 ? 'var(--danger)' : undefined }}>({info.memPct.toFixed(0)}%)</b>
-        </span>
-        {info.load1 > 0 ? (
+    <div className="card" style={{ padding: '10px 12px' }}>
+      <div className="row row-wrap" style={{ gap: 16, alignItems: 'flex-end' }}>
+        <div className="col" style={{ gap: 2, minWidth: 200 }}>
           <span className="small">
-            <span className="faint">负载</span> {info.load1.toFixed(2)}
+            <span className="faint">主机</span> <b>{info.hostname || '—'}</b>
           </span>
-        ) : null}
-        {info.uptime ? (
-          <span className="small">
-            <span className="faint">运行</span> {info.uptime}
+          <span className="small faint truncate" title={info.cpuModel}>
+            {info.cpuModel || 'CPU 未知'}
+            {info.cpuCores ? ` · ${info.cpuCores} 核` : ''}
           </span>
-        ) : null}
+          <span className="small faint">
+            负载 {info.load1.toFixed(2)}
+            {info.uptime ? ` · 运行 ${info.uptime}` : ''}
+          </span>
+        </div>
+        <div style={{ flex: '1 1 220px', minWidth: 180 }}>
+          {bar('CPU', info.cpuPct, `${info.cpuPct.toFixed(0)}%`)}
+        </div>
+        <div style={{ flex: '1 1 220px', minWidth: 180 }}>
+          {bar('内存', info.memPct, `${info.memUsedMb} / ${info.memTotalMb} MiB`)}
+        </div>
       </div>
       {info.gpus && info.gpus.length > 0 ? (
-        <div className="row row-wrap" style={{ gap: 14, marginTop: 6 }}>
+        <div className="row row-wrap" style={{ gap: 16, marginTop: 8 }}>
           {info.gpus.map((g, i) => (
-            <span key={i} className="small">
-              <Tag kind="ok">GPU{i + 1}</Tag> {gpuText(g)}
-            </span>
+            <div key={i} style={{ flex: '1 1 260px', minWidth: 220 }}>
+              <div className="stat-head">
+                <span className="faint">
+                  GPU{i + 1} · {g.name}
+                  {g.tempC > 0 ? ` · ${g.tempC.toFixed(0)}°C` : ''}
+                </span>
+                <span className="mono">{g.utilPct.toFixed(0)}%</span>
+              </div>
+              <div className="stat-track">
+                <div
+                  className={`stat-fill ${g.utilPct >= 90 ? 'bad' : g.utilPct >= 70 ? 'warn' : ''}`}
+                  style={{ width: `${Math.max(0, Math.min(100, g.utilPct))}%` }}
+                />
+              </div>
+              <div className="stat-track sm" style={{ marginTop: 3 }}>
+                <div
+                  className={`stat-fill alt ${g.memTotalMb > 0 && (g.memUsedMb / g.memTotalMb) * 100 >= 90 ? 'bad' : ''}`}
+                  style={{ width: `${g.memTotalMb > 0 ? Math.min(100, (g.memUsedMb / g.memTotalMb) * 100) : 0}%` }}
+                />
+              </div>
+              <div className="small faint mono" style={{ marginTop: 2 }}>
+                显存 {g.memUsedMb} / {g.memTotalMb} MiB
+              </div>
+            </div>
           ))}
         </div>
       ) : null}
     </div>
   )
 }
-

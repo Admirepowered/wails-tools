@@ -530,8 +530,14 @@ func (e *Engine) fetchChunkOnce(ctx context.Context, tr *taskRunner, idx int) er
 		return err
 	}
 	from := c.Start + c.Done
+	// Never ask for more than maxRangeBytes in one request: the Baidu pan CDN
+	// answers 403 to ranges above ~4 MiB (measured: 4 MiB ok, 8 MiB 403). This
+	// also repairs tasks created before the per-task chunk size existed.
+	to := c.End
+	if to-from+1 > maxRangeBytes {
+		to = from + maxRangeBytes - 1
+	}
 	if st.RangeOK && st.Total > 0 {
-		to := c.End
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, to))
 		// Only validate the entity when resuming inside a chunk; CDNs (Baidu pan)
 		// reject If-Range on plain ranged requests.
@@ -568,18 +574,28 @@ func (e *Engine) fetchChunkOnce(ctx context.Context, tr *taskRunner, idx int) er
 		}
 	}
 
+	// The body of a ranged request covers [from,to]; the rest of the chunk is
+	// fetched by the next call.
 	buf := make([]byte, 256*1024)
 	written := c.Done
+	// Only this sub-range was requested; the remaining part of the chunk is
+	// picked up by the next call.
+	deadlineBytes := total
+	if st.RangeOK && st.Total > 0 {
+		if want := (to - from) + 1; want < deadlineBytes {
+			deadlineBytes = want
+		}
+	}
 	dlCfg := e.store.Get().Downloads
 	limiter := newRateLimiter(dlCfg.SpeedLimitKBps)
-	for written < total {
+	for written < deadlineBytes {
 		select {
 		case <-ctx.Done():
 			e.saveChunkProgress(tr, idx, written)
 			return nil
 		default:
 		}
-		remain := total - written
+		remain := deadlineBytes - written
 		chunk := int64(len(buf))
 		if chunk > remain {
 			chunk = remain
@@ -602,8 +618,8 @@ func (e *Engine) fetchChunkOnce(ctx context.Context, tr *taskRunner, idx int) er
 			return rerr
 		}
 	}
-	if written < total {
-		return fmt.Errorf("short read: got %d of %d bytes", written, total)
+	if written < deadlineBytes {
+		return fmt.Errorf("short read: got %d of %d bytes", written, deadlineBytes)
 	}
 	return nil
 }
@@ -756,3 +772,8 @@ func headerLookup(headers map[string]string, key string) (string, bool) {
 	}
 	return "", false
 }
+
+// maxRangeBytes caps a single HTTP Range request. CDNs with hotlink protection
+// (Baidu pan) reject large ranges with 403, so every request stays at or below
+// this size no matter how big a chunk is.
+const maxRangeBytes int64 = 4 << 20

@@ -633,6 +633,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   align-items: stretch;
   min-height: 0;
   flex: 1;
+  /* Fill the viewport minus the page chrome so each column scrolls internally. */
+  height: calc(100vh - 300px);
+  min-height: 420px;
 }
 .ssh-split-files,
 .ssh-split-term {
@@ -641,6 +644,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
+}
+/* The file list scrolls on its own; the toolbar and path stay put. */
+.ssh-split-files .list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
 }
 .ssh-split-term .term-xterm {
   flex: 1;
@@ -651,3 +663,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* Remote host stat bars (CPU / memory / VRAM). */
+.stat-block { display: flex; flex-direction: column; gap: 3px; }
+.stat-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.stat-track {
+  height: 8px;
+  border-radius: 5px;
+  background: var(--bg-sunken, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+.stat-track.sm { height: 5px; }
+.stat-fill {
+  height: 100%;
+  border-radius: 5px;
+  background: var(--accent, #3ddc97);
+  transition: width 0.6s ease;
+}
+.stat-fill.alt { background: #5b8def; }
+.stat-fill.warn { background: #e5a83b; }
+.stat-fill.bad { background: var(--danger, #e05a5a); }
+
