@@ -1670,6 +1670,17 @@ function TerminalPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
     }
   }, [toast])
 
+  // Right-click copies when text is selected, otherwise pastes.
+  const copyFromTerminal = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      termRef.current?.clearSelection()
+      toast.push('已复制')
+    } catch (err) {
+      toast.error(err)
+    }
+  }
+
   // xterm.js does not paste on right-click; read the clipboard ourselves and
   // feed it through the same path as typed input.
   const pasteIntoTerminal = async () => {
@@ -1939,6 +1950,8 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
+
 
 
 

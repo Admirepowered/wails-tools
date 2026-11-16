@@ -906,3 +906,24 @@ if to-from+1 > maxRangeBytes { to = from + maxRangeBytes - 1 }   // maxRangeByte
 
 ### 46.6 终端右键粘贴
 xterm.js 默认不处理右键。给 `.term-xterm` 加 `onContextMenu` → `navigator.clipboard.readText()` → 走 `WriteTerminal`（与输入同一通道）；WebView 拒绝剪贴板权限时提示改用 `Ctrl+Shift+V`。
+
+---
+
+## 四十七、2026-11-16 SSH 缓存 + 右键复制 + 拖拽不跳转（v1.3.81）
+
+### 47.1 静态信息在 Go 侧缓存
+前端合并还不够 —— 采样本身可能整段失败。现在 `internal/app/ssh_sysinfo.go` 按 `sessionID` 缓存上一次成功结果：
+- `hostname` / `cpuModel` / `cpuCores` **只取一次**，后续只在为空时用缓存补；
+- 整段采样失败（`MemTotalMB==0 && CPUModel=="" && Hostname==""`）直接返回上次快照；
+- 内存、磁盘为 0 时也回填上次值，避免信息条"跳空"。
+
+### 47.2 终端右键：有选中就复制，否则粘贴
+`onContextMenu` 里先看 `term.getSelection()`：有选中 → `navigator.clipboard.writeText` 并清除选区 + 提示"已复制"；没有选中 → 走粘贴逻辑。
+
+### 47.3 拖拽不再变成下载
+把文件拖进 WebView 默认会导航（看起来就像开始下载）。在 `main.tsx` 加了全局：
+```js
+window.addEventListener('dragover', (e) => e.preventDefault())
+window.addEventListener('drop', (e) => e.preventDefault())
+```
+SSH 的投放区再自己 `preventDefault + stopPropagation`，并只在能拿到 `file.path` 时上传；拿不到就提示改用「上传」按钮（WebView2 有时不暴露路径）。

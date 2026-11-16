@@ -36,3 +36,4 @@ func (a *App) SSHCwd(sessionID string) (string, error) {
 	}
 	return strings.TrimSpace(out), nil
 }
+
