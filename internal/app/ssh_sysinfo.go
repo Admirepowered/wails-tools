@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"wailstools/internal/sshmgr"
 )
@@ -13,6 +14,13 @@ func (a *App) SSHSystemInfo(sessionID string) (sshmgr.SystemInfo, error) {
 	if sessionID == "" {
 		return sshmgr.SystemInfo{}, errors.New("session is required")
 	}
+	info, err := a.ssh.GatherSystemInfo(sessionID)
+	if err == nil && (info.CPUModel != "" || info.MemTotalMB > 0) {
+		return info, nil
+	}
+	// One retry: ssh exec sessions occasionally time out under load, and the UI
+	// prefers a slightly stale sample over an error.
+	time.Sleep(300 * time.Millisecond)
 	return a.ssh.GatherSystemInfo(sessionID)
 }
 

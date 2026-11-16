@@ -685,3 +685,40 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .stat-fill.warn { background: #e5a83b; }
 .stat-fill.bad { background: var(--danger, #e05a5a); }
 
+
+/* SSH: once a session is open the host list shrinks to a rail and expands on
+   hover, giving the workspace the whole width. */
+.ssh-root .ssh-hosts {
+  transition: width 0.18s ease, opacity 0.18s ease;
+}
+.ssh-root.session-open .ssh-hosts {
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
+  overflow: hidden;
+}
+.ssh-root.session-open .ssh-hosts:hover,
+.ssh-root.session-open .ssh-hosts:focus-within {
+  width: 340px;
+  min-width: 340px;
+  max-width: 340px;
+  overflow-y: auto;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  position: relative;
+  z-index: 5;
+  background: var(--bg-panel, #14171e);
+}
+.ssh-root.session-open .ssh-hosts:not(:hover) > *:not(.ssh-hosts-rail) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Remote stats stay pinned to the bottom of the SSH workspace. */
+.ssh-sysinfo {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--bg-panel, #14171e) 92%, transparent);
+  border-top: 1px solid var(--border);
+}

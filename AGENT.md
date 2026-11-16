@@ -859,3 +859,22 @@ if to-from+1 > maxRangeBytes { to = from + maxRangeBytes - 1 }   // maxRangeByte
 | 32 MiB（v1.3.73 会 403） | `retries=0, downloaded=2.9 MB / 9s` ✅ |
 
 真实 804 MB 文件、8 连接、netdisk UA、Cookie/Referer 全部照旧。
+
+---
+
+## 四十五、2026-11-16 SSH 三处体验修正（v1.3.79）
+
+### 45.1 主机列表自动收缩
+`.ssh-root.session-open .ssh-hosts` → 连接后左栏收成 64px 窄条，**鼠标移上去**（或 focus）展开到 340px 并浮在工作区上方（`position: relative; z-index`），移到别处又收回去；断开连接后（`sessionId` 为空）恢复常驻。
+窄条状态下内部控件 `opacity: 0; pointer-events: none`，避免误点。
+
+### 45.2 主机占用信息到底部
+`SystemInfoBar` 从工作区上方移到下方，加 `.ssh-sysinfo { position: sticky; bottom: 0 }`，滚动时也固定可见；这样文件列表和终端可以占满剩余高度。
+
+### 45.3 采样不丢数据
+- 采集失败时**保留上一次成功的样本**继续显示，并在主机名后标注"更新中断，显示上一次数据"，避免整条信息条突然变空。
+- 后端 `SSHSystemInfo` 增加一次 300ms 后的重试（`ssh exec` 在高负载下偶发超时）。
+- 前端 1 秒轮询带 `busyRef` 互斥，慢主机不会堆积请求。
+
+### 45.4 顺手清掉一个 bug
+上一版为了让文件面板跟随终端目录，往 shell 里注入了 `PROMPT_COMMAND`，但转义没处理好，命令**原样漏进了终端**（截图里那行 `export PROMPT_COMMAND='printf "\033]7;...`）。已删除该注入：现在只依赖 5 秒一次的 `SSHCwd` 轮询 + 若 shell 自己发 OSC 7 也能解析。

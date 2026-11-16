@@ -1627,19 +1627,7 @@ function TerminalPane({ sessionId, onCwd }: { sessionId: string; onCwd?: (dir: s
         termRef.current?.reset()
         termRef.current?.focus()
         dataSubRef.current?.dispose()
-            // Ask bash/zsh to report the working directory (OSC 7) so the file pane
-        // can follow the terminal.
-        window.setTimeout(() => {
-          const current = idRef.current
-          if (!current) return
-          void api
-            .WriteTerminal(
-              current,
-              `export PROMPT_COMMAND='printf "\\033]7;file://%s%s\\033\\\\\\\\" "$HOSTNAME" "$PWD";'\r`,
-            )
-            .catch(() => {})
-        }, 600)
-        termRef.current?.parser.registerOscHandler(7, (payload) => {
+            termRef.current?.parser.registerOscHandler(7, (payload) => {
           const idx = payload.indexOf('/')
           if (idx > 0) onCwd?.(decodeURIComponent(payload.slice(idx)))
           return true
@@ -1859,7 +1847,7 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
   if (!info) {
     return (
       <div className="card row" style={{ gap: 10, padding: '8px 12px' }}>
-        <span className="small faint">{failed ? '无法读取远端系统信息' : '读取远端系统信息…'}</span>
+        <span className="small faint">{failed ? '无法读取远端系统信息（将自动重试）' : '读取远端系统信息…'}</span>
       </div>
     )
   }
@@ -1885,6 +1873,7 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
         <div className="col" style={{ gap: 2, minWidth: 200 }}>
           <span className="small">
             <span className="faint">主机</span> <b>{info.hostname || '—'}</b>
+            {failed ? <span className="small faint"> · 更新中断，显示上一次数据</span> : null}
           </span>
           <span className="small faint truncate" title={info.cpuModel}>
             {info.cpuModel || 'CPU 未知'}
@@ -1935,3 +1924,7 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
+
+
+
