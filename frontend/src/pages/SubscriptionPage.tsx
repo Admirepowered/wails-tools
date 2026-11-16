@@ -51,12 +51,16 @@ export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const [importText, setImportText] = useState('')
 
   const [useProxy, setUseProxy] = useState(false)
+  const [subUA, setSubUA] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; items: { label: string; danger?: boolean; action: () => void }[] } | null>(null)
   const [tests, setTests] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string } | null>>({})
   useEffect(() => {
     void api
       .GetSettings()
-      .then((s) => setUseProxy(!!s.subscriptions?.useProxy))
+      .then((s) => {
+        setUseProxy(!!s.subscriptions?.useProxy)
+        setSubUA(s.subscriptions?.userAgent ?? '')
+      })
       .catch(() => {})
   }, [])
 
@@ -874,6 +878,7 @@ function NodeEditor({
     </Modal>
   )
 }
+
 
 
 

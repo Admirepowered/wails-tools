@@ -738,3 +738,22 @@ go channel.Serve(...)                      // 但自己的 Serve 还没起
 - `buildChain` 的 device relay 现在每次拨号都打日志：`p2p relay: <target> via <device> ok|failed: <err>`，便于定位是"没打通"还是"对端连不上"。
 - 语义明确：流量先经打洞设备，再由它连当前节点（如有），最多 2 跳；UI 文案已更新。
 - 未打洞时直接报错「该设备尚未打通直连」，不会静默直连。
+
+---
+
+## 二十八、2026-11-16 订阅 UA 可选（v1.3.72）
+
+- 订阅拉取以前写死 `WailsTools/1.0 (subscription)`，部分机场按 UA 返回不同格式甚至拒绝。
+- 新增 `SubscriptionSettings.UserAgent`，取值可以是预设名或**literal UA 字符串**；`settings.ResolveSubscriptionUserAgent` 负责映射：
+  | 值 | UA |
+  |---|---|
+  | 空 / `browser`（默认） | Chrome 120 / Windows |
+  | `quantumultx` | `Quantumult%20X/1.4.1 (iPhone15,2; iOS 17.1.2; Scale/3.00)` |
+  | `clash` | `Clash/v1.18.0` |
+  | `v2rayn` | `v2rayN/6.23` |
+  | `surge` | `Surge/5.7.0 (...)` |
+  | `shadowrocket` | `Shadowrocket/2.2.31 (...)` |
+- `subscription.Source` 增加同名 `userAgent` 字段做**单源覆盖**：`userAgentFor(src)` 优先单源、其次全局、最后默认浏览器 UA。
+- UI：「订阅」页开关旁新增下拉（浏览器（默认）/ Quantumult X / Clash / v2rayN / Surge / Shadowrocket），切换即写设置并提示。
+- 单测：`internal/settings/ua_test.go`（默认浏览器、quantumultx、literal 透传、clash）。
+- 注：Quantumult X 的响应通常是 base64 链接列表，解析器已支持（`TestParseBase64Subscription`）。
