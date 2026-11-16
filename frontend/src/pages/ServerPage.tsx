@@ -1429,7 +1429,7 @@ export default function ServerPage(props: PageProps) {
               </p>
               <p className="card-desc" style={{ margin: '4px 0 0' }}>
                 右键任意设备可「连接到此设备」：打洞成功后该设备即可作为 SSH 跳板与代理出口（必须双方都在线且 NAT 允许直连）。
-                打洞失败时可用「中转」：数据经同步服务器转发，不依赖 NAT，但延迟明显更高。
+                直连优先走「先假设对方有公网 → 再互相打洞」；仍不通时，可在右键菜单选「经服务器中转」，延迟更高。
               </p>
             </div>
             <button
@@ -1534,22 +1534,7 @@ export default function ServerPage(props: PageProps) {
                         >
                           {p2pBusy === d.id ? '…' : online ? '断开' : '连接'}
                         </button>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          title="经同步服务器中转：不依赖 NAT，但延迟明显更高"
-                          disabled={p2pBusy === d.id}
-                          onClick={async () => {
-                            try {
-                              await api.P2PRelayConnect(d.id)
-                              toast.push('已通过服务器中转连接，延迟明显高于直连')
-                              setP2p(await api.P2PStatus())
-                            } catch (err) {
-                              toast.error(err)
-                            }
-                          }}
-                        >
-                          中转
-                        </button>
+
                       </>
                     ) : null}
                     <button className="btn btn-ghost btn-sm" title="移除该设备" onClick={() => void removeMyDevice(d.id)}>
@@ -1839,6 +1824,8 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
+
 
 
 

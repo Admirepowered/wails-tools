@@ -185,9 +185,12 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	// The punch itself tries "assume the peer is public" (8s) and then mutual
+	// punching (rest of the budget). Relay is never automatic — it is a separate,
+	// explicitly chosen path.
 	channel, err := p2p.Punch(ctx, p2p.Options{
 		Rendezvous: rendezvous, Session: session, Secret: secret,
-		Role: "a", Timeout: 45 * time.Second, LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
+		Role: "a", Timeout: 40 * time.Second, LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
 		Logf: a.p2pLogf,
 	})
 	if err != nil {

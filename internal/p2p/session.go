@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"io"
 	"net"
 	"time"
 
@@ -49,9 +50,9 @@ func (s *QuicSession) CloseWithError(code uint64, msg string) error {
 	return s.conn.CloseWithError(quic.ApplicationErrorCode(code), msg)
 }
 
-func (s *QuicSession) Done() <-chan struct{}       { return s.conn.Context().Done() }
-func (s *QuicSession) LocalAddr() net.Addr         { return s.conn.LocalAddr() }
-func (s *QuicSession) RemoteAddr() net.Addr        { return s.conn.RemoteAddr() }
+func (s *QuicSession) Done() <-chan struct{} { return s.conn.Context().Done() }
+func (s *QuicSession) LocalAddr() net.Addr   { return s.conn.LocalAddr() }
+func (s *QuicSession) RemoteAddr() net.Addr  { return s.conn.RemoteAddr() }
 
 // YamuxSession adapts a yamux session carried over a relayed stream.
 type YamuxSession struct{ sess *yamux.Session }
@@ -86,9 +87,9 @@ func (s *YamuxSession) AcceptStream(ctx context.Context) (net.Conn, error) {
 }
 
 func (s *YamuxSession) CloseWithError(code uint64, msg string) error { return s.sess.Close() }
-func (s *YamuxSession) Done() <-chan struct{}                       { return s.sess.CloseChan() }
-func (s *YamuxSession) LocalAddr() net.Addr                         { return s.sess.LocalAddr() }
-func (s *YamuxSession) RemoteAddr() net.Addr                        { return s.sess.RemoteAddr() }
+func (s *YamuxSession) Done() <-chan struct{}                        { return s.sess.CloseChan() }
+func (s *YamuxSession) LocalAddr() net.Addr                          { return s.sess.LocalAddr() }
+func (s *YamuxSession) RemoteAddr() net.Addr                         { return s.sess.RemoteAddr() }
 
 // NewYamuxClient builds the dialing side of a relayed session.
 func NewYamuxClient(conn net.Conn) (*yamux.Session, error) {
@@ -109,6 +110,7 @@ func yamuxConfig() *yamux.Config {
 	cfg.EnableKeepAlive = true
 	cfg.KeepAliveInterval = 10 * time.Second
 	cfg.ConnectionWriteTimeout = 30 * time.Second
-	cfg.LogOutput = nil
+	// yamux refuses to start unless exactly one of Logger/LogOutput is set.
+	cfg.LogOutput = io.Discard
 	return cfg
 }

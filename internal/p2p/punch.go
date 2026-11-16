@@ -21,7 +21,6 @@ import (
 	"io"
 	"math/big"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -118,7 +117,7 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	_ = info.Start
 	// Our own reachability is decided locally: the server's observed address for
 	// this very socket either matches our local socket (no NAT) or not.
-	youPublic := info.YouPublic && sameEndpoint(info.You, conn.LocalAddr().String())
+	youPublic := EndpointIsLocal(info.You, conn.LocalAddr().String())
 	o.Logf("p2p: punch socket %s -> peer %s (peerPublic=%v youPublic=%v observed=%s)",
 		conn.LocalAddr(), info.Peer, info.PeerPublic, youPublic, info.You)
 	peerAddr, err := net.ResolveUDPAddr("udp4", info.Peer)
@@ -128,27 +127,34 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 
 	// Fast path: one side has a public address (no NAT), so the other side can
 	// simply dial it — no probing, no port prediction, no race.
-	fastRole := ""
-	switch {
-	case info.PeerPublic && !youPublic:
-		fastRole = "a" // we dial the public peer
-	case youPublic && !info.PeerPublic:
-		fastRole = "b" // we are the public host and listen
-	case youPublic && info.PeerPublic:
-		fastRole = role // both public: keep the negotiation roles
-	}
-	if fastRole != "" {
-		o.Logf("p2p: public path detected, role=%s (peerPublic=%v youPublic=%v)", fastRole, info.PeerPublic, youPublic)
-		quicConn, ferr := handshake(ctx, conn, peerAddr, fastRole, o.Secret)
-		if ferr == nil {
+	// 1) Assume the peer is directly reachable (a device with a public address is
+	//    the common case). A short attempt only, so a wrong guess costs little.
+	if !youPublic {
+		dialCtx, dialCancel := context.WithTimeout(ctx, 8*time.Second)
+		quicConn, derr := handshake(dialCtx, conn, peerAddr, "a", o.Secret)
+		dialCancel()
+		if derr == nil {
+			o.Logf("p2p: direct dial to %s succeeded", peerAddr)
 			success = true
 			return NewChannel(quicConn, o.Secret, info.Peer), nil
 		}
-		// The fast path is an optimisation only: fall back to real punching so a
-		// wrong verdict never makes the connection fail outright.
-		o.Logf("p2p: public path failed (%v), falling back to punching", ferr)
+		o.Logf("p2p: direct dial to %s failed (%v), switching to mutual punching", peerAddr, derr)
+		_ = conn.SetReadDeadline(time.Time{})
+		// Drain whatever the failed handshake left behind.
+		drainUDP(conn)
+	} else {
+		// We are the reachable side: listen for the peer instead of dialing.
+		listenCtx, listenCancel := context.WithTimeout(ctx, o.Timeout)
+		quicConn, lerr := handshake(listenCtx, conn, peerAddr, "b", o.Secret)
+		listenCancel()
+		if lerr == nil {
+			success = true
+			return NewChannel(quicConn, o.Secret, info.Peer), nil
+		}
+		o.Logf("p2p: listening on a public address did not work (%v), switching to mutual punching", lerr)
+		_ = conn.SetReadDeadline(time.Time{})
+		drainUDP(conn)
 	}
-
 	raddr, err := net.ResolveUDPAddr("udp4", o.Rendezvous)
 	if err != nil {
 		return nil, fmt.Errorf("rendezvous 地址无效: %w", err)
@@ -403,12 +409,14 @@ func selfSignedCert() (tls.Certificate, error) {
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
 }
 
-// sameEndpoint reports whether two host:port strings describe the same endpoint.
-func sameEndpoint(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	if a == "" || b == "" {
-		return false
+// drainUDP discards pending datagrams so a failed handshake does not confuse the
+// punching phase that follows.
+func drainUDP(conn *net.UDPConn) {
+	buf := make([]byte, 2048)
+	_ = conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	for {
+		if _, _, err := conn.ReadFromUDP(buf); err != nil {
+			return
+		}
 	}
-	return a == b || strings.TrimSuffix(a, ":0") == strings.TrimSuffix(b, ":0")
 }

@@ -67,7 +67,8 @@ func DetectNAT(ctx context.Context, rendezvous string, timeout time.Duration, lo
 	sort.Ints(ports)
 	info := NATInfo{Ports: ports, Local: locals[0], Public: observed[0].String()}
 	switch {
-	case observed[0].String() == locals[0] && observed[1].String() == locals[1]:
+	case isOwnEndpoint(observed[0]) && observed[0].Port == localPort(locals[0]) &&
+		isOwnEndpoint(observed[1]) && observed[1].Port == localPort(locals[1]):
 		info.Kind = NATPublic
 		info.Message = "本机直接可达（无 NAT），对端可以直接连进来，也能当主机"
 	case observed[0].Port == observed[1].Port:
@@ -133,4 +134,51 @@ func localPort(addr string) int {
 		return 0
 	}
 	return p
+}
+
+// localInterfaceIPs returns the machine's own interface addresses. A socket
+// bound to 0.0.0.0 reports "0.0.0.0:port" as its local address, so the only way
+// to tell "no NAT" from "port-preserving NAT" is to check whether the observed
+// public address is actually one of ours.
+func localInterfaceIPs() map[string]bool {
+	out := map[string]bool{}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return out
+	}
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP != nil {
+			out[ipnet.IP.String()] = true
+			if v4 := ipnet.IP.To4(); v4 != nil {
+				out[v4.String()] = true
+			}
+		}
+	}
+	return out
+}
+
+// isOwnEndpoint reports whether the observed address belongs to this machine.
+func isOwnEndpoint(observed *net.UDPAddr) bool {
+	if observed == nil || observed.IP == nil {
+		return false
+	}
+	ips := localInterfaceIPs()
+	return ips[observed.IP.String()]
+}
+
+// EndpointIsLocal reports whether the address the server observed for our socket
+// is really ours (i.e. there is no NAT in between).
+func EndpointIsLocal(observed, localAddr string) bool {
+	obs, err := net.ResolveUDPAddr("udp4", observed)
+	if err != nil {
+		return false
+	}
+	_, localPortStr, err := net.SplitHostPort(localAddr)
+	if err != nil {
+		return false
+	}
+	if fmt.Sprint(obs.Port) != localPortStr {
+		return false
+	}
+	return isOwnEndpoint(obs)
 }
