@@ -44,6 +44,10 @@ type Options struct {
 	Role string
 	// Timeout bounds the whole attempt; defaults to 45s.
 	Timeout time.Duration
+	// DirectTimeout bounds the "assume the peer is public" dial; defaults to 5s.
+	DirectTimeout time.Duration
+	// Quick stops after the direct dial attempt (no mutual punching).
+	Quick bool
 	// LocalPort pins the punch socket (0 = random). A stable port keeps the NAT
 	// mapping predictable and makes simultaneous punching much more reliable.
 	LocalPort int
@@ -94,6 +98,9 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	if o.Timeout <= 0 {
 		o.Timeout = 45 * time.Second
 	}
+	if o.DirectTimeout <= 0 {
+		o.DirectTimeout = 5 * time.Second
+	}
 	role := "a"
 	if o.Role == "b" || o.Role == "B" {
 		role = "b"
@@ -130,13 +137,17 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	// 1) Assume the peer is directly reachable (a device with a public address is
 	//    the common case). A short attempt only, so a wrong guess costs little.
 	if !youPublic {
-		dialCtx, dialCancel := context.WithTimeout(ctx, 8*time.Second)
+		dialCtx, dialCancel := context.WithTimeout(ctx, o.DirectTimeout)
 		quicConn, derr := handshake(dialCtx, conn, peerAddr, "a", o.Secret)
 		dialCancel()
 		if derr == nil {
 			o.Logf("p2p: direct dial to %s succeeded", peerAddr)
 			success = true
 			return NewChannel(quicConn, o.Secret, info.Peer), nil
+		}
+		if o.Quick {
+			o.Logf("p2p: quick attempt to %s failed (%v)", peerAddr, derr)
+			return nil, fmt.Errorf("快速尝试失败：对方可能不可直连（%v）", derr)
 		}
 		o.Logf("p2p: direct dial to %s failed (%v), switching to mutual punching", peerAddr, derr)
 		_ = conn.SetReadDeadline(time.Time{})

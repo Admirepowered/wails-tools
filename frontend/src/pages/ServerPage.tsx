@@ -1429,7 +1429,7 @@ export default function ServerPage(props: PageProps) {
               </p>
               <p className="card-desc" style={{ margin: '4px 0 0' }}>
                 右键任意设备可「连接到此设备」：打洞成功后该设备即可作为 SSH 跳板与代理出口（必须双方都在线且 NAT 允许直连）。
-                直连优先走「先假设对方有公网 → 再互相打洞」；仍不通时，可在右键菜单选「经服务器中转」，延迟更高。
+                右键任意设备：先「连接到此设备」（先假设对方有公网直拨 5 秒，失败再互相打洞，最多 15 秒）；只想快速判断可选「快速尝试（5 秒）」；都不通再选「经服务器中转」，延迟更高。
               </p>
             </div>
             <button
@@ -1497,6 +1497,17 @@ export default function ServerPage(props: PageProps) {
                           online
                             ? { label: '断开直连', action: () => void disconnectDevice(d.id) }
                             : { label: '连接到此设备（打洞）', action: () => void connectDevice(d.id) },
+                          {
+                            label: '快速尝试（5 秒）',
+                            action: () =>
+                              void api
+                                .P2PQuickConnect(d.id)
+                                .then(() => {
+                                  toast.push('已直连（快速尝试成功）')
+                                  return api.P2PStatus().then(setP2p)
+                                })
+                                .catch((err) => toast.error(err)),
+                          },
                           { label: '复制设备 ID', action: () => void copyDeviceId(d.id) },
                           ...(d.number ? [{ label: `复制设备号 ${d.number}`, action: () => void navigator.clipboard.writeText(d.number ?? '') }] : []),
                           {
@@ -1524,19 +1535,6 @@ export default function ServerPage(props: PageProps) {
                     {online ? <Tag kind="ok">直连中</Tag> : null}
                     <span className="file-size">{d.lastSeen ? relativeTime(d.lastSeen) : '—'}</span>
                     {p2pError && !online ? <Tag kind="warn">打洞失败</Tag> : null}
-                    {!isSelf ? (
-                      <>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          title={online ? '断开直连' : '连接到此设备'}
-                          disabled={p2pBusy === d.id}
-                          onClick={() => (online ? void disconnectDevice(d.id) : void connectDevice(d.id))}
-                        >
-                          {p2pBusy === d.id ? '…' : online ? '断开' : '连接'}
-                        </button>
-
-                      </>
-                    ) : null}
                     <button className="btn btn-ghost btn-sm" title="移除该设备" onClick={() => void removeMyDevice(d.id)}>
                       ✕
                     </button>
@@ -1824,6 +1822,8 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
+
 
 
 

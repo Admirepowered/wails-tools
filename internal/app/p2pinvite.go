@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"wailstools/internal/p2p"
@@ -160,6 +161,17 @@ func (a *App) p2pConnectTarget(targetDevice, number, label string) (map[string]a
 	return nil, errors.New("等待对方接受超时")
 }
 
+// quickMode is set while a "quick attempt" is running so the punch stops after
+// the direct dial instead of falling back to mutual punching.
+var quickMode atomic.Bool
+
+// P2PQuickConnect tries only the direct dial (5 seconds), then gives up.
+func (a *App) P2PQuickConnect(deviceID string) (map[string]any, error) {
+	quickMode.Store(true)
+	defer quickMode.Store(false)
+	return a.P2PConnect(deviceID)
+}
+
 // p2pConnectDevice performs the initiator side of the punch once accepted.
 func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[string]any, error) {
 	session, _ := accepted["session"].(string)
@@ -190,8 +202,10 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 	// explicitly chosen path.
 	channel, err := p2p.Punch(ctx, p2p.Options{
 		Rendezvous: rendezvous, Session: session, Secret: secret,
-		Role: "a", Timeout: 40 * time.Second, LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
-		Logf: a.p2pLogf,
+		Role: "a", Timeout: 15 * time.Second, DirectTimeout: 5 * time.Second,
+		Quick:     quickMode.Load(),
+		LocalPort: a.settings.Get().ProxyRuntime.P2PPort,
+		Logf:      a.p2pLogf,
 	})
 	if err != nil {
 		a.p2p.fail(deviceID, err)
