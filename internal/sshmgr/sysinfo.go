@@ -67,13 +67,12 @@ type GPUInfo struct {
 // GatherSystemInfo collects CPU/memory/GPU facts from the remote host.
 func (m *Manager) GatherSystemInfo(sessionID string) (SystemInfo, error) {
 	out, err := m.Exec(sessionID, `sh -c '
-echo "HOST::$(hostname 2>/dev/null)"
-echo "CPU::$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2-)"
+echo "HOST::$( { hostname 2>/dev/null || uname -n 2>/dev/null || cat /etc/hostname 2>/dev/null; } | head -n1)"
+echo "CPU::$( { grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2-; } || { lscpu 2>/dev/null | sed -n "s/^Model name: *//p" | head -n1; } )"
 echo "CORES::$(grep -c ^processor /proc/cpuinfo 2>/dev/null)"
 echo "LOAD::$(cut -d" " -f1-3 /proc/loadavg 2>/dev/null)"
 echo "MEM::$(grep -E "^(MemTotal|MemAvailable):" /proc/meminfo 2>/dev/null | tr "\n" " ")"
 echo "UP::$(cut -d. -f1 /proc/uptime 2>/dev/null)"
-echo "DISK::$(df -P -k / 2>/dev/null | awk "NR==2{print \$2\" \"\$3\" \"\$5}")"
 echo "STAT1::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
 sleep 0.4
 echo "STAT2::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
@@ -82,7 +81,38 @@ echo "GPU::$(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=nam
 	if err != nil {
 		return SystemInfo{}, err
 	}
-	return parseSystemInfo(out), nil
+	info := parseSystemInfo(out)
+	if info.DiskTotalMB == 0 {
+		if v, err := m.Exec(sessionID, `df -P -k / 2>/dev/null | tail -n1`); err == nil {
+			if total, used, pct, ok := parseDF(firstLine(v)); ok {
+				info.DiskTotalMB, info.DiskUsedMB, info.DiskPct = total, used, pct
+			}
+		}
+	}
+	if info.Hostname == "" || info.CPUModel == "" {
+		// Busybox / minimal images: ask for each value on its own.
+		if info.Hostname == "" {
+			if v, err := m.Exec(sessionID, `uname -n 2>/dev/null || cat /etc/hostname 2>/dev/null || echo`); err == nil {
+				info.Hostname = firstLine(v)
+			}
+		}
+		if info.CPUModel == "" {
+			if v, err := m.Exec(sessionID, `lscpu 2>/dev/null | sed -n "s/^Model name:[[:space:]]*//p" | head -n1`); err == nil {
+				info.CPUModel = strings.Join(strings.Fields(firstLine(v)), " ")
+			}
+		}
+	}
+	return info, nil
+}
+
+// firstLine returns the first non-empty line, trimmed.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if v := strings.TrimSpace(line); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func parseSystemInfo(raw string) SystemInfo {
@@ -235,4 +265,24 @@ func formatUptime(secs int64) string {
 	default:
 		return fmt.Sprintf("%d分", m)
 	}
+}
+
+// parseDF parses one `df -P -k` line: "dev 1K-blocks used avail capacity mount".
+func parseDF(line string) (totalMB, usedMB int64, pct float64, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 5 {
+		return 0, 0, 0, false
+	}
+	var totalKB, usedKB int64
+	if _, err := fmt.Sscanf(fields[1], "%d", &totalKB); err != nil {
+		return 0, 0, 0, false
+	}
+	if _, err := fmt.Sscanf(fields[2], "%d", &usedKB); err != nil {
+		return 0, 0, 0, false
+	}
+	if totalKB <= 0 {
+		return 0, 0, 0, false
+	}
+	pct = float64(usedKB) / float64(totalKB) * 100
+	return totalKB / 1024, usedKB / 1024, pct, true
 }

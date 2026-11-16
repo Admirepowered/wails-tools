@@ -1550,6 +1550,7 @@ function TerminalPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
   const toast = useToast()
   const [termId, setTermId] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
+  const [termMenu, setTermMenu] = useState<{ x: number; y: number } | null>(null)
   const [openKey, setOpenKey] = useState(0)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -1950,6 +1951,7 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
 
 
 

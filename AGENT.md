@@ -927,3 +927,34 @@ window.addEventListener('dragover', (e) => e.preventDefault())
 window.addEventListener('drop', (e) => e.preventDefault())
 ```
 SSH 的投放区再自己 `preventDefault + stopPropagation`，并只在能拿到 `file.path` 时上传；拿不到就提示改用「上传」按钮（WebView2 有时不暴露路径）。
+
+---
+
+## 四十八、2026-11-16 终端右键菜单 / 磁盘与主机信息兜底（v1.3.82）
+
+### 48.1 右键改成显式菜单
+上一版"有选中就复制、否则粘贴"的猜测在 WebView 里失败（`getSelection()` 偶尔返回残留内容，导致右键永远在复制）。改成在光标处弹出小菜单：
+
+- **复制（选中）** —— `term.getSelection()` 有内容时复制，没有则提示"先选中要复制的文字"；
+- **粘贴** —— 读剪贴板后 `WriteTerminal`。
+
+菜单用现成的 `.ctx-menu / .ctx-item` 样式，`position: fixed`，鼠标离开即关闭。
+
+### 48.2 磁盘占用没显示
+原来把 `df` 塞进那条大 `sh -c` 里，用 `awk` 拼字段，任何一步出错整段没有输出。改为**独立的一次 Exec**：
+
+```
+df -P -k / | tail -n1
+```
+前端解析第二、三、五列（1K-blocks / used / capacity）。在 s2 上实测：
+```
+/dev/vda2  51485392 29450136 19817144 60% /
+```
+
+### 48.3 主机名 / CPU 型号为空
+部分精简镜像里 `hostname`、`grep model name` 不可用或没权限。现在主脚本失败后**各字段单独兜底**：
+
+- 主机名：`uname -n || cat /etc/hostname`
+- CPU：`lscpu | sed -n 's/^Model name:[[:space:]]*//p'`
+
+再加上会话级缓存（47.1），成功取到一次后就不会再显示"主机 —、CPU 未知"。
