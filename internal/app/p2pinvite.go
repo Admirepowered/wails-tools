@@ -84,6 +84,25 @@ func (a *App) p2pConnectTarget(targetDevice, number, label string) (map[string]a
 	if err != nil {
 		return nil, err
 	}
+	// One attempt at a time; ignore double clicks while waiting for an answer.
+	if label != "" {
+		a.p2p.mu.Lock()
+		if _, ok := a.p2p.channels[label]; ok {
+			a.p2p.mu.Unlock()
+			return map[string]any{"device": label, "already": true}, nil
+		}
+		if a.p2p.busy[label] {
+			a.p2p.mu.Unlock()
+			return nil, errors.New("该设备正在打洞中，请稍候")
+		}
+		a.p2p.busy[label] = true
+		a.p2p.mu.Unlock()
+		defer func() {
+			a.p2p.mu.Lock()
+			delete(a.p2p.busy, label)
+			a.p2p.mu.Unlock()
+		}()
+	}
 	me := a.localDeviceID()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -127,7 +146,7 @@ func (a *App) p2pConnectTarget(targetDevice, number, label string) (map[string]a
 				}
 			}
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 	a.p2pLogf("p2p: invite %s timed out after 95s", id)
 	_ = link.P2PCancel(context.Background(), me, id)
@@ -201,6 +220,7 @@ func (a *App) P2PAcceptInvite(requestID string) (map[string]any, error) {
 	if a.p2p.serving() && a.p2p.initiating() {
 		return nil, errors.New("当前设备已作为穿透端，不能同时被穿透")
 	}
+	a.p2pLogf("p2p: accepted invite %s from %s, punching back", requestID, fromDevice)
 	a.answerPunch(session, fromDevice, secret)
 	return map[string]any{"device": fromDevice, "accepted": true}, nil
 }

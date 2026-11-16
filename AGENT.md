@@ -580,3 +580,29 @@ n2n 的"打洞"本质是：两端都用**同一个 UDP socket** 持续向 supern
 - 新增 Go 绑定 **`P2PLocalNumber()`**：直接向同步服务器要 `admin.devices.self`，用本机 `settings.DeviceID()` 匹配，匹配不到再按主机名兜底；返回 `{deviceId, number, name, error}`。
 - 设备页「设备号穿透」卡片顶部显示 `本机设备号 #9位 + 复制`；拿不到时显示「本机设备号尚未同步（需要登录同步服务器后刷新）」，不再静默不显示。
 - 打洞信令增强：rendezvous 回复带 `start`（双方就绪后 700ms 的同步开始时刻），两端等到该时刻同时发包；探测间隔 200ms→**100ms**，端口预测窗口 ±10→**±20**，1 秒后开始预测，探测期间每 2 秒重新 announce 保持 NAT 映射新鲜。
+
+---
+
+## 二十二、2026-11-16 设备号显示 + 持续探测 + 自动接受（v1.3.66）
+
+### 22.1 为什么界面一直显示"尚未同步"
+- 旧代码只按 `p2p.localDevice` 在 `myDevices` 里找设备行；本机登录上报的 id 与设备表里的历史 id 不一致时匹配失败，且**没有任何日志**，界面上就是一句提示。
+- 现在 `P2PLocalNumber()`：
+  1. 取 `admin.devices.self`；
+  2. 打印一行 `p2p: local device id …, host …, account devices [id#number …]`（排查用）；
+  3. 依次按 **设备 id → 主机名 → 单设备兜底** 匹配取号；
+  4. 拿不到才返回 `error`，前端显示提示而不是空白。
+
+### 22.2 设备号一定存在
+- 服务端 `registerDevice` 的两条路径（新增 / 已存在 Touch）**都会**调用 `EnsureDeviceNumbers(userID)`，登录一次即补齐全账号的 9 位号（含历史行）。
+- 集成测试新增断言：两台设备登录后 `admin.devices.self` 返回的每一行都必须是 9 位号。
+
+### 22.3 打洞：不再等同步时刻，一直发
+- 去掉"等到服务器给的 start 时刻再发包"的门控（`_ = startAt`），两端**从拿到对方地址起持续探测直到超时**，符合"被穿透端开 UDP 端口、穿透端一直发"的思路。
+- 探测日志：`p2p: punch socket <本地> -> peer <对端>`，之后每 50 次打印 `p2p: probe #N to <addr> from <local>`，收到回包打印 `p2p: probe answered by … after N probes`。这样日志里能看到 UDP 端口与探测过程。
+- 间隔 100ms、1 秒后开始 ±20 端口预测、每 2 秒重新 announce 保持映射。
+
+### 22.4 默认自动接受
+- 新增 `ProxyRuntimeSettings.P2PAutoAccept`（默认 `true`）；`Default()` 里置真，旧配置文件缺该键时 `json.Unmarshal` 到 Default 结构上仍是 `true`。
+- watcher 收到邀请即 `emit` 并**自动接受**，同时打印 `p2p: auto-accepting invite …`；界面「自动接受穿透」开关可关闭，关闭后必须手动点接受。
+- 发起侧加并发保护：同一目标正在打洞时不会重复发起（避免日志里一串 invite）；轮询间隔 2s → 1s。

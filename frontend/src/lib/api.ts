@@ -735,6 +735,8 @@ export interface ProxyRuntimeSettings {
   username?: string
   password?: string
   systemProxy?: boolean
+  p2pPort?: number
+  p2pAutoAccept?: boolean
 }
 
 export interface NodeTestResult {

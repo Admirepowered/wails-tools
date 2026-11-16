@@ -268,7 +268,11 @@ func (c *callCtx) registerDevice(userID, deviceID, deviceName, machineID string)
 
 	for _, d := range c.api.DB.ListDevices(userID) {
 		if d.ID == deviceID {
-			return c.api.DB.TouchDevice(userID, deviceID, deviceName, machineID)
+			err := c.api.DB.TouchDevice(userID, deviceID, deviceName, machineID)
+			// Every login refreshes the 9-digit numbers of the whole account so
+			// legacy rows (and the row used by this login) always have one.
+			_, _ = c.api.DB.EnsureDeviceNumbers(userID)
+			return err
 		}
 	}
 

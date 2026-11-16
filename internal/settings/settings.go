@@ -116,6 +116,8 @@ type ProxyRuntimeSettings struct {
 	SystemProxy bool `json:"systemProxy"`
 	// P2PPort pins the hole-punch UDP socket (0 = random).
 	P2PPort int `json:"p2pPort"`
+	// P2PAutoAccept answers incoming punch invitations automatically.
+	P2PAutoAccept bool `json:"p2pAutoAccept"`
 }
 
 // DownloadSettings tunes the HTTP download engine.
@@ -284,7 +286,7 @@ func Default() Settings {
 		Startup:      StartupSettings{TrayEnabled: true, CloseToTray: true},
 		SecretSync:   SecretSyncSettings{Enabled: true},
 		SNIProxy:     SNIProxySettings{Addr: "127.0.0.1:17891", Mitm: true, UseExistingProxy: true},
-		ProxyRuntime: ProxyRuntimeSettings{Port: 7890},
+		ProxyRuntime: ProxyRuntimeSettings{Port: 7890, P2PAutoAccept: true},
 	}
 }
 

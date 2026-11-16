@@ -339,6 +339,25 @@ func TestP2PInviteAcceptAndMap(t *testing.T) {
 		}
 		return ""
 	}
+	// Every device of the account must have a number as soon as either device
+	// logs in (legacy rows used to stay empty).
+	var all struct {
+		Devices []struct {
+			ID     string `json:"id"`
+			Number string `json:"number"`
+		} `json:"devices"`
+	}
+	if err := a.Call(ctx, "admin.devices.self", nil, &all); err != nil {
+		t.Fatalf("devices.self A: %v", err)
+	}
+	if len(all.Devices) != 2 {
+		t.Fatalf("expected 2 devices, got %+v", all.Devices)
+	}
+	for _, d := range all.Devices {
+		if len(d.Number) != 9 {
+			t.Fatalf("device %s has no 9-digit number: %q", d.ID, d.Number)
+		}
+	}
 	numB := numberOf(b, "dev-b")
 	if len(numB) != 9 {
 		t.Fatalf("device B number = %q", numB)

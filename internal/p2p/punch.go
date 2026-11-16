@@ -100,17 +100,8 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Wait for the server-agreed moment so both peers blast at the same time.
-	if startAt > 0 {
-		if wait := time.Until(time.UnixMilli(startAt)); wait > 0 && wait < 5*time.Second {
-			select {
-			case <-time.After(wait):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-	}
-	o.Logf("p2p: peer endpoint %s", peerStr)
+	_ = startAt // both sides probe continuously; no synchronized gate is needed
+	o.Logf("p2p: punch socket %s -> peer %s", conn.LocalAddr(), peerStr)
 	peerAddr, err := net.ResolveUDPAddr("udp4", peerStr)
 	if err != nil {
 		return nil, fmt.Errorf("解析对端地址失败: %w", err)
@@ -121,7 +112,7 @@ func Punch(ctx context.Context, o Options) (*Channel, error) {
 		return nil, fmt.Errorf("rendezvous 地址无效: %w", err)
 	}
 	annPayload, _ := json.Marshal(announce{Session: o.Session, Role: o.Role})
-	verified, err := punchProbe(ctx, conn, peerAddr, o.Secret, deadline, raddr, annPayload)
+	verified, err := punchProbe(ctx, conn, peerAddr, o.Secret, deadline, raddr, annPayload, o.Logf)
 	if err != nil {
 		return nil, err
 	}
@@ -194,12 +185,13 @@ func listenPunchSocket(port int) (*net.UDPConn, error) {
 // punchProbe sends authenticated probes to the peer and to a small window of
 // predicted ports (symmetric NATs allocate consecutive ports). It returns the
 // address that actually answered, which may differ from the announced one.
-func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secret string, deadline time.Time, raddr *net.UDPAddr, announcePayload []byte) (*net.UDPAddr, error) {
+func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secret string, deadline time.Time, raddr *net.UDPAddr, announcePayload []byte, probeLog func(string, ...any)) (*net.UDPAddr, error) {
 	probe := []byte(probeMagic + " " + token(secret, "probe"))
 	buf := make([]byte, 2048)
 	predict := portWindow(peer, 20)
 	start := time.Now()
 	lastAnnounce := time.Now()
+	sent := 0
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -212,6 +204,10 @@ func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secre
 		}
 		if _, err := conn.WriteToUDP(probe, peer); err != nil {
 			return nil, err
+		}
+		sent++
+		if sent%50 == 1 {
+			probeLog("p2p: probe #%d to %s from %s", sent, peer, conn.LocalAddr())
 		}
 		// Only start spraying predicted ports when the announced port stays
 		// silent: most networks do not need it and it keeps traffic low.
@@ -226,6 +222,7 @@ func punchProbe(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, secre
 			continue
 		}
 		if string(buf[:n]) == string(probe) {
+			probeLog("p2p: probe answered by %s after %d probes", from, sent)
 			return from, nil
 		}
 	}

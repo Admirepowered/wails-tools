@@ -266,6 +266,14 @@ func (a *App) startP2PWatcher() {
 				created, _ := item["created"].(string)
 				a.invites.put(p2pInvite{ID: id, Number: number, Name: name, From: from, State: "pending", Created: created})
 				a.emit("p2p:invite", map[string]any{"id": id, "number": number, "name": name})
+				if a.settings.Get().ProxyRuntime.P2PAutoAccept {
+					a.p2pLogf("p2p: auto-accepting invite %s from %s(#%s)", id, from, number)
+					go func(reqID string) {
+						if _, err := a.P2PAcceptInvite(reqID); err != nil {
+							a.p2pLogf("p2p: auto-accept %s failed: %v", reqID, err)
+						}
+					}(id)
+				}
 			}
 		}
 	}()
@@ -421,9 +429,10 @@ func (a *App) P2PLocalNumber() map[string]any {
 	defer cancel()
 	var res struct {
 		Devices []struct {
-			ID     string `json:"id"`
-			Number string `json:"number"`
-			Name   string `json:"name"`
+			ID       string `json:"id"`
+			Number   string `json:"number"`
+			Name     string `json:"name"`
+			LastSeen string `json:"lastSeen"`
 		} `json:"devices"`
 	}
 	if err := a.link.Call(ctx, "admin.devices.self", nil, &res); err != nil {
@@ -431,19 +440,32 @@ func (a *App) P2PLocalNumber() map[string]any {
 		return out
 	}
 	want := a.localDeviceID()
+	host, _ := os.Hostname()
+	ids := make([]string, 0, len(res.Devices))
 	for _, d := range res.Devices {
-		if d.ID == want {
-			out["number"] = d.Number
-			out["name"] = d.Name
-			return out
-		}
+		ids = append(ids, d.ID+"#"+d.Number)
 	}
-	// Fall back to a row whose machine matches this host (legacy ids).
-	for _, d := range res.Devices {
-		if d.Name == out["name"] && d.Number != "" {
-			out["number"] = d.Number
-			return out
+	a.p2pLogf("p2p: local device id %s, host %s, account devices %v", want, host, ids)
+	pick := func(pred func(id, name string) bool) (string, string, bool) {
+		for _, d := range res.Devices {
+			if pred(d.ID, d.Name) && d.Number != "" {
+				return d.Number, d.Name, true
+			}
 		}
+		return "", "", false
+	}
+	if num, name, ok := pick(func(id, _ string) bool { return id == want }); ok {
+		out["number"], out["name"] = num, name
+		return out
+	}
+	// Legacy rows may have registered under another id for this machine.
+	if num, name, ok := pick(func(_, n string) bool { return n == host }); ok {
+		out["number"], out["name"], out["fallback"] = num, name, true
+		return out
+	}
+	if len(res.Devices) == 1 && res.Devices[0].Number != "" {
+		out["number"], out["name"], out["fallback"] = res.Devices[0].Number, res.Devices[0].Name, true
+		return out
 	}
 	out["error"] = "本机设备尚未登记，请重新登录"
 	return out
