@@ -140,26 +140,12 @@ func (m *Manager) GatherSystemInfo(sessionID string) (SystemInfo, error) {
 		}
 		key, value := line[:idx], strings.TrimSpace(line[idx+2:])
 		switch key {
-		case "MEM":
-			info.MemTotalMB, info.MemUsedMB, info.MemPct = parseMeminfo(value)
-		case "LOAD":
-			fields := strings.Fields(value)
-			if len(fields) > 0 {
-				fmt.Sscanf(fields[0], "%f", &info.Load1)
-			}
 		case "STAT1":
 			stat1 = value
 		case "STAT2":
 			stat2 = value
-		case "DISK":
-			if total, used, pct, ok := parseDF(value); ok {
-				info.DiskTotalMB, info.DiskUsedMB, info.DiskPct = total, used, pct
-			}
-		case "GPU":
-			info.GPUs = parseNvidiaSMI(value)
-			if len(info.GPUs) > 0 {
-				info.GPUSource = "nvidia-smi"
-			}
+		default:
+			applyKV(&info, line)
 		}
 	}
 	info.CPUPct = cpuUsage(stat1, stat2)
@@ -297,4 +283,41 @@ func asciiOnly(s string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// applyKV parses one "KEY::value" line shared by both scripts.
+func applyKV(info *SystemInfo, line string) {
+	idx := strings.Index(line, "::")
+	if idx < 0 {
+		return
+	}
+	key, value := line[:idx], strings.TrimSpace(line[idx+2:])
+	switch key {
+	case "HOST":
+		info.Hostname = asciiOnly(value)
+	case "CPU":
+		info.CPUModel = asciiOnly(strings.Join(strings.Fields(value), " "))
+	case "CORES":
+		fmt.Sscanf(value, "%d", &info.CPUCores)
+	case "UP":
+		var secs int64
+		fmt.Sscanf(value, "%d", &secs)
+		info.Uptime = formatUptime(secs)
+	case "DISK":
+		if total, used, pct, ok := parseDF(value); ok {
+			info.DiskTotalMB, info.DiskUsedMB, info.DiskPct = total, used, pct
+		}
+	case "MEM":
+		info.MemTotalMB, info.MemUsedMB, info.MemPct = parseMeminfo(value)
+	case "LOAD":
+		fields := strings.Fields(value)
+		if len(fields) > 0 {
+			fmt.Sscanf(fields[0], "%f", &info.Load1)
+		}
+	case "GPU":
+		info.GPUs = parseNvidiaSMI(value)
+		if len(info.GPUs) > 0 {
+			info.GPUSource = "nvidia-smi"
+		}
+	}
 }

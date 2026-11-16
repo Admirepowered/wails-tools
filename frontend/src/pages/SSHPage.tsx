@@ -1381,6 +1381,30 @@ function SftpPane({ sessionId, cwd, onDir }: { sessionId: string; cwd?: string; 
     }
   }
 
+  // Upload a list of local paths into the current remote directory (drag & drop).
+  const uploadPaths = async (paths: string[]) => {
+    for (const local of paths) {
+      try {
+        const remote = joinPath(dir, basename(local))
+        await api.SFTPUpload(sessionId, local, remote)
+        toast.push(`已上传 ${basename(local)}`)
+      } catch (err) {
+        toast.error(err)
+      }
+    }
+    await openDir(dir)
+  }
+
+  // Wails reports native drops through the runtime event; use it when the
+  // WebView hides file paths.
+  useEffect(() => {
+    const rt = (window as unknown as { runtime?: { OnFileDrop?: (cb: (x: number, y: number, paths: string[]) => void, useDropTarget?: boolean) => void } }).runtime
+    if (!rt?.OnFileDrop) return
+    rt.OnFileDrop((_x, _y, paths) => {
+      if (paths && paths.length > 0) void uploadPaths(paths)
+    })
+  }, [sessionId, dir])
+
   const crumbs = crumbParts(dir)
   const canGoUp = dir !== '' && dir !== '/'
   const transfers = Object.values(xfers)
@@ -1550,7 +1574,7 @@ function TerminalPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
   const toast = useToast()
   const [termId, setTermId] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
-  const [termMenu, setTermMenu] = useState<{ x: number; y: number } | null>(null)
+  const [termMenu, setTermMenu] = useState<{ x: number; y: number; selection: string } | null>(null)
   const [openKey, setOpenKey] = useState(0)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -1955,6 +1979,7 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
 
 
 

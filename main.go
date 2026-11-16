@@ -40,6 +40,9 @@ func main() {
 			Handler: a.MediaHandler(),
 		},
 		BackgroundColour: &options.RGBA{R: 18, G: 20, B: 26, A: 1},
+		// Files dropped onto the window are reported through the runtime event
+		// instead of navigating the WebView.
+		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
 		OnStartup:        a.Startup,
 		OnShutdown:       a.Shutdown,
 		OnBeforeClose:    a.OnBeforeClose,
@@ -54,3 +57,4 @@ func main() {
 		log.Fatalf("run application: %v", err)
 	}
 }
+

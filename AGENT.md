@@ -1040,3 +1040,25 @@ MEM::MemTotal: 2014988 kB MemAvailable: 1210100 kB
 LOAD::0.03
 STAT1::cpu  262143761 ...
 ```
+
+---
+
+## 五十二、2026-11-16 选中复制 / 磁盘 / 拖拽（v1.3.86）
+
+### 52.1 终端选中后怎么复制
+右键菜单在**打开的那一瞬间**记录 `term.getSelection()`（因为点击菜单会让终端失焦、选区被清除，之前复制总是"未选中"）。现在菜单项直接显示已选中多少字，点「复制」复制的是快照内容。
+
+### 52.2 磁盘条为什么没有
+解析没问题 —— 用真实输出写了单测 `TestParseStaticAndDynamic`：
+```
+host="VM-0-6-ubuntu" cpu="Intel(R) Xeon(R) Platinum 8255C CPU @ 2.50GHz" cores=2 up="179天2小时"
+disk=28775/50278 57% mem=786/1967 load=0.03
+```
+问题在于旧版 app 里 `SSHSystemInfo` 的会话缓存把"磁盘为 0"的快照存下来了，之后一直回填 0。这一版静态脚本已带 `DISK`，且解析逻辑抽成 `applyKV` 并有单测覆盖；重启会话后即可看到。
+
+### 52.3 拖拽没有上传
+WebView2 不会给 `DataTransfer` 里的 File 暴露真实路径，所以之前 `file.path` 永远是空。开启 Wails 原生拖放：
+```go
+DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
+```
+前端用 `window.runtime.OnFileDrop(cb)` 拿到**绝对路径数组**，直接逐个 `SFTPUpload`。浏览器层面的 `onDrop` 仍然保留作为兜底。
