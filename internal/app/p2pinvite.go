@@ -86,11 +86,18 @@ func (a *App) p2pConnectTarget(targetDevice, number, label string) (map[string]a
 	}
 	// One attempt at a time; ignore double clicks while waiting for an answer.
 	if label != "" {
-		a.p2p.mu.Lock()
-		if _, ok := a.p2p.channels[label]; ok {
-			a.p2p.mu.Unlock()
-			return map[string]any{"device": label, "already": true}, nil
+		// Refresh a stale channel before deciding we are already connected.
+		if ch, ok := a.p2p.get(label); ok {
+			probeCtx, probeCancel := context.WithTimeout(context.Background(), 6*time.Second)
+			perr := ch.Ping(probeCtx)
+			probeCancel()
+			if perr == nil && ch.Alive() {
+				return map[string]any{"device": label, "already": true}, nil
+			}
+			a.p2pLogf("p2p: existing link to %s is stale (%v), re-punching", label, perr)
+			a.p2p.drop(label)
 		}
+		a.p2p.mu.Lock()
 		if a.p2p.busy[label] {
 			a.p2p.mu.Unlock()
 			return nil, errors.New("该设备正在打洞中，请稍候")

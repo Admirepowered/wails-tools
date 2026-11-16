@@ -323,8 +323,19 @@ func (a *App) startP2PWatcher() {
 
 // answerPunch performs the responder side of a hole punch and starts serving.
 func (a *App) answerPunch(sessionID, fromDevice, secret string) {
-	if _, ok := a.p2p.get(fromDevice); ok {
-		return
+	if ch, ok := a.p2p.get(fromDevice); ok {
+		// A half-dead channel used to block every new punch: the peer never
+		// answered because it believed the old link was still up. Verify it and
+		// drop the stale entry instead of returning early.
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		err := ch.Ping(ctx)
+		cancel()
+		if err == nil && ch.Alive() {
+			a.p2pLogf("p2p: already connected to %s, skipping punch", fromDevice)
+			return
+		}
+		a.p2pLogf("p2p: dropping stale link to %s before answering (%v)", fromDevice, err)
+		a.p2p.drop(fromDevice)
 	}
 	rendezvous, err := a.rendezvousAddr()
 	if err != nil {

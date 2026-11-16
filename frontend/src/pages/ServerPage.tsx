@@ -1433,6 +1433,29 @@ export default function ServerPage(props: PageProps) {
             </div>
             <button
               className="btn btn-sm"
+              title="用两个 UDP 端口探测服务器看到的公网映射，判断 NAT 类型"
+              disabled={natBusy}
+              onClick={async () => {
+                setNatBusy(true)
+                try {
+                  const res = await api.P2PNATDetect()
+                  setNat(res)
+                  const label =
+                    res.kind === 'public' ? '公网直连' :
+                    res.kind === 'cone' ? '锥形 NAT' :
+                    res.kind === 'symmetric' ? '对称型 NAT' : '未知'
+                  toast.push(`NAT 类型：${label}${res.ports?.length ? `（公网端口 ${res.ports.join(' / ')}）` : ''}`)
+                } catch (err) {
+                  toast.error(err)
+                } finally {
+                  setNatBusy(false)
+                }
+              }}
+            >
+              {natBusy ? '检测中…' : 'NAT 类型'}
+            </button>
+            <button
+              className="btn btn-sm"
               title="检查服务器的 UDP 打洞端口是否可达"
               onClick={async () => {
                 try {
@@ -1452,10 +1475,10 @@ export default function ServerPage(props: PageProps) {
               {myDevices.devices.map((d) => {
                 const online = !!p2p?.connected?.includes(d.id)
                 const p2pError = p2p?.errors?.[d.id]
+                const hasIdMatch = (myDevices?.devices ?? []).some((x) => x.id === p2p?.localDevice)
                 const isSelf =
                   d.id === p2p?.localDevice ||
-                  (!!p2p?.localName && d.name === p2p.localName) ||
-                  (!!p2p?.localMachine && !!d.machine && d.machine === p2p.localMachine)
+                  (!hasIdMatch && !!p2p?.localName && d.name === p2p.localName)
                 return (
                   <div
                     key={d.id}
@@ -1786,6 +1809,7 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
 
