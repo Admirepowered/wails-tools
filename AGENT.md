@@ -817,3 +817,24 @@ GET Range 0-65535 → 206, 65536 bytes, UA=netdisk;7.44.7.1;PC;PC-Windows;…
 - `internal/netdisk/live_list_test.go`（`WT_BAIDU_COOKIE`）
 - `internal/netdisk/live_baidu_test.go`（+`WT_BAIDU_FILE_ID`）
 - `internal/netdisk/live_fetch_test.go`（完整取链 + 拉前 64 KB）
+
+---
+
+## 三十一、2026-11-16 重复设备行与本机标记（v1.3.76）
+
+### 31.1 为什么会出现两条 DESKTOP-HDC9J55
+1. **命令行工具注册成了设备**：我排查时用的临时工具（`wt-devprobe`、`wt-offlinecheck`）走的是同一个 `login`，登录会调 `registerDevice`，于是多出一行 `wt-offlinecheck / DESKTOP-HDC9J55`，还拿了 9 位号 `#926783519`。`wt-admin` 之前靠 `SetMachineID("")` 没被机器指纹去重命中，所以行没被替换掉。
+2. **UI 把所有同名行都标成了"（本机）"**：上一版为了兜底，用 `d.name === p2p.localName` 判本机，结果同名的 CLI 行也被标成"本机"，看起来像"自己有两个设备"。
+
+### 31.2 修复
+- 服务端 `registerDevice`：
+  - `deviceID` 以 `wt-` 开头（CLI 工具）**直接跳过注册**，不占设备位；
+  - 每次登录顺手删除该账号下遗留的 `wt-` 行（本次部署后 `-devices admire` 立刻从 3 行降到 2 行：`iZ0totliu892dwZ#418047612`、`cf8c7433…#605135222`）。
+- 前端本机判定：**只按设备 ID 匹配**；仅当列表里没有任何一行匹配本机 ID 时，才退化为"同名最后一行"，不会再把两行都标成本机。
+
+### 31.3 现状
+```
+devices of admire (2):
+  6241cc75…  #418047612  iZ0totliu892dwZ
+  cf8c7433…  #605135222  DESKTOP-HDC9J55
+```

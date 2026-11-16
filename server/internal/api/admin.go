@@ -280,6 +280,22 @@ func (c *callCtx) registerDevice(userID, deviceID, deviceName, machineID string)
 	deviceName = strings.TrimSpace(deviceName)
 	machineID = strings.TrimSpace(machineID)
 
+	// CLI helper tools (wt-admin, wt-publish, probes) never own a device slot.
+	if strings.HasPrefix(deviceID, "wt-") {
+		for _, d := range c.api.DB.ListDevices(userID) {
+			if strings.HasPrefix(d.ID, "wt-") {
+				_ = c.api.DB.DeleteDevice(userID, d.ID)
+			}
+		}
+		return nil
+	}
+	// Clean leftovers from builds that did register CLI devices.
+	for _, d := range c.api.DB.ListDevices(userID) {
+		if strings.HasPrefix(d.ID, "wt-") {
+			_ = c.api.DB.DeleteDevice(userID, d.ID)
+		}
+	}
+
 	// Drop devices that have not logged in for a long time.
 	cutoff := time.Now().UTC().Add(-deviceTTL)
 	for _, d := range c.api.DB.ListDevices(userID) {
