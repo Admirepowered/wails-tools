@@ -92,7 +92,19 @@ func OpenNodesFresh(dir string) (*NodeStore, error) {
 }
 
 func (s *NodeStore) persist() error {
-	data, err := json.MarshalIndent(s.items, "", "  ")
+	// Safety net against a catastrophic wipe: if the in-memory list has no
+	// custom node left but the file on disk still has some, keep them. Losing
+	// the user's nodes once already happened when a sync pushed an empty list.
+	items := s.items
+	if countCustom(items) == 0 {
+		if disk, err := os.ReadFile(s.path); err == nil {
+			var onDisk []miproxy.Node
+			if json.Unmarshal(disk, &onDisk) == nil && countCustom(onDisk) > 0 {
+				items = onDisk
+			}
+		}
+	}
+	data, err := json.MarshalIndent(items, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -246,4 +258,15 @@ func (s *NodeStore) ImportLinks(text string) ([]miproxy.Node, error) {
 		return nil, errors.New("没有可导入的节点")
 	}
 	return out, nil
+}
+
+// countCustom counts nodes that are not the built-in direct entry.
+func countCustom(nodes []miproxy.Node) int {
+	n := 0
+	for _, node := range nodes {
+		if node.ID != BuiltinDirectID {
+			n++
+		}
+	}
+	return n
 }

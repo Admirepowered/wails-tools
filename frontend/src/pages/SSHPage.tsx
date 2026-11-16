@@ -91,12 +91,12 @@ function splitTags(value: string): string[] {
 
 /* ---------------- shared types ---------------- */
 
-type TabKey = 'sftp' | 'term' | 'cmd'
+type TabKey = 'sftp' | 'term'
 
 const TABS: Array<{ id: TabKey; label: string }> = [
   { id: 'sftp', label: '文件' },
   { id: 'term', label: '终端' },
-  { id: 'cmd', label: '命令' },
+
 ]
 
 interface HostTest {
@@ -157,6 +157,7 @@ export default function SSHPage({}: PageProps) {
   const [search, setSearch] = useState('')
   const [activeId, setActiveId] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKey>('sftp')
+  const [shellCwd, setShellCwd] = useState('')
   const [tests, setTests] = useState<Record<string, HostTest>>({})
 
   const [hostEditorOpen, setHostEditorOpen] = useState(false)
@@ -483,11 +484,16 @@ export default function SSHPage({}: PageProps) {
               </div>
             </div>
 
-            <Tabs tabs={TABS} value={tab} onChange={setTab} />
+            <SystemInfoBar sessionId={sessionId} />
 
-            {tab === 'sftp' ? <SftpPane sessionId={sessionId} /> : null}
-            {tab === 'term' ? <TerminalPane sessionId={sessionId} /> : null}
-            {tab === 'cmd' ? <CommandPane sessionId={sessionId} /> : null}
+            <div className="ssh-split">
+              <div className="ssh-split-files">
+                <SftpPane sessionId={sessionId} cwd={shellCwd} />
+              </div>
+              <div className="ssh-split-term">
+                <TerminalPane sessionId={sessionId} onCwd={setShellCwd} />
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -1174,7 +1180,7 @@ function KeysModal({ onClose, onChanged }: { onClose: () => void; onChanged: () 
 
 /* ---------------- SFTP ---------------- */
 
-function SftpPane({ sessionId }: { sessionId: string }) {
+function SftpPane({ sessionId, cwd }: { sessionId: string; cwd?: string }) {
   const toast = useToast()
   const [dir, setDir] = useState('')
   const [files, setFiles] = useState<RemoteFile[]>([])
@@ -1404,6 +1410,8 @@ function SftpPane({ sessionId }: { sessionId: string }) {
         {loading ? <Spinner /> : <span className="small faint">{files.length} 项</span>}
       </div>
 
+      <div className="small faint">拖入文件即可上传 · 双击预览 · 右键删除</div>
+
       <div className="crumbs">
         <span className="crumb" onClick={() => void openDir('/')}>
           /
@@ -1535,7 +1543,7 @@ function SftpPane({ sessionId }: { sessionId: string }) {
 
 /* ---------------- terminal (xterm.js) ---------------- */
 
-function TerminalPane({ sessionId }: { sessionId: string }) {
+function TerminalPane({ sessionId, onCwd }: { sessionId: string; onCwd?: (dir: string) => void }) {
   const toast = useToast()
   const [termId, setTermId] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
@@ -1619,6 +1627,23 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
         termRef.current?.reset()
         termRef.current?.focus()
         dataSubRef.current?.dispose()
+            // Ask bash/zsh to report the working directory (OSC 7) so the file pane
+        // can follow the terminal.
+        window.setTimeout(() => {
+          const current = idRef.current
+          if (!current) return
+          void api
+            .WriteTerminal(
+              current,
+              `export PROMPT_COMMAND='printf "\\033]7;file://%s%s\\033\\\\\\\\" "$HOSTNAME" "$PWD";'\r`,
+            )
+            .catch(() => {})
+        }, 600)
+        termRef.current?.parser.registerOscHandler(7, (payload) => {
+          const idx = payload.indexOf('/')
+          if (idx > 0) onCwd?.(decodeURIComponent(payload.slice(idx)))
+          return true
+        })
         dataSubRef.current = termRef.current?.onData((data) => {
           const current = idRef.current
           if (!current) return
@@ -1658,6 +1683,25 @@ function TerminalPane({ sessionId }: { sessionId: string }) {
       offClosed()
     }
   }, [toast])
+
+  useEffect(() => {
+    if (!onCwd) return
+    let stopped = false
+    const tick = async () => {
+      if (stopped || !idRef.current) return
+      try {
+        const dir = await api.SSHCwd(sessionId)
+        if (!stopped && dir) onCwd(dir)
+      } catch {
+        /* ignore: the shell may be busy */
+      }
+    }
+    const timer = window.setInterval(() => void tick(), 5000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [sessionId, onCwd])
 
   const closeTerm = () => {
     const id = idRef.current
@@ -1759,4 +1803,102 @@ function CommandPane({ sessionId }: { sessionId: string }) {
 }
 
 
+
+
+
+
+
+
+/* ---------------- remote system info ---------------- */
+
+type SysInfo = {
+  cpuModel: string
+  cpuCores: number
+  cpuPct: number
+  memTotalMb: number
+  memUsedMb: number
+  memPct: number
+  load1: number
+  uptime: string
+  hostname: string
+  gpus?: Array<{ name: string; utilPct: number; memUsedMb: number; memTotalMb: number; tempC: number }>
+}
+
+function SystemInfoBar({ sessionId }: { sessionId: string }) {
+  const [info, setInfo] = useState<SysInfo | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let stopped = false
+    const tick = async () => {
+      try {
+        const next = await api.SSHSystemInfo(sessionId)
+        if (!stopped) {
+          setInfo(next)
+          setFailed(false)
+        }
+      } catch {
+        if (!stopped) setFailed(true)
+      }
+    }
+    void tick()
+    const timer = window.setInterval(() => void tick(), 5000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [sessionId])
+
+  if (!info) {
+    return (
+      <div className="card row" style={{ gap: 10, padding: '8px 12px' }}>
+        <span className="small faint">{failed ? '无法读取远端系统信息' : '读取远端系统信息…'}</span>
+      </div>
+    )
+  }
+
+  const gpuText = (g: NonNullable<SysInfo['gpus']>[number]) =>
+    `${g.name} ${g.utilPct.toFixed(0)}% · 显存 ${g.memUsedMb}/${g.memTotalMb} MiB${g.tempC > 0 ? ` · ${g.tempC.toFixed(0)}°C` : ''}`
+
+  return (
+    <div className="card" style={{ padding: '8px 12px' }}>
+      <div className="row row-wrap" style={{ gap: 14 }}>
+        <span className="small">
+          <span className="faint">主机</span> <b>{info.hostname || '—'}</b>
+        </span>
+        <span className="small">
+          <span className="faint">CPU</span> {info.cpuModel || '—'}
+          {info.cpuCores ? ` · ${info.cpuCores} 核` : ''}
+        </span>
+        <span className="small">
+          <span className="faint">使用率</span>{' '}
+          <b style={{ color: info.cpuPct > 85 ? 'var(--danger)' : undefined }}>{info.cpuPct.toFixed(0)}%</b>
+        </span>
+        <span className="small">
+          <span className="faint">内存</span> {info.memUsedMb} / {info.memTotalMb} MiB{' '}
+          <b style={{ color: info.memPct > 90 ? 'var(--danger)' : undefined }}>({info.memPct.toFixed(0)}%)</b>
+        </span>
+        {info.load1 > 0 ? (
+          <span className="small">
+            <span className="faint">负载</span> {info.load1.toFixed(2)}
+          </span>
+        ) : null}
+        {info.uptime ? (
+          <span className="small">
+            <span className="faint">运行</span> {info.uptime}
+          </span>
+        ) : null}
+      </div>
+      {info.gpus && info.gpus.length > 0 ? (
+        <div className="row row-wrap" style={{ gap: 14, marginTop: 6 }}>
+          {info.gpus.map((g, i) => (
+            <span key={i} className="small">
+              <Tag kind="ok">GPU{i + 1}</Tag> {gpuText(g)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
 

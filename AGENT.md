@@ -805,3 +805,30 @@ probe #1 ... → probe answered after 1 probes            ← 第一个包就通
 - **本地文件**工具栏新增宽输入框（`minWidth:320`），输入目录回车直接跳转，不再是只能点面包屑。
 - **订阅页记住上次选中的订阅**：`localStorage["wt.subs.selected"]`，加载时优先恢复（列表里仍存在才用），点击切换时写入。
 - 记一笔教训：`FilesPage` 有两个 `{tab === 'transfers' && …}` 块，两次字符串替换各命中一处，导致 JSX 结构被破坏；此类多次命中的锚点必须先 `grep` 确认唯一，或改用精确的整块替换。
+
+---
+
+## 四十三、2026-11-16 SSH 工作区重做 + 自定义节点被清空的修复（v1.3.76）
+
+### 43.1 SSH 布局
+- 去掉「文件 / 终端 / 命令」标签页，改成**左文件、右终端**的两栏网格（`.ssh-split`，窄屏自动上下叠）。
+- 两个面板**同时挂载**：切到别的页面再回来，终端不再重新建 PTY（终端只依赖远端会话，缓冲区不丢）。
+- 删除「命令」标签页（`CommandPane` 保留但不再挂载）。
+
+### 43.2 远端系统信息条
+新增 `internal/sshmgr/sysinfo.go`：一次 `sh` 脚本取 `hostname`、`/proc/cpuinfo` 型号与核数、`/proc/stat` 两次采样算 CPU 使用率、`/proc/meminfo` 算内存、`/proc/loadavg`、`/proc/uptime`；若存在 `nvidia-smi` 再取 `name,utilization,memory.used,total,temperature`。
+绑定 `SSHSystemInfo(sessionId)`，前端 `SystemInfoBar` 每 5 秒刷新，顶部一行显示：主机、CPU 型号与核数、使用率、内存、负载、运行时长、GPU 列表。
+
+### 43.3 文件与终端目录同步
+- 终端打开后注入 `PROMPT_COMMAND` 让 shell 输出 **OSC 7**（`file://host/path`），前端用 `parser.registerOscHandler(7)` 解析并回调父组件；同时 5 秒轮询 `SSHCwd` 兜底（读 `/proc/<pid>/cwd`）。
+- 文件面板收到目录变化就自动刷新到同一目录。
+
+### 43.4 文件操作
+- **拖拽上传**：`onDrop` 读取 `DataTransfer` 里的绝对路径（Wails WebView 会带上），逐个 `SFTPUpload`。
+- **双击预览**：目录进入、文件直接打开预览（原本就有，保留）。
+- **右键删除**：`onContextMenu` 选中并弹出删除确认。
+
+### 43.5 自定义节点被清空（顺手修的 bug）
+现象：自定义节点页显示 0，实际 `%LOCALAPPDATA%\WailsTools\nodes\custom-nodes.json` 里 3 个节点（1 内置 + 2 自定义）。
+复现：用 `wt-nodecheck` 读同一个文件，`OpenNodes` 只返回 1 个 —— 文件在应用运行期间被**重写成只剩内置节点**。
+修复：`NodeStore.persist()` 加安全网 —— 如果内存里已没有自定义节点、而磁盘上还有，就沿用磁盘内容，避免一次空列表同步把用户节点抹掉。用户的 2 个节点（trojan `134.175.90.14:4443`、vmess `111:443`）已按原样写回。

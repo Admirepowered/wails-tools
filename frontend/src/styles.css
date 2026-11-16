@@ -624,3 +624,30 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .ctx-item.danger { color: var(--danger); }
 
 
+
+/* SSH workspace: files left, terminal right, both always mounted. */
+.ssh-split {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  min-height: 0;
+  flex: 1;
+}
+.ssh-split-files,
+.ssh-split-term {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ssh-split-term .term-xterm {
+  flex: 1;
+  min-height: 320px;
+}
+@media (max-width: 1100px) {
+  .ssh-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
