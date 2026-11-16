@@ -1423,6 +1423,72 @@ function SftpPane({ sessionId, cwd, onDir }: { sessionId: string; cwd?: string; 
 
   return (
     <div className="col" style={{ gap: 10, minHeight: 0 }}>
+      {player ? (
+        <MediaViewer
+          target={{
+            path: player.name,
+            name: player.name,
+            kind: kindOf(player.name) || 'image',
+            source: 'sftp',
+            playUrl: player.url,
+          }}
+          onClose={() => setPlayer(null)}
+        />
+      ) : null}
+      {menu ? (
+        <div
+          className="ctx-menu"
+          style={{ left: menu.x, top: menu.y, position: 'fixed', zIndex: 70 }}
+          onMouseLeave={() => setMenu(null)}
+        >
+          {!menu.file.isDir ? (
+            <div
+              className="ctx-item"
+              onClick={() => {
+                const f = menu.file
+                setMenu(null)
+                void previewMedia(f)
+              }}
+            >
+              预览
+            </div>
+          ) : null}
+          {!menu.file.isDir ? (
+            <div
+              className="ctx-item"
+              onClick={() => {
+                const f = menu.file
+                setMenu(null)
+                setSelected(f)
+                void download()
+              }}
+            >
+              下载
+            </div>
+          ) : null}
+          <div
+            className="ctx-item"
+            onClick={() => {
+              const f = menu.file
+              setMenu(null)
+              setSelected(f)
+              void rename()
+            }}
+          >
+            重命名
+          </div>
+          <div
+            className="ctx-item danger"
+            onClick={() => {
+              const f = menu.file
+              setMenu(null)
+              setPendingRemove(f)
+            }}
+          >
+            删除
+          </div>
+        </div>
+      ) : null}
       <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
         <button className="btn btn-sm" onClick={() => void openDir(dir)} disabled={loading}>
           刷新
@@ -2067,6 +2133,7 @@ function SystemInfoBar({ sessionId }: { sessionId: string }) {
     </div>
   )
 }
+
 
 
 

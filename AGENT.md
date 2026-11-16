@@ -1116,3 +1116,18 @@ term.attachCustomKeyEventHandler((ev) => {
 
 ### 54.3 磁盘
 按你的要求**删掉**了磁盘条（`df` 采样也一并从界面移除）。
+
+---
+
+## 五十五、2026-11-16 右键菜单和媒体预览其实没进构建（v1.3.89）
+
+现象：双击 `bg.png` 弹出的是**文本预览**（把 PNG 二进制当文本渲染），右键没有菜单。
+
+原因：上一版我用大段 `Replace` 插入「菜单 JSX + MediaViewer 弹层」，**锚点没命中，插入被静默丢弃**（`setMenu`/`setPlayer` 有定义但没有渲染），而 `onDoubleClick` 里又调用了不存在的 `isPreviewable` 分支，最终落到 `readFile()`。
+
+修复：
+- 用 `edit` 精确插回 `<MediaViewer>` 与 `.ctx-menu` 两段渲染（不再是静默失败的大段替换）；
+- 双击逻辑改成显式判断：`kindOf(name)` 是 `image/video/audio` 就 `previewMedia()`（下载到缓存 → 本地媒体通道），其余才走文本预览。
+
+### 教训（第 N 次）
+PowerShell 大段字符串 `Replace` 一旦锚点不匹配就**什么都不做也不报错**。涉及 JSX 结构的改动一律用 `edit` 工具，改完立刻 `grep` 关键字确认，再 `tsc`。
