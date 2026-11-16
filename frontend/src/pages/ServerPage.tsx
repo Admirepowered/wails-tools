@@ -84,6 +84,7 @@ export default function ServerPage(props: PageProps) {
   const [maps, setMaps] = useState<P2PMap[]>([])
   const [mapDevice, setMapDevice] = useState('')
   const [mapLocal, setMapLocal] = useState('')
+  const [mapHost, setMapHost] = useState('')
   const [mapRemote, setMapRemote] = useState('')
   const [allowRegister, setAllowRegister] = useState(true)
   const [maxDevices, setMaxDevices] = useState(5)
@@ -1789,6 +1790,7 @@ export default function ServerPage(props: PageProps) {
     </div>
   )
 }
+
 
 
 

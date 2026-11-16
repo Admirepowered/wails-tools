@@ -292,6 +292,18 @@ func (h *p2pHub) incomingDevices() []string {
 // travels over the QUIC (UDP) channel; each accepted connection opens one
 // stream that is released as soon as the connection closes.
 func (a *App) P2PMapPort(deviceID string, localPort, remotePort int) ([]map[string]any, error) {
+	return a.P2PMapPortTo(deviceID, localPort, "", remotePort)
+}
+
+// P2PMapPortTo binds a local TCP port to any host:port reachable from the
+// punched device, so a whole LAN segment can be reached (e.g. 192.168.1.50:5432).
+// An empty remoteHost means 127.0.0.1 (the device itself).
+func (a *App) P2PMapPortTo(deviceID string, localPort int, remoteHost string, remotePort int) ([]map[string]any, error) {
+	remoteHost = strings.TrimSpace(remoteHost)
+	remoteHost = strings.Trim(remoteHost, "[]")
+	if remoteHost == "" {
+		remoteHost = "127.0.0.1"
+	}
 	ch, ok := a.p2p.get(deviceID)
 	if !ok {
 		return nil, errors.New("请先连接到该设备（打洞成功后才能映射端口）")
@@ -303,7 +315,7 @@ func (a *App) P2PMapPort(deviceID string, localPort, remotePort int) ([]map[stri
 	if err != nil {
 		return nil, fmt.Errorf("本地端口 %d 绑定失败: %w", localPort, err)
 	}
-	pm := &portMap{Local: localPort, Remote: remotePort, Device: deviceID, ln: ln}
+	pm := &portMap{Local: localPort, Remote: remotePort, Host: remoteHost, Device: deviceID, ln: ln}
 	a.p2p.mu.Lock()
 	if a.p2p.maps[deviceID] == nil {
 		a.p2p.maps[deviceID] = map[int]*portMap{}
@@ -320,7 +332,11 @@ func (a *App) P2PMapPort(deviceID string, localPort, remotePort int) ([]map[stri
 
 // servePortMap accepts local connections and forwards each through one stream.
 func (a *App) servePortMap(pm *portMap, ch *p2p.Channel) {
-	remote := fmt.Sprintf("127.0.0.1:%d", pm.Remote)
+	host := pm.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	remote := net.JoinHostPort(host, fmt.Sprint(pm.Remote))
 	for {
 		conn, err := pm.ln.Accept()
 		if err != nil {
@@ -370,8 +386,12 @@ func (a *App) P2PMaps() []map[string]any {
 	out := []map[string]any{}
 	for device, m := range a.p2p.maps {
 		for _, pm := range m {
+			host := pm.Host
+			if host == "" {
+				host = "127.0.0.1"
+			}
 			out = append(out, map[string]any{
-				"device": device, "local": pm.Local, "remote": pm.Remote,
+				"device": device, "local": pm.Local, "remote": pm.Remote, "host": host,
 			})
 		}
 	}

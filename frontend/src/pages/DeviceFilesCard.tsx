@@ -28,7 +28,7 @@ export default function DeviceFilesCard() {
       if (!device) return
       setLoading(true)
       try {
-        const res = await api.P2PFilesList(device, next)
+        const res = await api.P2PFilesList(device, next ?? '')
         setEntries(res.entries ?? [])
         setRoot(res.root ?? '')
         setPath(next)
@@ -83,8 +83,14 @@ export default function DeviceFilesCard() {
           className="btn btn-sm btn-ghost"
           disabled={!device}
           onClick={() => {
-            const parent = path.replace(/[\\/][^\\/]*$/, '')
-            void load(parent === path ? '' : parent)
+            // "C:\a\b" -> "C:\a", "C:\a" -> "C:\", "/a/b" -> "/a"
+            const trimmed = path.replace(/[\\/]+$/, '')
+            const cut = trimmed.replace(/[\\/][^\\/]*$/, '')
+            if (!cut || cut === trimmed) {
+              void load('')
+              return
+            }
+            void load(/^[A-Za-z]:$/.test(cut) ? `${cut}\\` : cut)
           }}
         >
           上级
@@ -186,3 +192,4 @@ export default function DeviceFilesCard() {
     </div>
   )
 }
+

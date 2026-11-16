@@ -1031,6 +1031,7 @@ const rawApi = {
   P2PDeclineInvite: (id: string) => call<Record<string, unknown>>('P2PDeclineInvite', id),
   P2PMapPort: (device: string, local: number, remote: number) => call<P2PMap[]>('P2PMapPort', device, local, remote),
   P2PUnmap: (device: string, local: number) => call<P2PMap[]>('P2PUnmap', device, local),
+  P2PMapPortTo: (deviceId: string, localPort: number, remoteHost: string, remotePort: number) => call<P2PMap[]>('P2PMapPortTo', deviceId, localPort, remoteHost, remotePort),
   P2PMaps: () => call<P2PMap[]>('P2PMaps'),
   UnlockSecretSync: (password: string) => call<SecretSyncResult>('UnlockSecretSync', password),
   SetSecretSyncEnabled: (enabled: boolean) => call<SecretSyncStatus>('SetSecretSyncEnabled', enabled),
@@ -1281,6 +1282,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

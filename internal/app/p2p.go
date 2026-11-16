@@ -36,6 +36,8 @@ type p2pHub struct {
 type portMap struct {
 	Local  int
 	Remote int
+	// Host is the target on the peer side (LAN device or 127.0.0.1).
+	Host   string
 	Device string
 	ln     net.Listener
 }

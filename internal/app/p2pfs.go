@@ -27,8 +27,22 @@ func (a *App) p2pFsRoot() string {
 	return dir
 }
 
-// p2pFsPath resolves a peer-supplied relative path inside the shared root.
+// p2pFsPath resolves a peer-supplied path. A relative path stays inside the
+// shared root; an absolute path (e.g. "C:\" or "D:/Media") is used as-is so the
+// user can browse the whole machine of a connected device.
 func (a *App) p2pFsPath(rel string) (string, error) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" || rel == "/" || rel == "\\" {
+		return a.p2pFsRoot(), nil
+	}
+	// Windows drive root/absolute ("C:\", "C:/x", "\\server\share") or POSIX absolute.
+	isDriveAbs := len(rel) >= 3 && rel[1] == ':' && (rel[2] == '\\' || rel[2] == '/')
+	if isDriveAbs && len(rel) == 3 {
+		return rel[:2] + string(os.PathSeparator), nil
+	}
+	if filepath.IsAbs(rel) || isDriveAbs || strings.HasPrefix(rel, "\\\\") {
+		return filepath.Clean(rel), nil
+	}
 	root := a.p2pFsRoot()
 	clean := filepath.Clean("/" + strings.ReplaceAll(rel, "\\", "/"))
 	full := filepath.Join(root, filepath.FromSlash(clean))
@@ -36,6 +50,19 @@ func (a *App) p2pFsPath(rel string) (string, error) {
 		return "", errors.New("路径越界")
 	}
 	return full, nil
+}
+
+// p2pFsParent returns the parent directory of a peer-supplied path.
+func p2pFsParent(rel string) string {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return ""
+	}
+	parent := filepath.Dir(filepath.Clean(rel))
+	if parent == "." || parent == rel {
+		return ""
+	}
+	return parent
 }
 
 type p2pFsEntry struct {
