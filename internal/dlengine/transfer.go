@@ -285,8 +285,12 @@ func (e *Engine) run(ctx context.Context, tr *taskRunner) {
 	if conns < 1 {
 		conns = 1
 	}
+	chunkSize := tr.task.ChunkSize
+	if chunkSize <= 0 {
+		chunkSize = cfg.Downloads.ChunkSize
+	}
 	if !resume {
-		st.Chunks = planChunks(pr.Total, conns, cfg.Downloads.ChunkSize)
+		st.Chunks = planChunks(pr.Total, conns, chunkSize)
 	}
 	st.Filename = name
 	st.Total = pr.Total
@@ -472,6 +476,9 @@ func (e *Engine) fetchChunk(ctx context.Context, tr *taskRunner, idx int) error 
 			return nil
 		}
 		if err := e.fetchChunkOnce(ctx, tr, idx); err != nil {
+			if os.Getenv("WT_DL_DEBUG") != "" {
+				fmt.Fprintf(os.Stderr, "[dl] chunk %d attempt %d: %v\n", idx, attempt, err)
+			}
 			lastErr = err
 			tr.mu.Lock()
 			tr.task.Retries++
@@ -510,10 +517,10 @@ func (e *Engine) fetchChunkOnce(ctx context.Context, tr *taskRunner, idx int) er
 	if c.Done >= total {
 		return nil
 	}
-	path := st.FinalURL
-	if path == "" {
-		path = task.URL
-	}
+	// Always request the ORIGINAL url: CDNs such as Baidu's pan issue a fresh
+	// signed redirect per request, and reusing the redirect target (FinalURL) for
+	// other ranges gets rejected with 403.
+	path := task.URL
 	ci, err := e.clientFor(task)
 	if err != nil {
 		return err
@@ -526,10 +533,16 @@ func (e *Engine) fetchChunkOnce(ctx context.Context, tr *taskRunner, idx int) er
 	if st.RangeOK && st.Total > 0 {
 		to := c.End
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, to))
-		req.Header.Set("If-Range", firstNonEmpty(st.ETag, ""))
-		if st.ETag == "" {
-			req.Header.Del("If-Range")
+		// Only validate the entity when resuming inside a chunk; CDNs (Baidu pan)
+		// reject If-Range on plain ranged requests.
+		if c.Done > 0 && st.ETag != "" {
+			req.Header.Set("If-Range", st.ETag)
 		}
+	}
+	if os.Getenv("WT_DL_DEBUG") != "" {
+		fmt.Fprintf(os.Stderr, "[dl] GET %s range=%q ua=%q cookieLen=%d ref=%q\n",
+			path, req.Header.Get("Range"), req.Header.Get("User-Agent"),
+			len(req.Header.Get("Cookie")), req.Header.Get("Referer"))
 	}
 	resp, err := ci.client.Do(req)
 	if err != nil {

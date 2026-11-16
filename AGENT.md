@@ -767,3 +767,32 @@ probe #1 ... → probe answered after 1 probes            ← 第一个包就通
 2. **探测始终带 Range**（`bytes=0-0`，遇 403 再试 `bytes=0-65535`），不再退回无 Range 的普通 GET。
 3. `statusError.retryable()` 把 **403** 也算可重试（CDN 反盗链是间歇性的）。
 4. 引擎兜底：某分片收到 403 且 `Connections > 1` 时，**自动降为单连接**重试，并在任务上提示"服务端拒绝并发连接（403），已切换为单连接重试"。
+
+---
+
+## 四十一、2026-11-16 百度网盘 403 真因：Range 超过 4 MiB（v1.3.73）
+
+### 41.1 决定性实验
+用真实账号对同一个 804 MB 文件的签名直链做对照（UA=`netdisk;7.44.7.1;…`、带 Cookie/Referer）：
+
+| 单个 Range 大小 | 结果 |
+|---|---|
+| 1 MiB | 206 ✅ |
+| 4 MiB | 206 ✅ |
+| **8 MiB** | **403 ❌** |
+| 16 / 32 / 64 MiB | 403 ❌ |
+
+并发本身没问题：8 条 4 MiB 的并行 Range 全部 206（跑了两轮）。
+而引擎默认分片是 **32 MiB**（设置里的 `chunkSizeBytes`），于是每个分片请求都被 403。实测引擎路径：
+- 32 MiB 分片：`retries=32, downloaded=0`
+- 4 MiB 分片：`retries=0, downloaded=2.5 MB/8s`（正常下载）
+
+### 41.2 修复
+- `dlengine.Request/Task` 新增 `ChunkSize`（每任务覆盖全局）。
+- `NetdiskEnqueueDownload` 对百度 CDN（`baidupcs.com` / `pcs.baidu.com` / `pan.baidu.com`）设置 **4 MiB** 分片，连接数保持 8。
+- 之前的猜测（单连接、UA 缺失）都已用实验排除：UA 经 `TestHeadersReachTheOrigin` 证明会原样送达；并发 8 条 4 MiB 正常。
+
+### 41.3 保留的健壮性
+- 探测始终带 `Range`；`If-Range` 只在续传分片内部时才发（CDN 不喜欢无谓的 If-Range）。
+- 403 计入可重试，并在并发 > 1 且收到 403 时自动降为单连接（兜底）。
+- `WT_DL_DEBUG=1` 可打印每个分片请求的 URL/Range/UA（排查用，默认静默）。

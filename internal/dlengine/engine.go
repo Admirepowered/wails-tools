@@ -37,8 +37,13 @@ type Request struct {
 	Headers     map[string]string `json:"headers"`
 	Referer     string            `json:"referer"`
 	Connections int               `json:"connections"`
-	ProxyMode   string            `json:"proxyMode"`      // inherit|off|on
-	Kind        string            `json:"kind,omitempty"` // http|magnet
+	// ChunkSize overrides the global chunk size for this task (CDNs cap the
+	// size of a single Range request).
+	ChunkSize int64  `json:"chunkSize,omitempty"`
+	ProxyMode string `json:"proxyMode"`      // inherit|off|on
+	Kind      string `json:"kind,omitempty"` // http|magnet
+	// Refresh re-resolves an expired pre-signed URL (netdisk links). Optional.
+	Refresh func() (string, map[string]string, error) `json:"-"`
 }
 
 // Task is the persisted, UI-facing download record.
@@ -53,6 +58,7 @@ type Task struct {
 	Status      string            `json:"status"`
 	Error       string            `json:"error,omitempty"`
 	Connections int               `json:"connections"`
+	ChunkSize   int64             `json:"chunkSize,omitempty"`
 	SpeedBps    float64           `json:"speedBps"`
 	Percent     float64           `json:"percent"`
 	ETag        string            `json:"etag,omitempty"`
@@ -109,6 +115,8 @@ type taskRunner struct {
 	chunkWG   sync.WaitGroup
 	doneBytes int64
 	speed     speedMeter
+	// refresh re-resolves an expired/pre-signed URL (netdisk links). Optional.
+	refresh func() (string, map[string]string, error)
 }
 
 type speedMeter struct {
@@ -392,6 +400,7 @@ func (e *Engine) Add(req Request) (Task, error) {
 		Directory:   dir,
 		Status:      StatusQueued,
 		Connections: conns,
+		ChunkSize:   req.ChunkSize,
 		Headers:     req.Headers,
 		Referer:     req.Referer,
 		ProxyMode:   strings.ToLower(strings.TrimSpace(req.ProxyMode)),
@@ -399,7 +408,7 @@ func (e *Engine) Add(req Request) (Task, error) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	tr := &taskRunner{task: t, done: make(chan struct{})}
+	tr := &taskRunner{task: t, done: make(chan struct{}), refresh: req.Refresh}
 	e.mu.Lock()
 	e.tasks[t.ID] = tr
 	e.order = append(e.order, t.ID)

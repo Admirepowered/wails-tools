@@ -245,8 +245,12 @@ func (a *App) NetdiskEnqueueDownload(req netdisk.ResolveDownloadRequest) (dlengi
 	// Baidu's CDN signs the URL and rejects parallel connections to it (403 on
 	// some chunks). Quark/UC tolerate multi-connection downloads.
 	conns := 8
+	var chunkSize int64
 	if isBaiduCDN(link.URL, link.Referer) {
-		conns = 1
+		// Baidu's pan CDN rejects Range requests larger than ~4 MiB with 403
+		// (measured: 4 MiB ok, 8 MiB 403), so keep the chunks small and let the
+		// connections run in parallel.
+		chunkSize = 4 << 20
 	}
 	task, err := a.engine.Add(dlengine.Request{
 		URL:         link.URL,
@@ -255,6 +259,7 @@ func (a *App) NetdiskEnqueueDownload(req netdisk.ResolveDownloadRequest) (dlengi
 		Referer:     link.Referer,
 		ProxyMode:   "inherit",
 		Connections: conns,
+		ChunkSize:   chunkSize,
 	})
 	if err != nil {
 		return dlengine.Task{}, err
