@@ -70,6 +70,8 @@ type App struct {
 	notesSyncTimer *time.Timer
 	p2p            *p2pHub
 	invites        *inviteBox
+	relayOnce      sync.Once
+	relayCancel    context.CancelFunc
 	sni            *sniState
 	sniMu          sync.Mutex
 	lastRelayKind  string
@@ -274,6 +276,7 @@ func (a *App) Startup(ctx context.Context) {
 	go a.restoreActiveNode()
 	a.startKeepalive()
 	a.startP2PWatcher()
+	a.startRelayServer()
 	a.startSNIProxyOnBoot()
 	if a.settings.Get().Server.AutoConnect {
 		go func() {

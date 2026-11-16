@@ -1020,6 +1020,7 @@ const rawApi = {
 
   P2PConnect: (deviceId: string) => call<P2PStatus>('P2PConnect', deviceId),
   P2PDisconnect: (deviceId: string) => call<P2PStatus>('P2PDisconnect', deviceId),
+  P2PRelayConnect: (deviceId: string) => call<{ device: string; relayed?: boolean; already?: boolean }>('P2PRelayConnect', deviceId),
   P2PConnectByNumber: (number: string) => call<{ device: string; peer: string }>('P2PConnectByNumber', number),
   P2PLocalNumber: () => call<{ deviceId: string; number: string; name: string; error?: string }>('P2PLocalNumber'),
   P2PInvites: () => call<P2PInvite[]>('P2PInvites'),
@@ -1276,6 +1277,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

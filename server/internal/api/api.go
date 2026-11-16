@@ -58,6 +58,15 @@ type API struct {
 
 	offlineOnce sync.Once
 	offlineMgr  *OfflineManager
+
+	bridgeOnce sync.Once
+	bridgeHub  *bridgeHub
+}
+
+// Bridge returns the relay hub (server-side device bridging).
+func (a *API) Bridge() *bridgeHub {
+	a.bridgeOnce.Do(func() { a.bridgeHub = newBridgeHub() })
+	return a.bridgeHub
 }
 
 // New creates an API.
@@ -219,6 +228,7 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.vaultWipe()
 	case "files.extract":
 		return ctx.filesExtract(body)
+
 	case "relay.check":
 		return map[string]any{"enabled": a.Opts.RelayEnabled}, nil
 	// ---- NAT hole punching signalling --------------------------------------
@@ -243,6 +253,8 @@ func (a *API) Handle(method string, body json.RawMessage, sess *wire.ServerConn)
 		return ctx.sniRulesGet()
 	case "sni.rules.put":
 		return ctx.sniRulesPut(body)
+	case "relay.bridge":
+		return ctx.relayBridgeStatus()
 	// ---- server-side offline downloads ------------------------------------
 	case "offline.add":
 		return ctx.offlineAdd(body)
@@ -272,6 +284,8 @@ func (a *API) Pipe(method string, body json.RawMessage, conn net.Conn, sess *wir
 		return ctx.filesPut(body, conn)
 	case "relay.tcp":
 		return a.relayTCP(body, conn, sess)
+	case "p2p.bridge":
+		return ctx.bridgePipe(body, conn)
 	case "update.put":
 		return ctx.updatePut(body, conn)
 	case "update.get":

@@ -895,3 +895,25 @@ if _, ok := a.p2p.get(fromDevice); ok { return }
 public=[218.201.253.98:10817 218.201.253.88:10818]  → symmetric
 ```
 同账号下 `218.201.253.x` 的两台机器都是对称型 NAT，互相打洞基本无解；而 `47.108.84.112`（云主机，公网 IP）本来是最好打的一方 —— 只要对端没有僵尸链路，就能连上。
+
+---
+
+## 三十四、2026-11-16 服务器中转（v1.3.79）
+
+### 34.1 设计：独立路径，不碰打洞
+- 打洞（UDP/QUIC）与中转（服务器桥接）是**两条独立路径**：中转完全不依赖 NAT，任何能连上同步服务器的两台设备都能用，代价是延迟更高（多一跳服务器）。
+- 服务端 `p2p.bridge` 流方法（`server/internal/api/bridge.go`）：
+  - **目标设备**先 park 一条流（`{register:true, device}`），服务端按 `userID+device` 记录；
+  - **发起方**开 `{target}`，服务端回一个字节：`0x01` 表示配对成功、`0x00` 表示对方未注册；成功后服务端在两条流之间 `io.Copy` 双向转发。
+- 客户端 `internal/p2p/relay.go`：
+  - `RelayServe`：登录后自动 park 一条流，配对成功后用 **yamux server** 承载并 `channel.Serve`，断开自动重连；
+  - `RelayDial`：开流 → 读 `0x01` → 套 **yamux client** → 得到与打洞完全相同的 `Channel`（DialTCP / Call / OpenStream / 文件管理全部复用）。
+- 为了复用 Channel，新增 `internal/p2p/session.go`：把通道抽象成 `Session` 接口，`QuicSession`（打洞）与 `YamuxSession`（中转）两种实现，`Channel` 不再绑定 quic。
+
+### 34.2 界面
+- 「我的设备」每行在「连接」旁新增 **「中转」** 按钮，tooltip 与卡片说明都写明：*不依赖 NAT，但延迟明显更高*；右键菜单也有「经服务器中转（延迟更高）」。
+- 连接成功后 toast 提示"已通过服务器中转连接，延迟明显高于直连"，并 `emit("p2p:connected", {relayed:true})`。
+
+### 34.3 使用建议
+- 先「连接」打洞；失败（对称型 NAT 且端口预测失败）再点「中转」。
+- 中转走同步服务器的带宽，适合 SSH、代理这类交互流量；大批量传文件建议仍用打洞或网盘。
