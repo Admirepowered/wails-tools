@@ -345,16 +345,52 @@ func (c *BaiduClient) ResolveDownload(ctx context.Context, account Account, cook
 	if err != nil {
 		return DownloadLink{}, err
 	}
+	// The dlink answers 302 to the CDN; resolving it here means the offline
+	// download (or the local engine) only needs the final URL.
+	ua := baiduNetdiskUA
+	if final, ferr := baiduFollowRedirect(ctx, dlink, cookie, ua); ferr == nil && final != "" {
+		dlink = final
+	}
 	filename := path.Base(req.Path)
 	return DownloadLink{
 		URL:       dlink,
 		Filename:  filename,
 		Size:      req.Size,
-		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+		UserAgent: ua,
 		Cookie:    cookie,
 		Referer:   "https://pan.baidu.com/",
 		Policy:    "line3",
 	}, nil
+}
+
+// baiduNetdiskUA is the desktop client identity Baidu expects for pan links.
+const baiduNetdiskUA = "netdisk;7.44.7.1;PC;PC-Windows;10.0.19045;WindowsBaiduYunGuanJia"
+
+// baiduFollowRedirect issues a HEAD and returns the Location (the CDN URL).
+func baiduFollowRedirect(ctx context.Context, dlink, cookie, ua string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, dlink, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", ua)
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if loc := resp.Header.Get("Location"); loc != "" {
+		return loc, nil
+	}
+	return dlink, nil
 }
 
 type baiduAccountTpl struct {

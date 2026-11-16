@@ -757,3 +757,25 @@ go channel.Serve(...)                      // 但自己的 Serve 还没起
 - UI：「订阅」页开关旁新增下拉（浏览器（默认）/ Quantumult X / Clash / v2rayN / Surge / Shadowrocket），切换即写设置并提示。
 - 单测：`internal/settings/ua_test.go`（默认浏览器、quantumultx、literal 透传、clash）。
 - 注：Quantumult X 的响应通常是 base64 链接列表，解析器已支持（`TestParseBase64Subscription`）。
+
+---
+
+## 二十九、2026-11-16 百度网盘盘内下载 / 离线推送 / 订阅 UA 编辑（v1.3.73）
+
+### 29.1 百度网盘盘内下载（参照 lua 实现）
+- UA 改为桌面客户端身份：`netdisk;7.44.7.1;PC;PC-Windows;10.0.19045;WindowsBaiduYunGuanJia`（此前是 Chrome UA，百度会按浏览器身份限速/拒绝）。
+- 取链仍是 `gettemplatevariable`(sign1/sign3/timestamp) → RC4+base64 sign → `/api/download?type=dlink`；新增 **`baiduFollowRedirect`**：用同一 UA+Cookie 发 `HEAD`（`CheckRedirect` 返回 `ErrUseLastResponse`）取 `Location`，把 dlink 换成真正的 CDN 直链。这样本地引擎和服务器离线下载拿到的都是可直接 GET 的地址。
+- 返回的 `DownloadLink` 同时带 `UserAgent` / `Cookie` / `Referer`，下载器会原样带上。
+
+### 29.2 推送到服务器离线下载（URL + Header）
+- 服务端 `store.OfflineTask` 增加 `Kind`（magnet|url）、`URL`、`Headers`；`offline.add` 现在同时接受磁力链与 http(s) 地址 + 任意请求头。
+- 新增 `OfflineManager.downloadHTTP`：带 Header GET（默认浏览器 UA）、`Content-Length` 预检配额、边下边记 `Done` 并在超配额时删文件报错、完成后落 `离线下载/<文件名>` 并注册文件元数据 + `RecalcUsage`（与截图共享 10 GiB）。
+- 客户端新增绑定 `NetdiskPushOffline(req)`：本地解析出直链后调 `offline.add`（URL+Headers+Name）；网盘文件右键菜单新增 **「推送到服务器离线下载」**。
+- 实测（线上服务器）：推送 `speed.cloudflare.com/__down?bytes=2000000` → 任务 `completed`，`done=2000000`，`usedBytes` 增加 2 MB，文件落在 `离线下载/cf-2mb.bin`。
+
+### 29.3 订阅 UA 界面
+- 「编辑订阅」对话框新增 **User-Agent** 区块：下拉可选 跟随全局 / 浏览器 / Quantumult X / Clash / v2rayN / Surge / Shadowrocket / 自定义…，下方输入框可直接填任意 UA 字符串（或预设名）。
+- 单源 `userAgent` 优先于全局设置，留空则跟随全局。
+
+### 29.4 界面细节
+- 「文件 → 其他设备」的路径输入框加宽（`minWidth: 320`），设备下拉固定 180px，不再挤成小圆角框。

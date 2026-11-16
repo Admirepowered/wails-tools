@@ -36,6 +36,15 @@ function protocolTag(protocol: string) {
   return <Tag kind={kind}>{label}</Tag>
 }
 
+const UA_PRESETS: Array<{ value: string; label: string }> = [
+  { value: '', label: '跟随全局设置（默认浏览器 UA）' },
+  { value: 'browser', label: '浏览器' },
+  { value: 'quantumultx', label: 'Quantumult X' },
+  { value: 'clash', label: 'Clash' },
+  { value: 'v2rayn', label: 'v2rayN' },
+  { value: 'surge', label: 'Surge' },
+  { value: 'shadowrocket', label: 'Shadowrocket' },
+]
 export default function SubscriptionPage({ reloadSettings }: PageProps) {
   const toast = useToast()
   const [list, setList] = useState<SubscriptionSource[]>([])
@@ -878,6 +887,8 @@ function NodeEditor({
     </Modal>
   )
 }
+
+
 
 
 

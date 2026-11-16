@@ -613,6 +613,7 @@ export interface SubscriptionSource {
   url: string
   enabled: boolean
   useProxy?: boolean
+  userAgent?: string
   intervalHours: number
   lastFetch?: string
   lastError?: string
@@ -1073,6 +1074,7 @@ const rawApi = {
   ),
   NetdiskEnqueueFolder: (accountId: string, folder: string) =>
     call<{ queued: number; folder: string }>('NetdiskEnqueueFolder', accountId, folder),
+  NetdiskPushOffline: (req: { account_id: string; file_id: string; path?: string; name?: string; size?: number }) => call<OfflineStatus>('NetdiskPushOffline', req),
   NetdiskEnqueueDownload: (req: {
     account_id: string
     file_id: string
@@ -1273,6 +1275,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 
