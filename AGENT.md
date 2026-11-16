@@ -978,3 +978,30 @@ func (a *App) ClipboardPut(text string) error { runtime.ClipboardSetText(a.ctx, 
 
 ### 49.3 教训
 一条 `sh -c` 里塞太多 `$()` 嵌套，只要有一处引号/括号不兼容就整段静默失败。宁可多跑两次 Exec。
+
+---
+
+## 五十、2026-11-16 采样拆成两条固定脚本（v1.3.84）
+
+按你的要求重新组织采集，**一条 sh 只干一类事**：
+
+**静态脚本（只跑一次就够，失败才重试）**
+```sh
+hostname; grep -m1 "model name" /proc/cpuinfo | cut -d: -f2-; nproc; cut -d. -f1 /proc/uptime
+```
+按输出行取值 → 主机名 / CPU 型号 / 核数 / 运行时长。
+
+**动态脚本（每次刷新都跑）**
+```sh
+MEM ... /proc/meminfo
+LOAD /proc/loadavg
+STAT1 /proc/stat ; sleep 0.4 ; STAT2 /proc/stat
+DISK $(df -P -k / | tail -n1)
+GPU  $(nvidia-smi --query-gpu=... | tr "\n" ";")
+```
+只取负载、CPU 使用率、内存、显卡、根分区磁盘占用 —— 不再逐盘列出。
+
+其他修正：
+- 每条 Exec 都做了 **ASCII 清洗**（`asciiOnly`），主机名/CPU 型号里混进的非 UTF-8 字节不会再变成 UI 上的"□□□"方块；
+- `parseDF` 放宽到最小 4 列，`df -P -k /` 输出即 `设备 总量 已用 可用 使用率 挂载点`；
+- 静态字段在 App 侧按会话缓存（47.1），成功一次就不再重复请求。

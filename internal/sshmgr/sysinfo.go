@@ -23,7 +23,7 @@ func (m *Manager) Exec(sessionID, command string) (string, error) {
 	defer sess.Close()
 	var out bytes.Buffer
 	sess.Stdout = &out
-	sess.Stderr = &out
+	sess.Stderr = nil
 	if err := sess.Start(command); err != nil {
 		return "", err
 	}
@@ -34,10 +34,27 @@ func (m *Manager) Exec(sessionID, command string) (string, error) {
 	case <-time.After(8 * time.Second):
 		_ = sess.Signal(ssh.SIGTERM)
 	}
-	return out.String(), nil
+	return sanitizeText(out.String()), nil
 }
 
-// SystemInfo is the remote host snapshot shown above the SSH terminal.
+// sanitizeText drops bytes that are not valid UTF-8: Wails marshals strings as
+// JSON, and invalid bytes would show up as boxes in the UI.
+func sanitizeText(s string) string {
+	if isValidUTF8(s) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range strings.ToValidUTF8(s, "") {
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func isValidUTF8(s string) bool {
+	return strings.ToValidUTF8(s, "\uFFFD") == s
+}
+
+// SystemInfo is the remote host snapshot shown under the SSH workspace.
 type SystemInfo struct {
 	CPUModel    string    `json:"cpuModel"`
 	CPUCores    int       `json:"cpuCores"`
@@ -48,11 +65,11 @@ type SystemInfo struct {
 	Load1       float64   `json:"load1"`
 	Uptime      string    `json:"uptime"`
 	Hostname    string    `json:"hostname"`
-	GPUs        []GPUInfo `json:"gpus"`
-	GPUSource   string    `json:"gpuSource,omitempty"`
 	DiskTotalMB int64     `json:"diskTotalMb"`
 	DiskUsedMB  int64     `json:"diskUsedMb"`
 	DiskPct     float64   `json:"diskPct"`
+	GPUs        []GPUInfo `json:"gpus"`
+	GPUSource   string    `json:"gpuSource,omitempty"`
 }
 
 // GPUInfo is one NVIDIA device.
@@ -64,100 +81,61 @@ type GPUInfo struct {
 	TempC    float64 `json:"tempC"`
 }
 
-// GatherSystemInfo collects CPU/memory/GPU facts from the remote host.
+// staticScript returns values that never change: hostname, CPU model, cores, uptime.
+const staticScript = `sh -c 'hostname 2>/dev/null; grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2-; nproc 2>/dev/null; cut -d. -f1 /proc/uptime 2>/dev/null'`
+
+// dynamicScript returns the changing numbers: memory, load, CPU ticks, GPU, disk.
+const dynamicScript = `sh -c 'echo "MEM $(grep -E "^MemTotal:|^MemAvailable:" /proc/meminfo | tr "\n" " ")"; echo "LOAD $(cut -d" " -f1 /proc/loadavg)"; echo "STAT1 $(grep -m1 "^cpu " /proc/stat)"; sleep 0.4; echo "STAT2 $(grep -m1 "^cpu " /proc/stat)"; echo "DISK $(df -P -k / 2>/dev/null | tail -n1)"; echo "GPU $(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | tr "\n" ";")"'`
+
+// GatherSystemInfo collects the static facts once and the dynamic ones per call.
 func (m *Manager) GatherSystemInfo(sessionID string) (SystemInfo, error) {
-	out, err := m.Exec(sessionID, `sh -c '
-echo "HOST::$(hostname 2>/dev/null)"
-echo "CPU::$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2-)"
-echo "CORES::$(grep -c ^processor /proc/cpuinfo 2>/dev/null)"
-echo "LOAD::$(cut -d" " -f1-3 /proc/loadavg 2>/dev/null)"
-echo "MEM::$(grep -E "^(MemTotal|MemAvailable):" /proc/meminfo 2>/dev/null | tr "\n" " ")"
-echo "UP::$(cut -d. -f1 /proc/uptime 2>/dev/null)"
-echo "STAT1::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
-sleep 0.4
-echo "STAT2::$(grep -m1 "^cpu " /proc/stat 2>/dev/null)"
-echo "GPU::$(command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | tr "\n" ";")"
-'`)
-	if err != nil {
-		return SystemInfo{}, err
-	}
-	info := parseSystemInfo(out)
-	if info.DiskTotalMB == 0 {
-		if v, err := m.Exec(sessionID, `df -P -k / 2>/dev/null | tail -n1`); err == nil {
-			if total, used, pct, ok := parseDF(firstLine(v)); ok {
-				info.DiskTotalMB, info.DiskUsedMB, info.DiskPct = total, used, pct
-			}
-		}
-	}
-	if info.Hostname == "" || info.CPUModel == "" {
-		// Busybox / minimal images: ask for each value on its own.
-		if info.Hostname == "" {
-			if v, err := m.Exec(sessionID, `uname -n 2>/dev/null || cat /etc/hostname 2>/dev/null || echo`); err == nil {
-				info.Hostname = firstLine(v)
-			}
-		}
-		if info.CPUModel == "" {
-			if v, err := m.Exec(sessionID, `lscpu 2>/dev/null | sed -n "s/^Model name:[[:space:]]*//p" | head -n1`); err == nil {
-				info.CPUModel = strings.Join(strings.Fields(firstLine(v)), " ")
-			}
-		}
-	}
-	return info, nil
-}
-
-// firstLine returns the first non-empty line, trimmed.
-func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		if v := strings.TrimSpace(line); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func parseSystemInfo(raw string) SystemInfo {
 	info := SystemInfo{}
+	if raw, err := m.Exec(sessionID, staticScript); err == nil {
+		lines := nonEmptyLines(raw)
+		if len(lines) > 0 {
+			info.Hostname = asciiOnly(lines[0])
+		}
+		if len(lines) > 1 {
+			info.CPUModel = asciiOnly(strings.Join(strings.Fields(lines[1]), " "))
+		}
+		if len(lines) > 2 {
+			fmt.Sscanf(strings.TrimSpace(lines[2]), "%d", &info.CPUCores)
+		}
+		if len(lines) > 3 {
+			var secs int64
+			fmt.Sscanf(strings.TrimSpace(lines[3]), "%d", &secs)
+			info.Uptime = formatUptime(secs)
+		}
+	} else {
+		return info, err
+	}
+	raw, err := m.Exec(sessionID, dynamicScript)
+	if err != nil {
+		return info, err
+	}
 	var stat1, stat2 string
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
-		idx := strings.Index(line, "::")
+		idx := strings.Index(line, " ")
 		if idx < 0 {
 			continue
 		}
-		key, value := line[:idx], strings.TrimSpace(line[idx+2:])
+		key, value := line[:idx], strings.TrimSpace(line[idx+1:])
 		switch key {
-		case "HOST":
-			info.Hostname = value
-		case "CPU":
-			info.CPUModel = strings.Join(strings.Fields(value), " ")
-		case "CORES":
-			fmt.Sscanf(value, "%d", &info.CPUCores)
+		case "MEM":
+			info.MemTotalMB, info.MemUsedMB, info.MemPct = parseMeminfo(value)
 		case "LOAD":
 			fields := strings.Fields(value)
 			if len(fields) > 0 {
 				fmt.Sscanf(fields[0], "%f", &info.Load1)
 			}
-		case "MEM":
-			info.MemTotalMB, info.MemUsedMB, info.MemPct = parseMeminfo(value)
-		case "UP":
-			var secs int64
-			fmt.Sscanf(value, "%d", &secs)
-			info.Uptime = formatUptime(secs)
 		case "STAT1":
 			stat1 = value
 		case "STAT2":
 			stat2 = value
 		case "DISK":
-			fields := strings.Fields(value)
-			if len(fields) >= 3 {
-				var totalKB, usedKB int64
-				fmt.Sscanf(fields[0], "%d", &totalKB)
-				fmt.Sscanf(fields[1], "%d", &usedKB)
-				info.DiskTotalMB = totalKB / 1024
-				info.DiskUsedMB = usedKB / 1024
-				if totalKB > 0 {
-					info.DiskPct = float64(usedKB) / float64(totalKB) * 100
-				}
+			if total, used, pct, ok := parseDF(value); ok {
+				info.DiskTotalMB, info.DiskUsedMB, info.DiskPct = total, used, pct
 			}
 		case "GPU":
 			info.GPUs = parseNvidiaSMI(value)
@@ -167,19 +145,22 @@ func parseSystemInfo(raw string) SystemInfo {
 		}
 	}
 	info.CPUPct = cpuUsage(stat1, stat2)
-	return info
+	return info, nil
+}
+
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if v := strings.TrimSpace(line); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func parseMeminfo(value string) (totalMB, usedMB int64, pct float64) {
-	var totalKB, availKB int64
-	for _, part := range strings.Fields(value) {
-		switch {
-		case strings.HasPrefix(part, "MemTotal:"):
-		case strings.HasPrefix(part, "MemAvailable:"):
-		}
-	}
-	// Fields look like: MemTotal: 16384000 kB MemAvailable: 8000000 kB
 	tokens := strings.Fields(value)
+	var totalKB, availKB int64
 	for i := 0; i+1 < len(tokens); i++ {
 		switch tokens[i] {
 		case "MemTotal:":
@@ -212,19 +193,31 @@ func parseCPUStat(line string) (total, idle int64) {
 	if len(fields) < 5 {
 		return 0, 0
 	}
-	var values []int64
-	for _, f := range fields[1:] {
+	for i, f := range fields[1:] {
 		var v int64
 		fmt.Sscanf(f, "%d", &v)
-		values = append(values, v)
-	}
-	for i, v := range values {
 		total += v
-		if i == 3 || i == 4 { // idle + iowait
+		if i == 3 || i == 4 {
 			idle += v
 		}
 	}
 	return total, idle
+}
+
+// parseDF parses one `df -P -k` line: "dev 1K-blocks used avail capacity mount".
+func parseDF(line string) (totalMB, usedMB int64, pct float64, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 4 {
+		return 0, 0, 0, false
+	}
+	var totalKB, usedKB int64
+	if _, err := fmt.Sscanf(fields[1], "%d", &totalKB); err != nil || totalKB <= 0 {
+		return 0, 0, 0, false
+	}
+	if _, err := fmt.Sscanf(fields[2], "%d", &usedKB); err != nil {
+		return 0, 0, 0, false
+	}
+	return totalKB / 1024, usedKB / 1024, float64(usedKB) / float64(totalKB) * 100, true
 }
 
 func parseNvidiaSMI(value string) []GPUInfo {
@@ -267,22 +260,23 @@ func formatUptime(secs int64) string {
 	}
 }
 
-// parseDF parses one `df -P -k` line: "dev 1K-blocks used avail capacity mount".
-func parseDF(line string) (totalMB, usedMB int64, pct float64, ok bool) {
-	fields := strings.Fields(line)
-	if len(fields) < 5 {
-		return 0, 0, 0, false
+// asciiOnly keeps printable ASCII and collapses whitespace. Hostnames and CPU
+// model strings are ASCII; anything else is a decoding artefact that would show
+// up as placeholder boxes in the UI.
+func asciiOnly(s string) string {
+	var b strings.Builder
+	lastSpace := false
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r' || r == ' ':
+			if !lastSpace && b.Len() > 0 {
+				b.WriteByte(' ')
+				lastSpace = true
+			}
+		case r >= 0x20 && r < 0x7f:
+			b.WriteRune(r)
+			lastSpace = false
+		}
 	}
-	var totalKB, usedKB int64
-	if _, err := fmt.Sscanf(fields[1], "%d", &totalKB); err != nil {
-		return 0, 0, 0, false
-	}
-	if _, err := fmt.Sscanf(fields[2], "%d", &usedKB); err != nil {
-		return 0, 0, 0, false
-	}
-	if totalKB <= 0 {
-		return 0, 0, 0, false
-	}
-	pct = float64(usedKB) / float64(totalKB) * 100
-	return totalKB / 1024, usedKB / 1024, pct, true
+	return strings.TrimSpace(b.String())
 }
