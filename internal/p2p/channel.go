@@ -144,7 +144,7 @@ func (c *Channel) OpenStream(ctx context.Context, method string, body any) (net.
 
 // Ping verifies the channel is still alive.
 func (c *Channel) Ping(ctx context.Context) error {
-	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	stream, err := c.conn.OpenStreamSync(pingCtx)
 	if err != nil {
@@ -159,6 +159,16 @@ func (c *Channel) Ping(ctx context.Context) error {
 	}
 	var out map[string]any
 	return client.Call("p2p.ping", nil, &out)
+}
+
+// Alive reports whether the underlying QUIC connection is still usable.
+func (c *Channel) Alive() bool {
+	select {
+	case <-c.conn.Context().Done():
+		return false
+	default:
+		return true
+	}
 }
 
 // streamConn adapts a QUIC stream to net.Conn (the stream itself has no

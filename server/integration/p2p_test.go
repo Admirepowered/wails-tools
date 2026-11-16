@@ -484,3 +484,92 @@ func TestP2PInviteAcceptAndMap(t *testing.T) {
 		t.Fatalf("echo mismatch: %q", buf)
 	}
 }
+
+// punchPair creates two punched channels over a local rendezvous server.
+func punchPair(t *testing.T, ctx context.Context) (*p2p.Channel, *p2p.Channel) {
+	t.Helper()
+	srv := startP2PServer(t)
+	_, tcpAddr := srv.Addrs()
+	_, portStr, err := net.SplitHostPort(tcpAddr)
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	port := atoi(portStr)
+	rendezvous := net.JoinHostPort("127.0.0.1", itoa(port+1))
+
+	mk := func(deviceID, machine string) *serverlink.Client {
+		dir := t.TempDir()
+		store, err := settings.NewStore(filepath.Join(dir, "settings.json"))
+		if err != nil {
+			t.Fatalf("settings: %v", err)
+		}
+		if _, err := store.Update(func(s *settings.Settings) error {
+			s.Server.Host = "127.0.0.1"
+			s.Server.Port = port
+			s.Server.DeviceID = deviceID
+			return nil
+		}); err != nil {
+			t.Fatalf("configure: %v", err)
+		}
+		c := serverlink.New(store, t.Logf)
+		c.SetMachineID(machine)
+		t.Cleanup(func() { _ = c.Close() })
+		return c
+	}
+	a := mk("dev-a", "machine-a")
+	b := mk("dev-b", "machine-b")
+	if _, err := a.Connect(ctx); err != nil {
+		t.Fatalf("connect A: %v", err)
+	}
+	if _, err := a.Register(ctx, "carol", "super-secret-3", "", "Carol"); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := a.Login(ctx, "carol", "super-secret-3"); err != nil {
+		t.Fatalf("login A: %v", err)
+	}
+	if _, err := b.Connect(ctx); err != nil {
+		t.Fatalf("connect B: %v", err)
+	}
+	if _, err := b.Login(ctx, "carol", "super-secret-3"); err != nil {
+		t.Fatalf("login B: %v", err)
+	}
+
+	var offer struct {
+		Session string `json:"session"`
+		Secret  string `json:"secret"`
+	}
+	if err := a.Call(ctx, "p2p.offer", map[string]any{"fromDevice": "dev-a", "toDevice": "dev-b"}, &offer); err != nil {
+		t.Fatalf("p2p.offer: %v", err)
+	}
+
+	type res struct {
+		ch  *p2p.Channel
+		err error
+	}
+	done := make(chan res, 2)
+	go func() {
+		ch, err := p2p.Punch(ctx, p2p.Options{Rendezvous: rendezvous, Session: offer.Session, Secret: offer.Secret, Role: "a", Timeout: 40 * time.Second})
+		done <- res{ch, err}
+	}()
+	go func() {
+		ch, err := p2p.Punch(ctx, p2p.Options{Rendezvous: rendezvous, Session: offer.Session, Secret: offer.Secret, Role: "b", Timeout: 40 * time.Second})
+		done <- res{ch, err}
+	}()
+	var chA, chB *p2p.Channel
+	for i := 0; i < 2; i++ {
+		select {
+		case r := <-done:
+			if r.err != nil {
+				t.Fatalf("punch: %v", r.err)
+			}
+			if chA == nil {
+				chA = r.ch
+			} else {
+				chB = r.ch
+			}
+		case <-ctx.Done():
+			t.Fatal("punch timeout")
+		}
+	}
+	return chA, chB
+}

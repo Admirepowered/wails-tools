@@ -349,6 +349,9 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 	}
 	a.p2p.put(fromDevice, channel)
 	a.p2p.markIncoming(fromDevice)
+	if !a.verifyChannel(fromDevice, channel) {
+		return
+	}
 	a.heartbeat(fromDevice, channel)
 	a.p2p.watch(fromDevice, channel, func(dev string) {
 		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)
@@ -545,7 +548,7 @@ func (a *App) heartbeat(deviceID string, ch *p2p.Channel) {
 		case <-ch.Done():
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), interval-2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), interval+5*time.Second)
 			err := ch.Ping(ctx)
 			cancel()
 			if err == nil {
@@ -556,13 +559,31 @@ func (a *App) heartbeat(deviceID string, ch *p2p.Channel) {
 				continue
 			}
 			misses++
-			a.p2pLogf("p2p: heartbeat to %s failed (%d/3): %v", deviceID, misses, err)
-			if misses >= 3 {
-				a.p2pLogf("p2p: %s unresponsive for 30s, closing link", deviceID)
-				a.p2p.drop(deviceID)
-				a.emit("p2p:disconnected", map[string]any{"device": deviceID, "reason": "heartbeat timeout"})
-				return
+			a.p2pLogf("p2p: heartbeat to %s failed (%d/3): %v (quic alive=%v)", deviceID, misses, err, ch.Alive())
+			if misses < 3 {
+				continue
 			}
+			a.p2pLogf("p2p: %s unresponsive for 30s, closing link", deviceID)
+			a.p2p.drop(deviceID)
+			a.emit("p2p:disconnected", map[string]any{"device": deviceID, "reason": "heartbeat timeout"})
+			return
 		}
 	}
+}
+
+// verifyChannel proves the punched path really carries traffic before the app
+// reports "connected": NAT devices sometimes keep the punch open for a moment
+// and then drop the mapping.
+func (a *App) verifyChannel(deviceID string, ch *p2p.Channel) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	if err := ch.Ping(ctx); err != nil {
+		a.p2pLogf("p2p: link to %s opened but does not answer (%v)", deviceID, err)
+		a.p2p.fail(deviceID, errors.New("打洞成功但链路无响应（NAT 映射可能已关闭）"))
+		a.p2p.drop(deviceID)
+		a.emit("p2p:error", map[string]any{"device": deviceID, "error": "打洞成功但链路无响应（NAT 映射可能已关闭）"})
+		return false
+	}
+	a.p2pLogf("p2p: link to %s verified", deviceID)
+	return true
 }

@@ -253,7 +253,10 @@ func handshake(ctx context.Context, conn *net.UDPConn, peer *net.UDPAddr, role, 
 	quicCfg := &quic.Config{
 		HandshakeIdleTimeout: 15 * time.Second,
 		MaxIdleTimeout:       10 * time.Minute,
-		KeepAlivePeriod:      10 * time.Second,
+		// The punched NAT mapping is usually short-lived (many CGNAT/symmetric
+		// devices drop it after a few seconds of silence), so keep the path warm
+		// much more aggressively than the default.
+		KeepAlivePeriod: 3 * time.Second,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()

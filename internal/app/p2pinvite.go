@@ -190,6 +190,9 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 	}
 	a.p2p.put(deviceID, channel)
 	a.p2p.markOutgoing(deviceID)
+	if !a.verifyChannel(deviceID, channel) {
+		return nil, errors.New("打洞成功但链路无响应（NAT 映射可能已关闭）")
+	}
 	a.heartbeat(deviceID, channel)
 	a.p2p.watch(deviceID, channel, func(dev string) {
 		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)

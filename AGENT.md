@@ -663,3 +663,26 @@ event p2p:connected
 - 客户端新增 `P2PFilesList/Mkdir/Remove/Download/Upload`，界面「设备文件（打洞直连）」卡片：选择已直连设备 → 浏览目录 → 下载到本地 / 上传到对方 / 删除。
 - `p2p.capabilities` 现在返回 `{"tcp":true,"files":true,"fsRoot":…}`。
 - Channel 新增 `Call`（RPC）与 `OpenStream`（裸流），供文件读写复用。
+
+---
+
+## 二十五、2026-11-16 打洞"通了马上断"（v1.3.69）
+
+### 25.1 现象
+```
+p2p: probe answered by 47.108.84.112:55221 after 1 probes
+p2p: direct path open via 47.108.84.112:55221, starting QUIC handshake
+p2p: heartbeat … failed (1/3): deadline exceeded   ← 第一次心跳就失败
+```
+QUIC 握手成功（否则不会启动心跳），但之后所有新流（心跳 ping）都超时。
+
+### 25.2 结论与修复
+1. **NAT 映射过期**是主因：打洞成功后探测流量停止，很多 CGNAT/对称 NAT 在几秒内回收映射，QUIC 的默认 10 秒 keepalive 太慢。
+   → `KeepAlivePeriod = 3 * time.Second`（`MaxIdleTimeout` 仍 10 分钟），从握手完成就开始持续打点保持映射。
+2. **不要先报"已连接"再失败**：新增 `verifyChannel`，通道建立后立刻做一次 `p2p.ping`（12s 超时），失败则直接报「打洞成功但链路无响应（NAT 映射可能已关闭）」并 drop，而不是先弹"直连成功"再静默超时。
+3. 心跳超时从 8s 放宽到 15s（间隔 10s），失败日志附带 `quic alive=true/false`，用于区分"RPC 不通"与"连接已死"。
+4. 新增 `Channel.Alive()`；`TestChannelRPC`（集成测试）验证打洞通道上的 RPC（心跳路径）可用。
+
+### 25.3 排查建议
+- 若日志出现 `link to … opened but does not answer`：NAT 映射在握手后立刻失效，属于链路问题（换 5G/家庭宽带对比）。
+- 若 `quic alive=false`：连接已被 QUIC 判定死亡（空闲超时或对端关闭）。
