@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
+	"wailstools/internal/machineid"
 	"wailstools/internal/serverlink"
 )
 
@@ -24,8 +26,11 @@ type AdminUser struct {
 
 // AdminDevice is one registered client device.
 type AdminDevice struct {
-	ID       string `json:"id"`
+	ID string `json:"id"`
+	// Number is the public 9-digit device number used for hole punching.
+	Number   string `json:"number"`
 	Name     string `json:"name"`
+	Machine  string `json:"machine,omitempty"`
 	LastSeen string `json:"lastSeen"`
 }
 
@@ -72,10 +77,21 @@ func (a *App) adminCall(method string, body any, out any) error {
 // MyDevices lists the devices currently bound to the logged-in account.
 func (a *App) MyDevices() (DeviceSummary, error) {
 	var out DeviceSummary
-	if err := a.adminCall("admin.devices.self", nil, &out); err != nil {
+	// Always identify this installation: the server re-registers the row when it
+	// was replaced (e.g. by another login from the same machine) and fills in
+	// the 9-digit device number.
+	host, _ := os.Hostname()
+	body := map[string]any{
+		"deviceId":   a.localDeviceID(),
+		"deviceName": host,
+		"machineId":  machineid.ID(),
+	}
+	if err := a.adminCall("admin.devices.self", body, &out); err != nil {
 		return DeviceSummary{}, err
 	}
-	a.sess.deviceCount = len(out.Devices)
+	if out.Devices == nil {
+		out.Devices = []AdminDevice{}
+	}
 	return out, nil
 }
 

@@ -190,6 +190,7 @@ func (a *App) p2pConnectDevice(deviceID string, accepted map[string]any) (map[st
 	}
 	a.p2p.put(deviceID, channel)
 	a.p2p.markOutgoing(deviceID)
+	a.heartbeat(deviceID, channel)
 	a.p2p.watch(deviceID, channel, func(dev string) {
 		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)
 		a.emit("p2p:disconnected", map[string]any{"device": dev})

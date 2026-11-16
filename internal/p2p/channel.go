@@ -100,6 +100,48 @@ func (c *Channel) DialTCP(ctx context.Context, target string) (net.Conn, error) 
 	return conn, nil
 }
 
+// Call performs one request/response RPC on a fresh stream.
+func (c *Channel) Call(ctx context.Context, method string, body any, out any) error {
+	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	stream, err := c.conn.OpenStreamSync(callCtx)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	conn := wrapStream(c.conn, stream)
+	client, err := wire.NewClient(conn, wire.Hello{
+		Token: token(c.secret, "wire"), App: "wails-tools", Purpose: "p2p",
+	})
+	if err != nil {
+		return err
+	}
+	return client.Call(method, body, out)
+}
+
+// OpenStream opens a raw byte stream for a streaming method.
+func (c *Channel) OpenStream(ctx context.Context, method string, body any) (net.Conn, error) {
+	openCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	stream, err := c.conn.OpenStreamSync(openCtx)
+	if err != nil {
+		return nil, err
+	}
+	conn := wrapStream(c.conn, stream)
+	client, err := wire.NewClient(conn, wire.Hello{
+		Token: token(c.secret, "wire"), App: "wails-tools", Purpose: "p2p",
+	})
+	if err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	if err := client.OpenStream(method, body); err != nil {
+		_ = stream.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
 // Ping verifies the channel is still alive.
 func (c *Channel) Ping(ctx context.Context) error {
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

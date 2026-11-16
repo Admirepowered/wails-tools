@@ -214,10 +214,12 @@ func (a *App) P2PStatus() map[string]any {
 	}
 	h.mu.Unlock()
 	return map[string]any{
-		"localDevice": a.localDeviceID(),
-		"connected":   connected,
-		"errors":      errs,
-		"loggedIn":    a.sess.loggedIn,
+		"localDevice":  a.localDeviceID(),
+		"localName":    hostName(),
+		"localMachine": machineid.ID(),
+		"connected":    connected,
+		"errors":       errs,
+		"loggedIn":     a.sess.loggedIn,
 	}
 }
 
@@ -229,6 +231,20 @@ func (a *App) P2PConnect(deviceID string) (map[string]any, error) {
 	}
 	if deviceID == a.localDeviceID() {
 		return nil, errors.New("不能连接本机")
+	}
+	// A device row created by another login from this very machine is still
+	// "this machine": refuse instead of punching to ourselves.
+	if mine, err := a.MyDevices(); err == nil {
+		host := hostName()
+		localMachine := machineid.ID()
+		for _, d := range mine.Devices {
+			if d.ID != deviceID {
+				continue
+			}
+			if (d.Name != "" && d.Name == host) || (localMachine != "" && d.Machine == localMachine) {
+				return nil, errors.New("这是本机的另一条设备记录，不能连接自己")
+			}
+		}
 	}
 	if !a.sess.loggedIn || a.link == nil || !a.link.Available() {
 		return nil, errors.New("请先连接并登录同步服务器")
@@ -289,7 +305,10 @@ func (a *App) startP2PWatcher() {
 				created, _ := item["created"].(string)
 				a.invites.put(p2pInvite{ID: id, Number: number, Name: name, From: from, State: "pending", Created: created})
 				a.emit("p2p:invite", map[string]any{"id": id, "number": number, "name": name})
-				if a.settings.Get().ProxyRuntime.P2PAutoAccept {
+				// Same-account devices are trusted and answered automatically;
+				// another account's device always needs a manual confirmation.
+				_, sameAccount := item["sameAccount"].(bool)
+				if a.settings.Get().ProxyRuntime.P2PAutoAccept || sameAccount {
 					a.p2pLogf("p2p: auto-accepting invite %s from %s(#%s)", id, from, number)
 					go func(reqID string) {
 						if _, err := a.P2PAcceptInvite(reqID); err != nil {
@@ -330,6 +349,7 @@ func (a *App) answerPunch(sessionID, fromDevice, secret string) {
 	}
 	a.p2p.put(fromDevice, channel)
 	a.p2p.markIncoming(fromDevice)
+	a.heartbeat(fromDevice, channel)
 	a.p2p.watch(fromDevice, channel, func(dev string) {
 		a.p2pLogf("p2p: link to %s lost, releasing mappings", dev)
 		a.emit("p2p:disconnected", map[string]any{"device": dev})
@@ -349,8 +369,9 @@ func (h *p2pWireHandler) Handle(method string, body json.RawMessage, sess *wire.
 		host, _ := os.Hostname()
 		return map[string]any{"ok": true, "host": host}, nil
 	case "p2p.capabilities":
-		// Reserved: file management will advertise its methods here.
-		return map[string]any{"tcp": true, "files": false}, nil
+		return map[string]any{"tcp": true, "files": true, "fsRoot": h.app.p2pFsRoot()}, nil
+	case "p2p.fs.list", "p2p.fs.mkdir", "p2p.fs.remove":
+		return h.handleFs(method, body)
 	default:
 		return nil, wire.Errorf("unknown_method", "p2p method %q is not implemented", method)
 	}
@@ -358,6 +379,8 @@ func (h *p2pWireHandler) Handle(method string, body json.RawMessage, sess *wire.
 
 func (h *p2pWireHandler) Pipe(method string, body json.RawMessage, conn net.Conn, sess *wire.ServerConn) error {
 	switch method {
+	case "p2p.fs.read", "p2p.fs.write":
+		return h.pipeFs(method, body, conn)
 	case "p2p.tcp":
 		var req struct {
 			Target string `json:"target"`
@@ -501,4 +524,45 @@ func (a *App) P2PLocalNumber() map[string]any {
 	}
 	out["error"] = "本机设备尚未登记，请重新登录"
 	return out
+}
+
+// hostName returns this machine's hostname (device rows are named after it).
+func hostName() string {
+	h, _ := os.Hostname()
+	return h
+}
+
+// heartbeat keeps a punched link alive and detects a dead peer: one ping every
+// 10 seconds, three consecutive misses tear the channel down (which also
+// releases its port mappings).
+func (a *App) heartbeat(deviceID string, ch *p2p.Channel) {
+	const interval = 10 * time.Second
+	misses := 0
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ch.Done():
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), interval-2*time.Second)
+			err := ch.Ping(ctx)
+			cancel()
+			if err == nil {
+				if misses > 0 {
+					a.p2pLogf("p2p: heartbeat to %s recovered", deviceID)
+				}
+				misses = 0
+				continue
+			}
+			misses++
+			a.p2pLogf("p2p: heartbeat to %s failed (%d/3): %v", deviceID, misses, err)
+			if misses >= 3 {
+				a.p2pLogf("p2p: %s unresponsive for 30s, closing link", deviceID)
+				a.p2p.drop(deviceID)
+				a.emit("p2p:disconnected", map[string]any{"device": deviceID, "reason": "heartbeat timeout"})
+				return
+			}
+		}
+	}
 }

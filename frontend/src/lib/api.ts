@@ -488,6 +488,20 @@ export interface SNIProxyStatus {
   cachedDomains?: number
   caPath?: string
 }
+export interface P2PFilesEntry {
+  name: string
+  path: string
+  dir: boolean
+  size: number
+  modified: string
+}
+
+export interface P2PFilesListing {
+  path: string
+  root: string
+  entries: P2PFilesEntry[]
+}
+
 export interface P2PInvite {
   id: string
   number: string
@@ -504,6 +518,8 @@ export interface P2PMap {
 }
 
 export interface P2PStatus {
+  localName?: string
+  localMachine?: string
   localDevice: string
   connected: string[]
   errors: Record<string, string>
@@ -834,6 +850,11 @@ const rawApi = {
   TestProxyRule: (rule: ProxyRule, probeUrl: string) => call<TestResult>('TestProxyRule', rule, probeUrl),
   OpenDataDir: () => call<void>('OpenDataDir'),
   OpenPath: (path: string) => call<void>('OpenPath', path),
+  P2PFilesList: (device: string, path: string) => call<P2PFilesListing>('P2PFilesList', device, path),
+  P2PFilesMkdir: (device: string, path: string) => call<void>('P2PFilesMkdir', device, path),
+  P2PFilesRemove: (device: string, path: string) => call<void>('P2PFilesRemove', device, path),
+  P2PFilesDownload: (device: string, remote: string, local: string) => call<{ bytes: number; path: string }>('P2PFilesDownload', device, remote, local),
+  P2PFilesUpload: (device: string, local: string, remote: string) => call<{ bytes: number; path: string }>('P2PFilesUpload', device, local, remote),
   RevealInExplorer: (path: string) => call<void>('RevealInExplorer', path),
   PickDirectory: (title: string) => call<string>('PickDirectory', title),
   PickFile: (title: string) => call<string>('PickFile', title),
@@ -1252,6 +1273,8 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
+
 
 
 

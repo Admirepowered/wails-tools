@@ -637,3 +637,29 @@ p2p: direct path open via 47.108.84.112:54242, starting QUIC handshake
 event p2p:connected
 ```
 同一对设备上一次失败、这次 1 个包就打通 —— 说明之前的"发送一次就停/等同步时刻"确实是主因。
+
+---
+
+## 二十四、2026-11-16 review 后的修正（v1.3.68）
+
+### 24.1 设备号为什么一直看不到（真因）
+上一版把号加到 `server.Device`（服务端）与 TS 类型，但**漏了 Wails 绑定层** `internal/app.AdminDevice`（只有 id/name/lastSeen）。前端拿到的 JSON 里根本没有 `number`，所以永远显示空。修：
+- `app.AdminDevice` 补 `Number`/`Machine`；
+- `MyDevices()` 改为带身份调用 `admin.devices.self`（`deviceId/deviceName/machineId`），服务端据此**自愈**缺失的设备行；
+- 前端每 5 秒刷新设备列表 + `P2PLocalNumber()`（此前那个轮询 effect 在删重复卡片时被一并删掉了，导致从未调用过）。
+
+### 24.2 不能连自己
+`isSelf` 以前只比设备 id；同一台机器可能有多条行（CLI 登录产生）。现在同时比较 **id / 主机名 / 机器指纹**，`P2PConnect` 也会拒绝"本机的另一条设备记录"。
+
+### 24.3 心跳
+新增 `App.heartbeat`：每 **10 秒** 一次 `p2p.ping`，**连续 3 次失败**（30 秒）判定对端失联 → `drop` 通道并释放端口映射，推送 `p2p:disconnected`。QUIC 自身 keepalive 10s、`MaxIdleTimeout` 10 分钟作为兜底。打洞完成后完全不依赖同步服务器。
+
+### 24.4 接受策略
+`Request.SameAccount`：**同一账号的设备自动接受**（无需确认），**其它账号的设备必须在界面点「接受」**。`P2PAutoAccept` 开关保留，打开后连他账号的邀请也自动接受。
+
+### 24.5 打洞后的文件管理
+- 对端新增 `p2p.fs.list` / `p2p.fs.mkdir` / `p2p.fs.remove`（RPC）与 `p2p.fs.read` / `p2p.fs.write`（流）。
+- 路径被限制在对方的**下载目录**内（`filepath.Clean` + 前缀校验，越界拒绝）。
+- 客户端新增 `P2PFilesList/Mkdir/Remove/Download/Upload`，界面「设备文件（打洞直连）」卡片：选择已直连设备 → 浏览目录 → 下载到本地 / 上传到对方 / 删除。
+- `p2p.capabilities` 现在返回 `{"tcp":true,"files":true,"fsRoot":…}`。
+- Channel 新增 `Call`（RPC）与 `OpenStream`（裸流），供文件读写复用。

@@ -277,17 +277,18 @@ const requestTTL = 90 * time.Second
 // Request is an invitation to punch towards a device. The target must accept
 // before any endpoint is exchanged.
 type Request struct {
-	ID         string
-	FromUser   string
-	FromDevice string
-	FromNumber string
-	FromName   string
-	ToUser     string
-	ToDevice   string
-	State      string // pending|accepted|declined|canceled
-	Session    string
-	Secret     string
-	Created    time.Time
+	ID          string
+	FromUser    string
+	FromDevice  string
+	FromNumber  string
+	FromName    string
+	ToUser      string
+	ToDevice    string
+	State       string // pending|accepted|declined|canceled
+	SameAccount bool
+	Session     string
+	Secret      string
+	Created     time.Time
 }
 
 // RequestInfo is the client-facing view of a request.
@@ -301,13 +302,16 @@ type RequestInfo struct {
 	Session    string `json:"session,omitempty"`
 	Secret     string `json:"secret,omitempty"`
 	Created    string `json:"created"`
+	// SameAccount is true when both devices belong to the same account; such
+	// invitations are accepted automatically by the client.
+	SameAccount bool `json:"sameAccount"`
 }
 
 func (r *Request) info() RequestInfo {
 	return RequestInfo{
 		ID: r.ID, FromNumber: r.FromNumber, FromName: r.FromName, FromDevice: r.FromDevice,
 		ToDevice: r.ToDevice, State: r.State, Session: r.Session, Secret: r.Secret,
-		Created: r.Created.UTC().Format(time.RFC3339),
+		Created: r.Created.UTC().Format(time.RFC3339), SameAccount: r.SameAccount,
 	}
 }
 
@@ -349,6 +353,7 @@ func (h *Hub) CreateRequest(fromUser, fromDevice, fromNumber, fromName, toUser, 
 	r := &Request{
 		ID: "pr-" + randomID(6), FromUser: fromUser, FromDevice: fromDevice, FromNumber: fromNumber,
 		FromName: fromName, ToUser: toUser, ToDevice: toDevice, State: "pending", Created: time.Now(),
+		SameAccount: fromUser == toUser,
 	}
 	h.requests[r.ID] = r
 	h.logf("p2p request %s: %s(#%s) -> %s", r.ID, fromDevice, fromNumber, toDevice)

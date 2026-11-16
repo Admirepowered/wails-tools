@@ -211,11 +211,16 @@ func TestP2PHolePunchAndRelay(t *testing.T) {
 
 // relayHandler implements the minimal wire handler the peer needs: ping plus a
 // TCP relay for p2p.tcp.
-type relayHandler struct{}
+type relayHandler struct {
+	fsRoot string
+}
 
 func (h *relayHandler) Handle(method string, body json.RawMessage, sess *wire.ServerConn) (any, error) {
-	if method == "p2p.ping" {
+	switch method {
+	case "p2p.ping":
 		return map[string]any{"ok": true}, nil
+	case "p2p.fs.list":
+		return map[string]any{"entries": []string{}, "root": h.fsRoot}, nil
 	}
 	return nil, wire.Errorf("unknown_method", "unsupported")
 }
