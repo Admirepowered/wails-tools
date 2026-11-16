@@ -744,3 +744,26 @@ probe #1 ... → probe answered after 1 probes            ← 第一个包就通
 - 百度网盘盘内下载：桌面 UA `netdisk;7.44.7.1;PC;PC-Windows;10.0.19045;WindowsBaiduYunGuanJia`、dlink 302 跟随、**timestamp 不再被格式化成科学计数法**（errno 113 的根因）、列表类接口用浏览器 UA（两者必须分开）。
 - 服务端离线下载支持 **URL + 任意 Header**（`offline.add` 接受 `url`/`headers`），落 `离线下载/` 并计入 10 GiB 配额；网盘右键「推送到服务器离线下载」。
 - 订阅 UA 可选（浏览器默认 / Quantumult X / Clash / v2rayN / Surge / Shadowrocket / 自定义），支持单订阅覆盖。
+
+---
+
+## 四十、2026-11-16 百度网盘下载 403（v1.3.72）
+
+### 40.1 实测结论
+用真实账号跑了三组实验：
+
+| 请求 | 结果 |
+|---|---|
+| 不带 Range 的普通 GET | **有时 403**（CDN 反盗链） |
+| `Range: bytes=0-0 / 0-1 / 0-1023 / 0-65535` | **全部 206** |
+| 直连 vs 走本机代理 | 完全一样（说明与出口 IP 无关） |
+| 同一 URL 连续多次 Range 请求 | 都正常 |
+
+失败任务的日志：`8 连接 · direct · 重试 24 · chunk 2 failed after retries: unexpected status 403 Forbidden`
+→ **多连接并发**才是主因：bd 的签名 URL 有并发限制，多余连接被 403。
+
+### 40.2 修复
+1. **百度 CDN 强制单连接**：`NetdiskEnqueueDownload` 里 `isBaiduCDN(url, referer)` 命中（`baidupcs.com` / `pcs.baidu.com` / `pan.baidu.com`）时 `Connections = 1`；夸克/UC 仍是 8。
+2. **探测始终带 Range**（`bytes=0-0`，遇 403 再试 `bytes=0-65535`），不再退回无 Range 的普通 GET。
+3. `statusError.retryable()` 把 **403** 也算可重试（CDN 反盗链是间歇性的）。
+4. 引擎兜底：某分片收到 403 且 `Connections > 1` 时，**自动降为单连接**重试，并在任务上提示"服务端拒绝并发连接（403），已切换为单连接重试"。

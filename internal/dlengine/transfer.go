@@ -96,15 +96,20 @@ func (e *Engine) probe(ctx context.Context, t Task) (*probeResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Range is mandatory here: CDN links (Baidu pan) answer 403 to a plain GET.
 	req.Header.Set("Range", "bytes=0-0")
 	resp, err := ci.client.Do(req)
 	if err != nil {
-		// Retry without the range header: some servers reject Range requests.
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		// One retry with a bigger range: some CDNs refuse a 1-byte range.
+		_ = resp.Body.Close()
 		req2, err2 := buildRequest(ctx, http.MethodGet, t.URL, t, e.store.Get().Downloads.Cookie)
 		if err2 != nil {
 			return nil, err2
 		}
-		req2.Header.Set("Range", "")
+		req2.Header.Set("Range", "bytes=0-65535")
 		resp, err = ci.client.Do(req2)
 		if err != nil {
 			return nil, err
@@ -470,6 +475,12 @@ func (e *Engine) fetchChunk(ctx context.Context, tr *taskRunner, idx int) error 
 			lastErr = err
 			tr.mu.Lock()
 			tr.task.Retries++
+			// A 403 on a parallel download usually means the origin only allows
+			// one connection per signed URL (Baidu pan): collapse to serial.
+			if serr, ok := err.(*statusError); ok && serr.code == http.StatusForbidden && tr.task.Connections > 1 {
+				tr.task.Connections = 1
+				tr.task.Error = "服务端拒绝并发连接（403），已切换为单连接重试"
+			}
 			tr.mu.Unlock()
 			select {
 			case <-ctx.Done():

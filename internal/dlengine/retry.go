@@ -14,11 +14,15 @@ type statusError struct {
 func (e *statusError) Error() string { return "server returned " + e.status }
 
 // retryable reports whether the response is worth another attempt.
+//
+// 403 is retried as well: CDN links (Baidu pan, signed URLs) reject a plain GET
+// without a Range header, and hot-linking protection kicks in from time to time;
+// both recover when the request is repeated with a range/a fresh connection.
 func (e *statusError) retryable() bool {
 	switch {
 	case e.code >= 500:
 		return true
-	case e.code == 408, e.code == 425, e.code == 429:
+	case e.code == 403, e.code == 408, e.code == 425, e.code == 429:
 		return true
 	default:
 		return false

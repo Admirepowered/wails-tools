@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -241,12 +242,19 @@ func (a *App) NetdiskEnqueueDownload(req netdisk.ResolveDownloadRequest) (dlengi
 	if name == "" {
 		name = req.Name
 	}
+	// Baidu's CDN signs the URL and rejects parallel connections to it (403 on
+	// some chunks). Quark/UC tolerate multi-connection downloads.
+	conns := 8
+	if isBaiduCDN(link.URL, link.Referer) {
+		conns = 1
+	}
 	task, err := a.engine.Add(dlengine.Request{
-		URL:       link.URL,
-		Filename:  name,
-		Headers:   headers,
-		Referer:   link.Referer,
-		ProxyMode: "inherit",
+		URL:         link.URL,
+		Filename:    name,
+		Headers:     headers,
+		Referer:     link.Referer,
+		ProxyMode:   "inherit",
+		Connections: conns,
 	})
 	if err != nil {
 		return dlengine.Task{}, err
@@ -332,4 +340,18 @@ func (a *App) NetdiskVideoPreview(req netdisk.VideoPreviewRequest) (netdisk.Vide
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	return m.ResolveVideoPreview(ctx, req)
+}
+
+// isBaiduCDN reports whether the resolved link belongs to Baidu's pan CDN.
+func isBaiduCDN(rawURL, referer string) bool {
+	u, err := url.Parse(rawURL)
+	if err == nil {
+		host := strings.ToLower(u.Hostname())
+		for _, suffix := range []string{"baidupcs.com", "pcs.baidu.com", "pan.baidu.com", "baidu.com"} {
+			if host == suffix || strings.HasSuffix(host, "."+suffix) {
+				return true
+			}
+		}
+	}
+	return strings.Contains(strings.ToLower(referer), "pan.baidu.com")
 }
