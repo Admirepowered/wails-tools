@@ -118,6 +118,12 @@ type ProxyRuntimeSettings struct {
 	P2PPort int `json:"p2pPort"`
 	// P2PAutoAccept answers incoming punch invitations automatically.
 	P2PAutoAccept bool `json:"p2pAutoAccept"`
+	// DNSMode selects how node/outbound names are resolved: "system" (the OS
+	// resolver) or "doh" (the servers in DNSServers). DoH never falls back to the
+	// local resolver.
+	DNSMode string `json:"dnsMode,omitempty"`
+	// DNSServers holds sdns:// stamps or https:// DoH URLs.
+	DNSServers []string `json:"dnsServers,omitempty"`
 }
 
 // DownloadSettings tunes the HTTP download engine.
@@ -544,4 +550,3 @@ func (s *Store) DeviceID() string {
 	})
 	return id
 }
-

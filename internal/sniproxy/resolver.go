@@ -134,8 +134,18 @@ func pinnedDohIP(host string) string {
 	return ""
 }
 
-// Lookup returns the IP for host. Pinned rules win, then the cache, then DoH,
-// then the system resolver.
+// External is an optional resolution hook (the app's DNS settings: system or
+// DoH). When set it replaces the built-in DoH+system chain, so the user's DNS
+// choice also applies to connections that do not go through the proxy.
+var externalLookup func(ctx context.Context, host string) (string, error)
+
+// SetExternal installs the app-level resolver.
+func (r *Resolver) SetExternal(fn func(ctx context.Context, host string) (string, error)) {
+	externalLookup = fn
+}
+
+// Lookup returns the IP for host. Pinned rules win, then the cache, then the
+// configured resolver (external hook), then DoH, then the system resolver.
 func (r *Resolver) Lookup(ctx context.Context, host string, rules *RuleSet) (string, string, error) {
 	host = normalizeHost(host)
 	if rule, ok := rules.Match(host); ok && len(rule.IPs) > 0 {
@@ -143,6 +153,17 @@ func (r *Resolver) Lookup(ctx context.Context, host string, rules *RuleSet) (str
 	}
 	if ip := r.cached(host); ip != "" {
 		return ip, "cache", nil
+	}
+	if externalLookup != nil {
+		if ip, err := externalLookup(ctx, host); err == nil && ip != "" {
+			r.store(host, ip)
+			return ip, "configured", nil
+		} else if err != nil {
+			// Do not fall through to the local resolver when the user picked a
+			// custom DNS: report the error instead of a possibly poisoned answer.
+			r.logf("sniproxy: configured dns %s: %v", host, err)
+			return "", "", err
+		}
 	}
 	if ip, err := r.lookupDoH(ctx, host); err == nil && ip != "" {
 		r.store(host, ip)

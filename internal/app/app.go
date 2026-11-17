@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"wailstools/internal/dnsx"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -71,6 +72,8 @@ type App struct {
 	p2p            *p2pHub
 	invites        *inviteBox
 	relayOnce      sync.Once
+	dnsOnce        sync.Once
+	dnsRes         *dnsx.Resolver
 	relayCancel    context.CancelFunc
 	sni            *sniState
 	sniMu          sync.Mutex
@@ -226,6 +229,9 @@ func New() (*App, error) {
 // Startup is called by Wails when the window is ready.
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	// Install the DNS resolver early: node hostnames and non-proxied dials must
+	// honour the user's choice (system DNS or DoH) from the very first dial.
+	_ = a.dnsResolver()
 	if cfg := a.settings.Get(); cfg.Screenshots.WatchClipboard {
 		if err := a.shots.StartClipboardWatch(); err != nil {
 			a.emit("screenshot:watch", map[string]any{"watching": false, "error": err.Error()})

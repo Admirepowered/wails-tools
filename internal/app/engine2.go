@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"wailstools/internal/dnsx"
 	"wailstools/internal/geodata"
 	"wailstools/internal/miproxy"
 	"wailstools/internal/paths"
@@ -51,19 +52,25 @@ func (a *App) buildDirectFunc() func(host string) bool {
 	}
 }
 
+// activeResolver is a package-level hook so helpers without an *App receiver can
+// use the configured DNS (set in App.Startup).
+var activeResolver *dnsx.Resolver
+
 func resolveHostIPs(host string) []net.IP {
 	if ip := net.ParseIP(host); ip != nil {
 		return []net.IP{ip}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := activeResolver.LookupAll(ctx, host)
 	if err != nil {
 		return nil
 	}
-	out := make([]net.IP, 0, len(addrs))
-	for _, a := range addrs {
-		out = append(out, a.IP)
+	out := make([]net.IP, 0, len(ips))
+	for _, s := range ips {
+		if ip := net.ParseIP(s); ip != nil {
+			out = append(out, ip)
+		}
 	}
 	return out
 }

@@ -1144,3 +1144,46 @@ PowerShell 大段字符串 `Replace` 一旦锚点不匹配就**什么都不做�
 - 旧的 `P2PMapPort` 保持兼容（内部转调新方法）。
 
 使用方式：同步服务 → 端口映射，选设备，填「本地端口 → 对端地址 / 对端端口」。因为转发走的是打洞后的通道，对端只要能访问到那台局域网设备就行，你本机不需要任何路由配置。
+
+---
+
+## 五十七、2026-11-17 DNS 解析可选系统 / sdns DoH（v1.3.92）
+
+### 57.1 需求
+节点的域名解析、以及"不走代理"的直连解析，都不能再依赖本地 DNS（会被污染/超时）。可选：系统 DNS，或自定义 DoH（`sdns://` 邮票，可自由增删、批量导入）。
+
+### 57.2 新包 internal/dnsx
+- **sdns 邮票解析**（dnscrypt 规范）：`proto(1) + props(8) + lp(addr) + vlen/hashes + lp(host) + lp(path)`。只接受 `0x02`（DoH），其它协议给出明确错误。
+- 你给的那条实测解析正确：
+  ```
+  sdns://AgcAAAAAAAAACTIyMy41LjUuNSCY49XlNq8pWM0vfxT3BO9KJ20l4zzWXy5l9eTycnwTMA5kbnMuYWxpZG5zLmNvbQovZG5zLXF1ZXJ5
+  → host=dns.alidns.com path=/dns-query addr=223.5.5.5:443
+  ```
+- **DoH 用 RFC 8484 线格式**：先 POST `application/dns-message`，服务端不支持再退 GET `?dns=<base64url>`。
+  踩坑记录：AliDNS 对 `POST application/dns-json` 与 `GET ?name=&type=` 都回 **400**（`no 'dns' query parameter found`），只有线格式可用。
+- **固定 IP 拨号**：邮票里的 `addr` 用来连 TCP，SNI/Host 仍用 `host`，证书照常校验 —— 这正是"本地 DNS 坏掉也能用 DoH"的关键。早期 bug：把 `ip:port` 再 `JoinHostPort` 一次，得到 `[223.5.5.5:443]:443`，已修。
+- **DoH 模式不回退本地解析**：失败直接报错。`system` 模式才走 `net.DefaultResolver`。
+- 10 分钟缓存 + `ClearCache`。
+
+### 57.3 接线
+| 位置 | 说明 |
+|---|---|
+| `miproxy.HostResolver` + `dialHost()` | 节点 **server 域名**解析所有 dial 都走它 |
+| `sniproxy.Resolver.SetExternal` | 拦截/直连解析走同一套；DoH 失败不再回落 `net.LookupIP` |
+| `resolveHostIPs()`（GeoIP 判定） | 改用 `activeResolver.LookupAll` |
+| `App.Startup` | 启动即装载，第一次拨号就生效 |
+
+### 57.4 界面
+「代理」页新增 **DNS 解析** 卡片：
+- 模式下拉：系统 DNS / 自定义 DoH（sdns）；
+- 单条添加（粘贴 sdns:// 或 https://），添加前自动 `DNSTest` 验证并显示耗时；
+- 「导入」可一次粘贴多行批量导入；
+- 列表显示 host / endpoint / 固定 IP，可删除；
+- 「解析测试」输入域名即可看到当前模式下解析出的 IP 与耗时（DoH 模式会标注"不回落"）。
+
+### 57.5 实测
+```
+cf.yfjc.sbs  DoH(AliDNS) → 141.193.213.8   (0.09s)
+cf.yfjc.sbs  本机 DNS    → 请求超时
+```
+也就是说正是这个域名在你机器上本地解析不了，DoH 可以。

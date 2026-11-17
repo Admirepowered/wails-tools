@@ -58,6 +58,26 @@ func (d *Dialer) hops() []Node {
 	return out
 }
 
+// HostResolver lets the app plug in its own name resolution (DNS-over-HTTPS).
+// When set, every outbound TCP dial in this package resolves through it instead
+// of the local resolver.
+var HostResolver func(ctx context.Context, host string) (string, error)
+
+// dialHost opens a TCP connection to "host:port", resolving the name with
+// HostResolver when one is configured.
+func dialHost(ctx context.Context, timeout time.Duration, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || HostResolver == nil || net.ParseIP(strings.Trim(host, "[]")) != nil {
+		return (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", addr)
+	}
+	ip, rerr := HostResolver(ctx, host)
+	if rerr != nil {
+		return nil, rerr
+	}
+	nd := &net.Dialer{Timeout: timeout}
+	return nd.DialContext(ctx, "tcp", net.JoinHostPort(ip, port))
+}
+
 // Dial connects to target through the configured chain.
 func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 	hops := d.hops()
@@ -67,19 +87,19 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 		if d.Relay != nil {
 			return d.Relay(ctx, target)
 		}
-		return (&net.Dialer{Timeout: d.Timeout}).DialContext(ctx, "tcp", target)
+		return dialHost(ctx, d.Timeout, target)
 	}
 	if d.Direct != nil && len(d.Chain) == 0 {
 		host, _, err := net.SplitHostPort(target)
 		if err == nil && d.Direct(host) {
-			return (&net.Dialer{Timeout: d.Timeout}).DialContext(ctx, "tcp", target)
+			return dialHost(ctx, d.Timeout, target)
 		}
 	}
 	if hops[0].Protocol == ProtoDirect {
 		if d.Relay != nil {
 			return d.Relay(ctx, target)
 		}
-		return (&net.Dialer{Timeout: d.Timeout}).DialContext(ctx, "tcp", target)
+		return dialHost(ctx, d.Timeout, target)
 	}
 
 	// First hop: plain TCP or through the relay.
@@ -91,8 +111,7 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 			return nil, fmt.Errorf("relay to %s: %w", hops[0].Addr(), err)
 		}
 	} else {
-		nd := &net.Dialer{Timeout: d.Timeout}
-		conn, err = nd.DialContext(ctx, "tcp", hops[0].Addr())
+		conn, err = dialHost(ctx, d.Timeout, hops[0].Addr())
 		if err != nil {
 			return nil, fmt.Errorf("dial %s: %w", hops[0].Addr(), err)
 		}

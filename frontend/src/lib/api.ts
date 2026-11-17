@@ -1021,6 +1021,13 @@ const rawApi = {
 
   ClipboardGet: () => call<string>('ClipboardGet'),
   ClipboardPut: (text: string) => call<void>('ClipboardPut', text),
+  DNSStatus: () => call<{ mode: string; servers: Array<{ raw: string; name?: string; host?: string; path?: string; addr?: string; endpoint?: string; error?: string }> }>('DNSStatus'),
+  DNSSetMode: (mode: string) => call<{ mode: string; servers: any[] }>('DNSSetMode', mode),
+  DNSAddServer: (raw: string) => call<{ mode: string; servers: any[] }>('DNSAddServer', raw),
+  DNSRemoveServer: (raw: string) => call<{ mode: string; servers: any[] }>('DNSRemoveServer', raw),
+  DNSTest: (raw: string) => call<{ host: string; path: string; addr?: string; endpoint: string; sample?: string; ms?: number }>('DNSTest', raw),
+  DNSLookup: (host: string) => call<{ host: string; mode: string; ips?: string[]; ms?: number; error?: string }>('DNSLookup', host),
+  DNSClearCache: () => call<{ mode: string; servers: any[] }>('DNSClearCache'),
   P2PConnect: (deviceId: string) => call<P2PStatus>('P2PConnect', deviceId),
   P2PRelayConnect: (deviceId: string) => call<{ device: string; relayed?: boolean; already?: boolean }>('P2PRelayConnect', deviceId),
   P2PDisconnect: (deviceId: string) => call<P2PStatus>('P2PDisconnect', deviceId),
@@ -1282,6 +1289,7 @@ for (const [method, field] of NESTED_LISTS) {
 
 export { api }
 export default api
+
 
 
 

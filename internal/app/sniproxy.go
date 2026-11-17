@@ -130,6 +130,9 @@ func (a *App) applySNIProxy() error {
 	state.resolver.SetUpstream(func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return dialer.Dial(ctx, addr)
 	})
+	// Name resolution follows the DNS setting (system or DoH), never silently
+	// the local resolver when the user picked a custom one.
+	state.resolver.SetExternal(a.dnsResolver().Lookup)
 	logf("sniproxy: outbound follows the proxy chain")
 	state.handler = sniproxy.NewHandler(sniproxy.Options{
 		Rules:    state.rules,

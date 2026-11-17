@@ -1,3 +1,4 @@
+import DNSCard from './DNSCard'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   api,
@@ -355,6 +356,8 @@ export default function ProxyPage({ settings, reloadSettings }: PageProps) {
         <ChainCard onChanged={() => void loadRuntime()} />
         <SNICard />
         <DirectRulesCard onChanged={() => void loadRuntime()} />
+
+        <DNSCard />
       </div>
 
       <div className="grid-2" style={{ marginTop: 14 }}>
@@ -772,6 +775,7 @@ function DirectRulesCard({ onChanged }: { onChanged: () => void }) {
     </div>
   )
 }
+
 
 
 
