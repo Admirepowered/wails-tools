@@ -16,6 +16,11 @@ type RelayFunc func(ctx context.Context, target string) (net.Conn, error)
 
 // Dialer opens connections through a node, optionally chained.
 type Dialer struct {
+	// FallbackRelay is tried when a direct TCP dial to the first hop fails
+	// (e.g. the node's IP is reachable only from the sync server).
+	FallbackRelay RelayFunc
+	// Logf records fallbacks (optional).
+	Logf func(format string, args ...any)
 	Node Node
 	// Chain lists intermediate hops; Node is the final hop. Max two hops total.
 	Chain []Node
@@ -41,11 +46,11 @@ func NewChainDialer(hops []Node, relay RelayFunc, direct func(string) bool, time
 		timeout = 15 * time.Second
 	}
 	if len(hops) == 0 {
-		return &Dialer{Timeout: timeout, Relay: relay, Direct: direct}
+		return &Dialer{Timeout: timeout, Relay: relay, Direct: direct, FallbackRelay: relay}
 	}
 	last := hops[len(hops)-1]
 	chain := append([]Node(nil), hops[:len(hops)-1]...)
-	return &Dialer{Node: last, Chain: chain, Relay: relay, Direct: direct, Timeout: timeout}
+	return &Dialer{Node: last, Chain: chain, Relay: relay, Direct: direct, FallbackRelay: relay, Timeout: timeout}
 }
 
 // hops returns the full node sequence.
@@ -62,6 +67,26 @@ func (d *Dialer) hops() []Node {
 // When set, every outbound TCP dial in this package resolves through it instead
 // of the local resolver.
 var HostResolver func(ctx context.Context, host string) (string, error)
+
+// direct opens a TCP connection to addr and, if that fails, retries through the
+// fallback relay (when configured).
+func (d *Dialer) direct(ctx context.Context, addr string) (net.Conn, error) {
+	conn, err := dialHost(ctx, d.Timeout, addr)
+	if err == nil {
+		return conn, nil
+	}
+	if d.FallbackRelay == nil {
+		return nil, err
+	}
+	relayed, rerr := d.FallbackRelay(ctx, addr)
+	if rerr != nil {
+		return nil, err
+	}
+	if d.Logf != nil {
+		d.Logf("p2p dial: %s direct failed (%v), used sync-server relay", addr, err)
+	}
+	return relayed, nil
+}
 
 // dialHost opens a TCP connection to "host:port", resolving the name with
 // HostResolver when one is configured.
@@ -87,7 +112,7 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 		if d.Relay != nil {
 			return d.Relay(ctx, target)
 		}
-		return dialHost(ctx, d.Timeout, target)
+		return d.direct(ctx, target)
 	}
 	if d.Direct != nil && len(d.Chain) == 0 {
 		host, _, err := net.SplitHostPort(target)
@@ -99,7 +124,7 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 		if d.Relay != nil {
 			return d.Relay(ctx, target)
 		}
-		return dialHost(ctx, d.Timeout, target)
+		return d.direct(ctx, target)
 	}
 
 	// First hop: plain TCP or through the relay.
@@ -111,7 +136,7 @@ func (d *Dialer) Dial(ctx context.Context, target string) (net.Conn, error) {
 			return nil, fmt.Errorf("relay to %s: %w", hops[0].Addr(), err)
 		}
 	} else {
-		conn, err = dialHost(ctx, d.Timeout, hops[0].Addr())
+		conn, err = d.direct(ctx, hops[0].Addr())
 		if err != nil {
 			return nil, fmt.Errorf("dial %s: %w", hops[0].Addr(), err)
 		}
@@ -254,4 +279,13 @@ func MatchHost(host string, rules []string) bool {
 		}
 	}
 	return false
+}
+
+// newDialerWithFallback builds a dialer with a separate failure-only relay.
+func newDialerWithFallback(hops []Node, relay, fallback RelayFunc, direct func(string) bool, timeout time.Duration) *Dialer {
+	d := NewChainDialer(hops, relay, direct, timeout)
+	if fallback != nil {
+		d.FallbackRelay = fallback
+	}
+	return d
 }

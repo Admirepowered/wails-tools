@@ -47,7 +47,11 @@ func effectiveSNIRules(raw string) string {
 // the same chain/relay settings as the local proxy.
 func (a *App) sniChainDialer() *miproxy.Dialer {
 	hops, relay := a.buildChain()
-	return miproxy.NewChainDialer(hops, relay, a.buildDirectFunc(), 15e9)
+	d := miproxy.NewChainDialer(hops, relay, a.buildDirectFunc(), 15e9)
+	if fb := a.fallbackRelay(); fb != nil {
+		d.FallbackRelay = fb
+	}
+	return d
 }
 
 // fetchServerSNIRules returns the rule list published on the sync server.

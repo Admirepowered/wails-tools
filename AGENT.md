@@ -1187,3 +1187,35 @@ cf.yfjc.sbs  DoH(AliDNS) → 141.193.213.8   (0.09s)
 cf.yfjc.sbs  本机 DNS    → 请求超时
 ```
 也就是说正是这个域名在你机器上本地解析不了，DoH 可以。
+
+---
+
+## 五十八、2026-11-17 DNS 持久化 + 节点直连失败回退中转（v1.3.93）
+
+### 58.1 "添加后切页面就没了"
+`DNSServers` 原本放在 `settings.ProxyRuntime` 里，而 `SaveSettings(next settings.Settings)` 是**整份结构覆盖写**：UI 某处用旧的 Settings 副本一保存，就把刚加的 DNS 抹掉了（chain / 规则文件早就因为同样原因独立落盘）。
+修复：DNS 配置移到独立文件 `dns.json`（`{mode, servers}`），带一次性从 settings 迁移；`DNSStatus/Add/Remove/SetMode` 全部读写这个文件，**整份 settings 保存再也碰不到它**。
+
+### 58.2 用 cf.yfjc.sbs 实测，结论很关键
+```
+DoH (AliDNS 邮票)  cf.yfjc.sbs → 141.193.213.8     0.09s
+本机 DNS           cf.yfjc.sbs → 请求超时
+本机 TCP 直连       141.193.213.8:443 → i/o timeout（被阻断）
+同步服务器 TCP      141.193.213.8:443 → 可达
+用正确的 SNI 访问    yfjc-hk1.777036.xyz → HTTP 403（TLS 握手正常，节点本身是好的）
+```
+所以：**DNS 已经不是障碍**，这个节点的 IP 在本机被网络层阻断，只有经同步服务器能到。
+
+### 58.3 新增：直连失败自动回退中转
+`miproxy.Dialer` 增加 `FallbackRelay`（与"始终走中转"的 `Relay` 区分）：
+- 所有**直连拨号**（无节点 / 直连节点 / 第一跳）失败后自动用同步服务器 `DialTCP` 重试一次；
+- 日志会写明：`p2p dial: cf.yfjc.sbs:443 direct failed (…), used sync-server relay`；
+- `Relay` 语义保持原样（只有 chain 模式 = server 时才全程中转），避免"直连模式偷偷走服务器"。
+
+端到端测试（真实账号 + 真实节点）：
+```
+cf.yfjc.sbs -> 141.193.213.8 (DoH)
+p2p dial: cf.yfjc.sbs:443 direct failed (dial tcp 141.193.213.8:443: i/o timeout), used sync-server relay
+connected through the node (DoH + sync-server relay fallback)
+```
+即：**DoH 解析 + 中转回退 = 这个节点能连上**。

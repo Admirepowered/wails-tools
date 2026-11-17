@@ -38,6 +38,8 @@ type ServerConfig struct {
 	Chain []Node
 	// Relay reaches the first hop through an external relay when set.
 	Relay RelayFunc
+	// FallbackRelay is only used when a direct dial fails.
+	FallbackRelay RelayFunc
 	// Direct decides whether a destination bypasses the proxy.
 	Direct func(host string) bool
 	// ListenAddr is the bind address, e.g. "127.0.0.1:0" (internal only) or
@@ -93,10 +95,12 @@ func StartServer(cfg ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen %s: %w", cfg.ListenAddr, err)
 	}
+	dialer := newDialerWithFallback(append(append([]Node{}, cfg.Chain...), cfg.Node), cfg.Relay, cfg.FallbackRelay, cfg.Direct, 15*time.Second)
+	dialer.Logf = cfg.Logf
 	s := &Server{
 		cfg:     cfg,
 		ln:      ln,
-		dialer:  NewChainDialer(append(append([]Node{}, cfg.Chain...), cfg.Node), cfg.Relay, cfg.Direct, 15*time.Second),
+		dialer:  dialer,
 		logf:    cfg.Logf,
 		started: time.Now(),
 		conns:   map[net.Conn]struct{}{},

@@ -114,14 +114,7 @@ func (a *App) buildChain() ([]miproxy.Node, miproxy.RelayFunc) {
 	var relay miproxy.RelayFunc
 	relayKind := "none"
 	if cfg.Mode == "server" && a.link != nil {
-		relay = func(ctx context.Context, target string) (net.Conn, error) {
-			if !a.link.Available() {
-				if _, err := a.link.Connect(ctx); err != nil {
-					return nil, err
-				}
-			}
-			return a.link.DialTCP(ctx, target)
-		}
+		relay = a.serverRelay()
 		relayKind = "server"
 	}
 	if cfg.Mode == "device" {
@@ -154,6 +147,7 @@ func (a *App) startEngine(node miproxy.Node) (proxysvc.Status, error) {
 		opts.Port = rt.Port
 	}
 	opts.Chain, opts.Relay = a.buildChain()
+	opts.FallbackRelay = a.fallbackRelay()
 	relayText := "none"
 	if opts.Relay != nil {
 		relayText = a.lastRelayKind
@@ -493,4 +487,31 @@ func (a *App) geoFallbackClients() []*http.Client {
 	}
 	clients = append(clients, &http.Client{Timeout: 90 * time.Second})
 	return clients
+}
+
+// serverRelay dials through the sync server on our behalf.
+func (a *App) serverRelay() miproxy.RelayFunc {
+	if a.link == nil {
+		return nil
+	}
+	return func(ctx context.Context, target string) (net.Conn, error) {
+		if !a.link.Available() {
+			if _, err := a.link.Connect(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return a.link.DialTCP(ctx, target)
+	}
+}
+
+// fallbackRelay is used only after a direct dial fails: some node IPs are
+// blocked locally but reachable from the sync server.
+func (a *App) fallbackRelay() miproxy.RelayFunc {
+	if a.link == nil {
+		return nil
+	}
+	if a.chainCfg.Mode == "server" {
+		return nil // already relaying
+	}
+	return a.serverRelay()
 }

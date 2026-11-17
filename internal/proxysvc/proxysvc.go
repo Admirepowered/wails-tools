@@ -28,6 +28,8 @@ type StartOptions struct {
 	Chain []miproxy.Node
 	// Relay reaches the first hop through the sync server when set.
 	Relay miproxy.RelayFunc
+	// FallbackRelay is only used when a direct dial to the node fails.
+	FallbackRelay miproxy.RelayFunc
 	// Direct decides whether a destination bypasses the proxy.
 	Direct func(host string) bool
 	// Intercept takes over matching TLS tunnels (SNI engine) before the chain.
@@ -83,15 +85,16 @@ func (s *Service) Start(node miproxy.Node, opts StartOptions) (Status, error) {
 		listen = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.Port))
 	}
 	srv, err := miproxy.StartServer(miproxy.ServerConfig{
-		Node:       node,
-		Chain:      opts.Chain,
-		Relay:      opts.Relay,
-		Direct:     opts.Direct,
-		ListenAddr: listen,
-		Username:   opts.Username,
-		Password:   opts.Password,
-		Intercept:  opts.Intercept,
-		Logf:       s.logf,
+		Node:          node,
+		Chain:         opts.Chain,
+		Relay:         opts.Relay,
+		FallbackRelay: opts.FallbackRelay,
+		Direct:        opts.Direct,
+		ListenAddr:    listen,
+		Username:      opts.Username,
+		Password:      opts.Password,
+		Intercept:     opts.Intercept,
+		Logf:          s.logf,
 	})
 	if err != nil {
 		return Status{Error: err.Error()}, err
